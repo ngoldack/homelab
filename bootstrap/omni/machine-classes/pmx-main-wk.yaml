@@ -1,0 +1,16 @@
+metadata:
+  namespace: default
+  type: MachineClasses.omni.sidero.dev
+  id: pmx-main-wk
+spec:
+  autoprovision:
+    providerid: proxmox
+    providerdata: |
+      node: pmx-main
+      sockets: 1
+      cores: 4
+      memory: 8192
+      disk_size: 40
+      machine_type: q35
+      storage_selector: name == "local-zfs"
+      network_bridge: vmbr0

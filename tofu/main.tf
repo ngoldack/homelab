@@ -16,11 +16,11 @@ locals {
 
 # Download the Talos OS ISO directly onto the Proxmox node
 resource "proxmox_virtual_environment_download_file" "talos_iso" {
-  node_name               = var.proxmox_node
-  content_type            = "iso"
-  datastore_id            = "local"
-  file_name               = "talos-${var.talos_version}-amd64.iso"
-  url                     = "https://github.com/siderolabs/talos/releases/download/${var.talos_version}/talos-amd64.iso"
+  node_name    = var.proxmox_node
+  content_type = "iso"
+  datastore_id = "local"
+  file_name    = "talos-${var.talos_version}-amd64.iso"
+  url          = "https://github.com/siderolabs/talos/releases/download/${var.talos_version}/talos-amd64.iso"
 }
 
 # Create Proxmox VMs for each node in the cluster
@@ -58,8 +58,7 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
 
   # CDROM drive to boot into Talos live installation ISO
   cdrom {
-    enabled   = true
-    file_id   = proxmox_virtual_environment_download_file.talos_iso.id
+    file_id = proxmox_virtual_environment_download_file.talos_iso.id
   }
 
   operating_system {

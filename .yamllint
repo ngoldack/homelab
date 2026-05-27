@@ -1,0 +1,12 @@
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  document-start: disable
+  comments:
+    # Disable comments indentation rules to allow easier commenting out of yaml code blocks
+    level: warning
+  truthy: disable

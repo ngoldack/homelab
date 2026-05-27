@@ -1,0 +1,75 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cilium
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cilium
+      version: "1.15.5"
+      sourceRef:
+        kind: HelmRepository
+        name: cilium
+      interval: 1h
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Use standard K8s-based PodCIDR allocation
+    ipam:
+      mode: kubernetes
+
+    # Talos specific mounts for cgroups
+    cgroup:
+      autoMount:
+        enabled: false
+      hostPath: /sys/fs/cgroup
+
+    # Cilium eBPF-based kube-proxy replacement
+    kubeProxyReplacement: true
+
+    # Talos local API proxy endpoint. This avoids the bootstrap circulardependency
+    # where the CNI needs to reach the cluster_endpoint but the CNI isn't running yet.
+    k8sServiceHost: 127.0.0.1
+    k8sServicePort: 7445
+
+    # Enable eBPF-based masquerading
+    bpf:
+      masquerade: true
+
+    # Enable native host services routing
+    hostServices:
+      enabled: true
+
+    # Secure Operator deployment config
+    operator:
+      replicas: 2
+      rollOutPods: true
+
+    # Standard overlay network tunnel
+    tunnel: vxlan
+
+    # Necessary security capabilities for Talos Linux Kernel interaction
+    securityContext:
+      capabilities:
+        ciliumAgent:
+          - CHOWN
+          - DAC_OVERRIDE
+          - FOWNER
+          - IPC_LOCK
+          - SYS_ADMIN
+          - SYS_BOOT
+          - SYS_CHROOT
+          - SYS_PTRACE
+          - SYS_RESOURCE
+          - NET_ADMIN
+          - NET_RAW
+          - BPF
+          - PERFMON
+        cleanCiliumState:
+          - NET_ADMIN
+          - SYS_ADMIN
+          - SYS_CHROOT

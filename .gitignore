@@ -1,0 +1,20 @@
+# Age private key — never commit this
+age.key
+*.age.key
+
+# OpenTofu state and lock files
+tofu/.terraform/
+tofu/.terraform.lock.hcl
+# Track encrypted state in Git while ignoring plaintext backups
+!tofu/terraform.tfstate
+tofu/terraform.tfstate.backup
+
+# tfvars files may contain plaintext secrets
+tofu/*.tfvars
+tofu/*.tfvars.json
+
+# Generated kubeconfig and talosconfig outputs
+kubeconfig
+talosconfig
+*.kubeconfig
+*.talosconfig

@@ -95,6 +95,6 @@ jobs:
       - name: Setup Flux CLI
         uses: fluxcd/flux2/action@main
 
-      - name: Dry-run and Validate Flux Manifests
+      - name: Validate Flux Manifests
         run: |
-          flux install --dry-run
+          flux build kustomization flux-system --path ./kubernetes/clusters/production > /dev/null

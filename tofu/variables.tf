@@ -74,7 +74,7 @@ variable "node_pools" {
     }
     "worker-large" = {
       cpu_cores  = 12
-      memory     = 49152 # 48 GB
+      memory     = 65536 # 64 GB
       disk_size  = 128
       count      = 1
       talos_role = "worker"

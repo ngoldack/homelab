@@ -29,7 +29,9 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 .
 ├── tofu/                   # OpenTofu — VM provisioning & Talos bootstrap
 └── kubernetes/
-    ├── clusters/production/ # Flux entrypoint
+    ├── clusters/
+    │   ├── production/     # Flux entrypoint for your Proxmox/Talos cluster
+    │   └── local-dev/      # Flux entrypoint for local testing (Kind/Docker Desktop)
     ├── infrastructure/      # Cilium, cert-manager
     └── apps/                # Homelab applications (managed by Flux)
 ```

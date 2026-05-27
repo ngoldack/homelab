@@ -43,6 +43,7 @@ cd tofu && tofu init -backend=false && tofu validate
 
 # Validate Kubernetes manifests
 kustomize build kubernetes/clusters/production
+kustomize build kubernetes/clusters/local-dev
 kustomize build kubernetes/infrastructure
 kustomize build kubernetes/apps
 
@@ -52,5 +53,5 @@ yamllint -c .yamllint kubernetes/
 
 ## CI/CD
 
-- `.github/workflows/validate.yaml` — runs on every push/PR; validates tofu, kustomize, and YAML.
-- `.github/workflows/tofu-run.yaml` — manual `workflow_dispatch`; requires a self-hosted runner on the same LAN as Proxmox, and two GitHub Actions secrets: `SOPS_AGE_KEY` and `STATE_ENCRYPTION_PASSPHRASE`.
+- `.github/workflows/validate.yaml` — runs on every push/PR; validates kustomize, and YAML.
+- Local custom cluster and VM operations are automated completely on the native workstation using a unified `Taskfile.yaml` runner configuration (no active cloud deployment runner workflow needed).

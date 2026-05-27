@@ -1,0 +1,74 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infrastructure
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  path: ./kubernetes/infrastructure
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  timeout: 5m
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  patches:
+    # -----------------------------------------------------------------
+    # Patch Cert-Manager to use a local Self-Signed issuer for local dev
+    # so we don't hit Let's Encrypt servers or rate limits.
+    # -----------------------------------------------------------------
+    - target:
+        group: cert-manager.io
+        version: v1
+        kind: ClusterIssuer
+        name: letsencrypt-staging
+      patch: |
+        - op: replace
+          path: /spec/acme
+          value:
+            # Replaced with a local self-signed issuer spec
+            server: https://localhost
+        - op: add
+          path: /spec/selfSigned
+          value: {}
+    - target:
+        group: cert-manager.io
+        version: v1
+        kind: ClusterIssuer
+        name: letsencrypt-production
+      patch: |
+        - op: replace
+          path: /spec/acme
+          value:
+            server: https://localhost
+        - op: add
+          path: /spec/selfSigned
+          value: {}
+
+    # -----------------------------------------------------------------
+    # Patch Cilium to run cleanly on local Kind clusters.
+    # Kind provides its own loopbacks/cni default; Cilium must adapt.
+    # -----------------------------------------------------------------
+    - target:
+        group: helm.toolkit.fluxcd.io
+        version: v2
+        kind: HelmRelease
+        name: cilium
+      patch: |
+        # Use standard tunneling and bypass host routing constraints natively on Mac Docker
+        - op: replace
+          path: /spec/values/kubeProxyReplacement
+          value: false
+        - op: replace
+          path: /spec/values/ipam/mode
+          value: "cluster-pool"
+        - op: add
+          path: /spec/values/ipam/operator
+          value:
+            clusterPoolIPv4PodCIDRList: ["10.244.0.0/16"]
+        - op: replace
+          path: /spec/values/k8sServiceHost
+          value: "local-dev-control-plane" # Match Kind control plane container loopback

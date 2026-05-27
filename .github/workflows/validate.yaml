@@ -25,9 +25,7 @@ jobs:
         run: tofu fmt -check
         working-directory: tofu
 
-      - name: OpenTofu Init
-        # We initialize with backend validation disabled (since we don't need real credentials for validate)
-        # and provide dummy/mock values for SOPS provider if needed.
+      - name: OpenTofu Init (syntax only, no backend)
         run: tofu init -backend=false
         working-directory: tofu
 
@@ -67,6 +65,9 @@ jobs:
         run: |
           echo "==== Validating Production Cluster ===="
           kustomize build kubernetes/clusters/production > /dev/null
+
+          echo "==== Validating Local Dev Cluster ===="
+          kustomize build kubernetes/clusters/local-dev > /dev/null
 
           echo "==== Validating Infrastructure ===="
           kustomize build kubernetes/infrastructure > /dev/null

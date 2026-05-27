@@ -1,0 +1,179 @@
+version: '3'
+
+dotenv:
+  - .env # Optional: place SOPS_AGE_KEY_FILE and TOFU_ENCRYPTION_PASSPHRASE_statekey here locally
+
+vars:
+  TOFU_DIR: tofu
+
+tasks:
+  default:
+    desc: List all available tasks
+    cmds:
+      - task --list
+
+  # -------------------------
+  # Secrets
+  # -------------------------
+
+  secrets:encrypt:
+    desc: Encrypt tofu/secret.sops.yaml in place using age
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - sops --encrypt --in-place secret.sops.yaml
+
+  secrets:decrypt:
+    desc: Decrypt tofu/secret.sops.yaml and print to stdout (never writes plaintext to disk)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - sops --decrypt secret.sops.yaml
+
+  secrets:edit:
+    desc: Open tofu/secret.sops.yaml in your default editor via SOPS (decrypts, edits, re-encrypts)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - sops secret.sops.yaml
+
+  # -------------------------
+  # OpenTofu
+  # -------------------------
+
+  tofu:init:
+    desc: Initialize OpenTofu working directory
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu init
+
+  tofu:fmt:
+    desc: Format all OpenTofu files
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu fmt -recursive
+
+  tofu:validate:
+    desc: Validate OpenTofu configuration (no credentials needed)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu init -backend=false -reconfigure
+      - tofu validate
+
+  tofu:plan:
+    desc: Run OpenTofu plan. Pass target with TARGET= to scope (e.g. task tofu:plan TARGET=module.foo)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu plan {{if .TARGET}}-target={{.TARGET}}{{end}} -out=tofu.tfplan
+
+  tofu:apply:
+    desc: Apply the last plan (or generate and apply a new one if no plan file exists)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - |
+        if [ -f tofu.tfplan ]; then
+          tofu apply -input=false tofu.tfplan
+        else
+          tofu apply {{if .TARGET}}-target={{.TARGET}}{{end}}
+        fi
+
+  tofu:destroy:
+    desc: Destroy all managed infrastructure. Pass TARGET= to scope destruction.
+    dir: '{{.TOFU_DIR}}'
+    prompt: This will DESTROY infrastructure. Are you sure?
+    cmds:
+      - tofu destroy -auto-approve {{if .TARGET}}-target={{.TARGET}}{{end}}
+
+  tofu:output:
+    desc: Print all OpenTofu outputs (sensitive values redacted by default)
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu output
+
+  tofu:kubeconfig:
+    desc: Extract kubeconfig from OpenTofu state and write to kubeconfig.yaml
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu output -raw kubeconfig > ../kubeconfig.yaml
+      - echo "kubeconfig written to kubeconfig.yaml"
+
+  tofu:talosconfig:
+    desc: Extract talosconfig from OpenTofu state and write to talosconfig.yaml
+    dir: '{{.TOFU_DIR}}'
+    cmds:
+      - tofu output -raw talosconfig > ../talosconfig.yaml
+      - echo "talosconfig written to talosconfig.yaml"
+
+  # -------------------------
+  # Kubernetes / Flux
+  # -------------------------
+
+  k8s:validate:
+    desc: Validate all Kustomize overlays
+    cmds:
+      - kustomize build kubernetes/clusters/production > /dev/null && echo "OK clusters/production"
+      - kustomize build kubernetes/clusters/local-dev > /dev/null && echo "OK clusters/local-dev"
+      - kustomize build kubernetes/infrastructure > /dev/null && echo "OK infrastructure"
+      - kustomize build kubernetes/apps > /dev/null && echo "OK apps"
+
+  flux:bootstrap:
+    desc: Bootstrap Flux onto the cluster (requires GITHUB_USER and GITHUB_REPO env vars)
+    cmds:
+      - flux bootstrap github
+          --owner={{.GITHUB_USER}}
+          --repository={{.GITHUB_REPO}}
+          --branch=main
+          --path=kubernetes/clusters/production
+          --personal
+
+  flux:status:
+    desc: Show status of all Flux Kustomizations and HelmReleases
+    cmds:
+      - kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A
+      - kubectl get helmreleases.helm.toolkit.fluxcd.io -A
+
+  flux:reconcile:
+    desc: Force Flux to reconcile all sources immediately
+    cmds:
+      - flux reconcile source git flux-system
+      - flux reconcile kustomization infrastructure
+      - flux reconcile kustomization apps
+
+  # -------------------------
+  # Local Dev Sandbox (Kind)
+  # -------------------------
+
+  dev:up:
+    desc: Spin up local testing cluster in Kind (Docker Desktop must be running)
+    cmds:
+      - kind create cluster --config kubernetes/clusters/local-dev/kind-config.yaml
+      - kubectl cluster-info --context kind-local-dev
+
+  dev:down:
+    desc: Destroy local testing cluster
+    cmds:
+      - kind delete cluster --name local-dev
+
+  dev:bootstrap:
+    desc: Bootstrap Flux into the local dev cluster mapped to local folders (requires GITHUB_USER and GITHUB_REPO env vars)
+    cmds:
+      - |
+        # Check for context safety (guarantees you don't bootstrap over production!)
+        if [ "$(kubectl config current-context)" != "kind-local-dev" ]; then
+          echo "ERROR: Current context is NOT kind-local-dev. Switch using development commands."
+          exit 1
+        fi
+      # 1. Create flux-system namespace
+      - kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f -
+      # 2. Add SOPS age decryption keys directly to Kind
+      - |
+        if [ -f age.key ]; then
+          kubectl create secret generic sops-age -n flux-system --from-file=age.agekey=age.key --dry-run=client -o yaml | kubectl apply -f -
+        else
+          echo "WARNING: Local age.key not found. Flux decryption may fail."
+        fi
+      # 3. Bootstrap local-dev Flux branch
+      - flux bootstrap github
+          --owner={{.GITHUB_USER}}
+          --repository={{.GITHUB_REPO}}
+          --branch=main
+          --path=kubernetes/clusters/local-dev
+          --personal
+

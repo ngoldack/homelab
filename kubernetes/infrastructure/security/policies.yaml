@@ -1,0 +1,82 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: "Disallow Privileged Containers"
+    policies.kyverno.io/category: "Pod Security Standards"
+    policies.kyverno.io/severity: "high"
+    policies.kyverno.io/description: "Privileged containers share namespaces and capabilities, bypassing security boundaries."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Privileged containers are disallowed."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): false
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-drop-all-capabilities
+  annotations:
+    policies.kyverno.io/title: "Require Drop All Capabilities"
+    policies.kyverno.io/category: "Pod Security Simple"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/description: "Requires dropping ALL capabilities and only adding back necessary ones."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Containers must drop ALL capabilities in securityContext.capabilities.drop."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop:
+                      - ALL
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-read-only-root-filesystem
+  annotations:
+    policies.kyverno.io/title: "Enforce Read-Only Root Filesystem"
+    policies.kyverno.io/category: "Pod Security Standards"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/description: "Requires containers to run with a read-only root filesystem."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: read-only-root-filesystem
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: "Containers must run with a read-only root filesystem."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true

@@ -10,7 +10,11 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 | OS | Talos Linux |
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
 | CNI | Cilium (eBPF, kube-proxy replacement) |
+| Storage | TrueNAS CSI Driver (`tns-csi`) |
+| VPN Overlay | NetBird (Operator + Node Extension) |
 | TLS | cert-manager + Let's Encrypt |
+| Observability | VictoriaMetrics + Loki + OTel Collector + Grafana |
+| Security / Policy | Kyverno (Best Practices Pod Security Standards) |
 | GitOps | Flux CD |
 | Secrets | SOPS + age |
 | State Encryption | OpenTofu native AES-GCM |
@@ -30,8 +34,7 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 ├── tofu/                   # OpenTofu — VM provisioning & Talos bootstrap
 └── kubernetes/
     ├── clusters/
-    │   ├── production/     # Flux entrypoint for your Proxmox/Talos cluster
-    │   └── local-dev/      # Flux entrypoint for local testing (Kind/Docker Desktop)
+    │   └── production/     # Flux entrypoint for your Proxmox/Talos cluster
     ├── infrastructure/      # Cilium, cert-manager
     └── apps/                # Homelab applications (managed by Flux)
 ```
@@ -88,7 +91,11 @@ flux bootstrap github \
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `validate.yaml` | push / PR | Lint, validate, and security-scan all configs |
-| `tofu-run.yaml` | manual | Run `plan`, `apply`, or `destroy` via GitHub Actions UI |
+| `validate.yaml` | push / PR | Lint, validate, security-scan configs, and verify raw secret leaks |
+| `tofu-run.yaml` | push / PR / manual | Run automated plans or approve apply/destroys over NetBird |
 
-> **Note:** The `tofu-run.yaml` workflow requires a self-hosted runner with LAN access to Proxmox. Add `SOPS_AGE_KEY` and `STATE_ENCRYPTION_PASSPHRASE` as GitHub Actions secrets.
+---
+
+## Developer and Agent Guidelines
+
+For comprehensive cross-system checklists, custom GitOps conventions (Cilium integration, CrowdSec parsing rules, and CloudNativePG storage policies), and rules of engagement (SOPS secrets and validation workflows) designed specifically for human developers and AI coding agents, please refer directly to [AGENTS.md](AGENTS.md).

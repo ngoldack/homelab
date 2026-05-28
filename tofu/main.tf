@@ -3,12 +3,16 @@ locals {
   vm_instances = merge([
     for pool_name, pool in var.node_pools : {
       for idx in range(pool.count) : "${pool_name}-${idx}" => {
-        pool_name  = pool_name
-        cpu_cores  = pool.cpu_cores
-        memory     = pool.memory
-        disk_size  = pool.disk_size
-        talos_role = pool.talos_role
-        index      = idx
+        pool_name         = pool_name
+        cpu_cores         = pool.cpu_cores
+        memory            = pool.memory
+        disk_size         = pool.disk_size
+        talos_role        = pool.talos_role
+        index             = idx
+        enable_gvisor     = pool.enable_gvisor
+        enable_secure_nic = pool.enable_secure_nic
+        extensions        = pool.extensions
+        taints            = pool.taints
       }
     }
   ]...)
@@ -44,8 +48,18 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     enabled = true
   }
 
+  # Default (primary) NIC — general cluster traffic
   network_device {
-    bridge = "vmbr0"
+    bridge = var.network_default_bridge
+  }
+
+  # Secure (secondary) NIC — VLAN-isolated network; only attached when enabled for the pool
+  dynamic "network_device" {
+    for_each = each.value.enable_secure_nic ? [true] : []
+    content {
+      bridge  = var.network_secure_bridge
+      vlan_id = var.network_secure_vlan_id
+    }
   }
 
   # Root disk (Where Talos OS will be installed during apply/bootstrap)

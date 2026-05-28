@@ -52,6 +52,22 @@ spec:
     # Standard overlay network tunnel
     tunnel: vxlan
 
+    # Enable Cilium Hubble observability
+    hubble:
+      enabled: true
+      metrics:
+        enabled:
+          - dns
+          - drop
+          - tcp
+          - flow
+          - icmp
+          - http
+      relay:
+        enabled: true
+      ui:
+        enabled: true
+
     # Necessary security capabilities for Talos Linux Kernel interaction
     securityContext:
       capabilities:

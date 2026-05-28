@@ -1,0 +1,16 @@
+apiVersion: valkey.io/v1alpha1
+kind: Valkey
+metadata:
+  name: langfuse-valkey
+  namespace: langfuse
+spec:
+  replicas: 1
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tns-csi-fast-nfs
+        resources:
+          requests:
+            storage: 2Gi

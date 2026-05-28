@@ -1,0 +1,75 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: crowdsec
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: crowdsec
+  chart:
+    spec:
+      chart: crowdsec
+      version: "0.19.x"
+      sourceRef:
+        kind: HelmRepository
+        name: crowdsec
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Local API Configuration
+    lapi:
+      enabled: true
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100Mi
+        limits:
+          cpu: 200m
+          memory: 250Mi
+      # Define static bouncers via environment secrets
+      env:
+        - name: BOUNCER_KEY_AUTHENTIK
+          valueFrom:
+            secretKeyRef:
+              name: crowdsec-secrets
+              key: authentik-bouncer-key
+      persistentVolume:
+        config:
+          enabled: true
+          storageClassName: tns-csi-fast-nfs
+          size: 1Gi
+        data:
+          enabled: true
+          storageClassName: tns-csi-fast-nfs
+          size: 1Gi
+
+    # Agent configuration running as a DaemonSet on every node
+    agent:
+      enabled: true
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100Mi
+        limits:
+          cpu: 200m
+          memory: 250Mi
+      # Read Kubernetes events & logs
+      acquisition:
+        - namespace: crowdsec
+          podName: "*"
+          program: "kubernetes"
+        - namespace: kube-system
+          podName: "cilium-*"
+          program: "cilium"
+      env:
+        - name: COLLECTIONS
+          value: >-
+            crowdsecurity/kubernetes
+            crowdsecurity/nginx-ingress
+            crowdsecurity/http-cve
+            crowdsecurity/base-httping
+            crowdsecurity/cilium

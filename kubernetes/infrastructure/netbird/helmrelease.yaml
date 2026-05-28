@@ -1,0 +1,30 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: netbird-operator
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: netbird
+  chart:
+    spec:
+      # Check latest: https://github.com/netbirdio/kubernetes-operator/releases
+      chart: netbird-operator
+      version: "0.1.x"
+      sourceRef:
+        kind: HelmRepository
+        name: netbird
+      interval: 1h
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  valuesFrom:
+    - kind: Secret
+      name: netbird-operator-credentials
+      valuesKey: apiToken
+      targetPath: operator.apiToken
+  values:
+    operator:
+      # Cloud-hosted NetBird. Change to your self-hosted management URL if applicable.
+      managementURL: "https://api.netbird.io:443"

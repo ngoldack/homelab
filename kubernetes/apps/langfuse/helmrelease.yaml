@@ -1,0 +1,62 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: langfuse
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: langfuse
+  chart:
+    spec:
+      chart: langfuse
+      version: "2.10.0"
+      sourceRef:
+        kind: HelmRepository
+        name: langfuse
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Disable sub-charts of Postgres and Redis since we use local custom statefulsets
+    postgresql:
+      enabled: false
+    redis:
+      enabled: false
+
+    # Database configuration for Langfuse Helm properties.
+    # CloudNativePG dynamically creates a database named 'langfuse' and an app owner named 'langfuse',
+    # and secret 'langfuse-postgres-app' containing username, password, and connection parameters.
+    database:
+      host: "langfuse-postgres-rw.langfuse.svc.cluster.local"
+      port: 5432
+      username: "langfuse"
+      passwordSecret:
+        name: "langfuse-postgres-app"
+        key: "password"
+      database: "langfuse"
+
+    # Env-level properties overrides for extra assurance & Redis config
+    env:
+      DATABASE_URL:
+        valueFrom:
+          secretKeyRef:
+            name: "langfuse-postgres-app"
+            key: "uri"
+      REDIS_HOST: "langfuse-valkey.langfuse.svc.cluster.local"
+      REDIS_PORT: "6379"
+      # Secure bootstrap salts & authentication secrets referencing SOPS
+      NEXTAUTH_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-secrets
+            key: nextauth-secret
+      SALT:
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-secrets
+            key: salt
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"

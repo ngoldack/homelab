@@ -109,19 +109,18 @@ tasks:
     desc: Validate all Kustomize overlays
     cmds:
       - kustomize build kubernetes/clusters/production > /dev/null && echo "OK clusters/production"
-      - kustomize build kubernetes/clusters/local-dev > /dev/null && echo "OK clusters/local-dev"
       - kustomize build kubernetes/infrastructure > /dev/null && echo "OK infrastructure"
       - kustomize build kubernetes/apps > /dev/null && echo "OK apps"
 
   flux:bootstrap:
-    desc: Bootstrap Flux onto the cluster (requires GITHUB_USER and GITHUB_REPO env vars)
+    desc: Bootstrap Flux onto the cluster. Attempts SSH-based Git bootstrap to bypass GitHub API restrictions.
     cmds:
-      - flux bootstrap github
-          --owner={{.GITHUB_USER}}
-          --repository={{.GITHUB_REPO}}
-          --branch=main
+      - |
+        echo "===> Bootstrapping via standard Git/SSH (bypasses GitHub API constraints)..."
+        flux bootstrap git \
+          --url=ssh://git@github.com/{{.GITHUB_USER}}/{{.GITHUB_REPO}}.git \
+          --branch=main \
           --path=kubernetes/clusters/production
-          --personal
 
   flux:status:
     desc: Show status of all Flux Kustomizations and HelmReleases
@@ -135,45 +134,4 @@ tasks:
       - flux reconcile source git flux-system
       - flux reconcile kustomization infrastructure
       - flux reconcile kustomization apps
-
-  # -------------------------
-  # Local Dev Sandbox (Kind)
-  # -------------------------
-
-  dev:up:
-    desc: Spin up local testing cluster in Kind (Docker Desktop must be running)
-    cmds:
-      - kind create cluster --config kubernetes/clusters/local-dev/kind-config.yaml
-      - kubectl cluster-info --context kind-local-dev
-
-  dev:down:
-    desc: Destroy local testing cluster
-    cmds:
-      - kind delete cluster --name local-dev
-
-  dev:bootstrap:
-    desc: Bootstrap Flux into the local dev cluster mapped to local folders (requires GITHUB_USER and GITHUB_REPO env vars)
-    cmds:
-      - |
-        # Check for context safety (guarantees you don't bootstrap over production!)
-        if [ "$(kubectl config current-context)" != "kind-local-dev" ]; then
-          echo "ERROR: Current context is NOT kind-local-dev. Switch using development commands."
-          exit 1
-        fi
-      # 1. Create flux-system namespace
-      - kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f -
-      # 2. Add SOPS age decryption keys directly to Kind
-      - |
-        if [ -f age.key ]; then
-          kubectl create secret generic sops-age -n flux-system --from-file=age.agekey=age.key --dry-run=client -o yaml | kubectl apply -f -
-        else
-          echo "WARNING: Local age.key not found. Flux decryption may fail."
-        fi
-      # 3. Bootstrap local-dev Flux branch
-      - flux bootstrap github
-          --owner={{.GITHUB_USER}}
-          --repository={{.GITHUB_REPO}}
-          --branch=main
-          --path=kubernetes/clusters/local-dev
-          --personal
 

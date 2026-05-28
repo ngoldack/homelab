@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "flux": {
+    "fileMatch": ["(^|/)kubernetes/.+\\.yaml$"]
+  },
+  "kubernetes": {
+    "fileMatch": ["(^|/)kubernetes/.+\\.yaml$"]
+  },
+  "opentofu": {
+    "enabled": true,
+    "fileMatch": ["(^|/)tofu/.+\\.tf$"]
+  },
+  "minimumReleaseAge": "7d",
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "labels": ["automerge", "dependencies"]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "labels": ["major-upgrade", "dependencies"]
+    }
+  ]
+}

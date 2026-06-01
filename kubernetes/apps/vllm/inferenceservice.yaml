@@ -1,0 +1,50 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: llama-8b
+  namespace: vllm
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    # Run only on worker-ai tainted node
+    nodeSelector:
+      ai: "true"
+    tolerations:
+      - key: "ai"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+
+    model:
+      modelFormat:
+        name: huggingface
+      # Model is downloaded from HuggingFace on first start
+      # Requires HUGGING_FACE_HUB_TOKEN secret if using gated models
+      storageUri: "hf://meta-llama/Llama-3.1-8B-Instruct"
+      runtime: kserve-vllmserver
+      args:
+        # ── CPU-only (current) ────────────────────────────────────────
+        # Upgrade path for Intel Arc Pro B65:
+        #   - change --device=cpu  → --device=xpu
+        #   - change --dtype=bfloat16 → --dtype=float16
+        #   - add resources.limits: gpu.intel.com/i915: "1"
+        - "--device=cpu"
+        - "--dtype=bfloat16"      # uses AVX512_BF16 on 13900HX
+        - "--max-model-len=4096"
+        - "--cpu-memory-utilization=0.85"
+      resources:
+        requests:
+          cpu: "8"
+          memory: "24Gi"
+        limits:
+          cpu: "12"
+          memory: "48Gi"
+      # Model weights stored on tns-csi-fast-nfs (50Gi)
+      storageSpec:
+        storageClassName: tns-csi-fast-nfs
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi

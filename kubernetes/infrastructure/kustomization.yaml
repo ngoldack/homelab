@@ -13,3 +13,4 @@ resources:
   - backup
   - cnpg-operator
   - valkey-operator
+  - kserve-operator

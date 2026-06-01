@@ -1,0 +1,29 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kserve-operator
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: kserve
+  dependsOn:
+    - name: cert-manager
+      namespace: flux-system
+  chart:
+    spec:
+      chart: kserve
+      version: "0.14.x"
+      sourceRef:
+        kind: HelmRepository
+        name: kserve
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    kserve:
+      controller:
+        # RawDeployment: no Istio or Knative required
+        deploymentMode: "RawDeployment"

@@ -72,7 +72,8 @@ jobs:
           SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
         run: |
           set -euo pipefail
-          export TOFU_ENCRYPTION_PASSPHRASE_statekey="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
           tofu init -lockfile=readonly
 
       - name: OpenTofu Destroy
@@ -80,5 +81,6 @@ jobs:
           SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
         run: |
           set -euo pipefail
-          export TOFU_ENCRYPTION_PASSPHRASE_statekey="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
           tofu destroy -auto-approve -no-color -input=false

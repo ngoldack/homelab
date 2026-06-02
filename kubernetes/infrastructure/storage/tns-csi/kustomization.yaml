@@ -5,6 +5,5 @@ namespace: storage
 
 resources:
   - namespace.yaml
-  - helmrepository.yaml
   - secret.sops.yaml
   - helmrelease.yaml

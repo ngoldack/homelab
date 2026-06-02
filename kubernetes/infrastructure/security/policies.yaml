@@ -6,7 +6,8 @@ metadata:
     policies.kyverno.io/title: "Disallow Privileged Containers"
     policies.kyverno.io/category: "Pod Security Standards"
     policies.kyverno.io/severity: "high"
-    policies.kyverno.io/description: "Privileged containers share namespaces and capabilities, bypassing security boundaries."
+    policies.kyverno.io/description: >-
+      Privileged containers share namespaces and capabilities, bypassing security boundaries.
 spec:
   validationFailureAction: Audit
   background: true

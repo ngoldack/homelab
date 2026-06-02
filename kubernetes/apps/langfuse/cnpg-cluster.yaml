@@ -5,11 +5,11 @@ metadata:
   namespace: langfuse
 spec:
   instances: 1
-  
+
   # Set up a volume claim spec
   storage:
     size: 10Gi
-    storageClass: tns-csi-fast-nvmeof
+    storageClass: tns-csi-fast-nfs
 
   # Database configuration
   bootstrap:

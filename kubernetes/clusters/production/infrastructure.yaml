@@ -7,10 +7,12 @@ spec:
   interval: 10m0s
   path: ./kubernetes/infrastructure
   prune: true
+  wait: true
+  timeout: 15m
+  retryInterval: 1m
   sourceRef:
     kind: GitRepository
     name: flux-system
-  timeout: 5m
   decryption:
     provider: sops
     secretRef:

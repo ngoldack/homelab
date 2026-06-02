@@ -26,61 +26,50 @@ spec:
     redis:
       enabled: false
 
-    # Environment variables to configure Authentik, PostgreSQL, Valkey, and CrowdSec
+    # Core Authentik configuration. The chart maps authentik.* onto AUTHENTIK_* settings.
     authentik:
+      postgresql:
+        host: "authentik-postgres-rw.authentik.svc.cluster.local"
+        name: "authentik"
+        user: "authentik"
+        port: 5432
+      redis:
+        host: "authentik-valkey.authentik.svc.cluster.local"
+        port: 6379
       email:
         host: "localhost"
         port: 25
         use_tls: false
 
-    # Inject connection properties and keys via environment overrides
-    env:
-      - name: AUTHENTIK_POSTGRESQL__HOST
-        value: "authentik-postgres-rw.authentik.svc.cluster.local"
-      - name: AUTHENTIK_POSTGRESQL__NAME
-        value: "authentik"
-      - name: AUTHENTIK_POSTGRESQL__USER
-        value: "authentik"
-      - name: AUTHENTIK_POSTGRESQL__PORT
-        value: "5432"
-      - name: AUTHENTIK_POSTGRESQL__PASSWORD
-        valueFrom:
-          secretKeyRef:
-            name: authentik-postgres-app
-            key: password
-      - name: AUTHENTIK_REDIS__HOST
-        value: "authentik-valkey.authentik.svc.cluster.local"
-      - name: AUTHENTIK_REDIS__PORT
-        value: "6379"
-      - name: AUTHENTIK_SECRET_KEY
-        valueFrom:
-          secretKeyRef:
-            name: authentik-secrets
-            key: secret-key
-      - name: CROWDSEC_BOUNCER_KEY
-        valueFrom:
-          secretKeyRef:
-            name: authentik-secrets
-            key: authentik-bouncer-key
+    # Secrets and the CrowdSec bouncer key are injected via env so they can reference
+    # SOPS-managed Kubernetes Secrets instead of being inlined as plaintext values.
+    # global.env applies to both the server and worker deployments.
+    global:
+      env:
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-postgres-app
+              key: password
+        - name: AUTHENTIK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: secret-key
+        - name: CROWDSEC_BOUNCER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: authentik-bouncer-key
 
-    # Configure server deployment components & mount the CrowdSec policy blueprint configmap
     server:
       replicas: 1
-      volumeMounts:
-        - name: crowdsec-blueprint
-          mountPath: /blueprints/crowdsec
-      volumes:
-        - name: crowdsec-blueprint
-          configMap:
-            name: crowdsec-authentik-blueprint
 
-    # Configure worker deployment components & mount the CrowdSec policy blueprint configmap
     worker:
       replicas: 1
-      volumeMounts:
-        - name: crowdsec-blueprint
-          mountPath: /blueprints/crowdsec
-      volumes:
-        - name: crowdsec-blueprint
-          configMap:
-            name: crowdsec-authentik-blueprint
+
+    # Load the CrowdSec IP-reputation policy blueprint via the chart-native mechanism
+    # so it is reliably discovered and imported by the worker.
+    blueprints:
+      configMaps:
+        - crowdsec-authentik-blueprint

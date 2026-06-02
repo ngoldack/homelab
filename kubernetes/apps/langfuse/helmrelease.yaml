@@ -9,10 +9,14 @@ spec:
   chart:
     spec:
       chart: langfuse
-      version: "2.10.0"
+      # TODO: pin an existing chart version from https://langfuse.github.io/langfuse-k8s/
+      # The previous value "2.10.0" does not exist in that repository. Once a real
+      # version is chosen, re-verify the values block below against that chart's values.yaml.
+      version: "1.2.x"
       sourceRef:
         kind: HelmRepository
         name: langfuse
+        namespace: flux-system
       interval: 1h
   install:
     crds: CreateReplace
@@ -20,43 +24,58 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
-    # Disable sub-charts of Postgres and Redis since we use local custom statefulsets
+    # Disable bundled stateful sub-charts; we provide external operator-managed services.
+    # NOTE: current langfuse-k8s charts gate sub-charts on `deploy`, not `enabled`.
     postgresql:
-      enabled: false
-    redis:
-      enabled: false
-
-    # Database configuration for Langfuse Helm properties.
-    # CloudNativePG dynamically creates a database named 'langfuse' and an app owner named 'langfuse',
-    # and secret 'langfuse-postgres-app' containing username, password, and connection parameters.
-    database:
+      deploy: false
       host: "langfuse-postgres-rw.langfuse.svc.cluster.local"
       port: 5432
-      username: "langfuse"
-      passwordSecret:
-        name: "langfuse-postgres-app"
-        key: "password"
-      database: "langfuse"
+      auth:
+        username: "langfuse"
+        database: "langfuse"
+        existingSecret: "langfuse-postgres-app"
+        existingSecretKeys:
+          password: "password"
+    redis:
+      deploy: false
+      host: "langfuse-valkey.langfuse.svc.cluster.local"
+      port: 6379
+    # ClickHouse is required by Langfuse v3. We intentionally let the chart manage it
+    # using the cluster-standard NFS storage class. Switch to an external/operator
+    # cluster if durability/perf requires it.
+    clickhouse:
+      deploy: true
+      persistence:
+        storageClass: tns-csi-fast-nfs
+    # Object storage for events/media — points at the provisioned RustFS/TrueNAS bucket.
+    s3:
+      deploy: false
+      bucket: "langfuse"
+      endpoint: "http://truenas.home:9000"
+      forcePathStyle: true
+      # TODO: confirm key names exposed by langfuse-s3-credentials secret
+      accessKeyId:
+        secretKeyRef:
+          name: langfuse-s3-credentials
+          key: access-key-id
+      secretAccessKey:
+        secretKeyRef:
+          name: langfuse-s3-credentials
+          key: secret-access-key
 
-    # Env-level properties overrides for extra assurance & Redis config
-    env:
-      DATABASE_URL:
-        valueFrom:
-          secretKeyRef:
-            name: "langfuse-postgres-app"
-            key: "uri"
-      REDIS_HOST: "langfuse-valkey.langfuse.svc.cluster.local"
-      REDIS_PORT: "6379"
-      # Secure bootstrap salts & authentication secrets referencing SOPS
-      NEXTAUTH_SECRET:
-        valueFrom:
+    langfuse:
+      # Secure bootstrap salt & NextAuth secret sourced from SOPS-managed secrets.
+      salt:
+        secretKeyRef:
+          name: langfuse-secrets
+          key: salt
+      nextauth:
+        secret:
           secretKeyRef:
             name: langfuse-secrets
             key: nextauth-secret
-      SALT:
-        valueFrom:
-          secretKeyRef:
-            name: langfuse-secrets
-            key: salt
-      PORT: "3000"
-      HOSTNAME: "0.0.0.0"
+      additionalEnv:
+        - name: PORT
+          value: "3000"
+        - name: HOSTNAME
+          value: "0.0.0.0"

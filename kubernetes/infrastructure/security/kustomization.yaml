@@ -5,6 +5,6 @@ namespace: kyverno
 
 resources:
   - namespace.yaml
-  - helmrepositories.yaml
   - helmrelease.yaml
+  - trivy-operator.yaml
   - policies.yaml

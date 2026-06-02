@@ -13,6 +13,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: tns-csi
+        namespace: flux-system
   install:
     crds: CreateReplace
   upgrade:
@@ -24,7 +25,7 @@ spec:
       targetPath: truenas.apiKey
   values:
     truenas:
-      url: wss://YOUR-TRUENAS-IP:443/api/current
+      url: wss://YOUR-TRUENAS-IP:443/api/current  # TODO: set to your TrueNAS API websocket endpoint
 
     # Storage tiers managed by the CSI driver.
     # - bulk: tank (HDD RAIDZ1) for capacity-focused workloads

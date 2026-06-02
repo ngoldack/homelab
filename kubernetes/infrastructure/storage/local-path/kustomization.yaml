@@ -4,5 +4,4 @@ kind: Kustomization
 namespace: storage
 
 resources:
-  - helmrepository.yaml
   - helmrelease.yaml

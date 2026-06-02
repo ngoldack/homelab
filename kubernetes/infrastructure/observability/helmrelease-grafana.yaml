@@ -13,6 +13,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: grafana
+        namespace: flux-system
   install:
     crds: CreateReplace
   upgrade:
@@ -32,7 +33,7 @@ spec:
         searchNamespace: ALL
         label: grafana_datasource
         labelValue: "1"
-    
+
     additionalDataSources:
       - name: VictoriaMetrics
         type: prometheus
@@ -45,10 +46,10 @@ spec:
       - name: Loki
         type: loki
         access: proxy
-        url: http://loki-single-binary.monitoring.svc.cluster.local:3100
+        url: http://loki.monitoring.svc.cluster.local:3100
         jsonData:
           maxLines: 1000
-    
+
     resources:
       requests:
         cpu: 50m

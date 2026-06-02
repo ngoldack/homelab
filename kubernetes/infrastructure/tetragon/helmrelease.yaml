@@ -19,7 +19,7 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
-    # Essential for Talos Linux kernel tracing 
+    # Essential for Talos Linux kernel tracing
     extraHostPathMounts:
       - name: sys-kernel-tracing
         mountPath: /sys/kernel/tracing

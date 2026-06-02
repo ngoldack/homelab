@@ -13,6 +13,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: velero
+        namespace: flux-system
       interval: 1h
   install:
     crds: CreateReplace
@@ -39,7 +40,7 @@ spec:
             s3ForcePathStyle: true
             # Replace with your actual TrueNAS RustFS S3 IP/Hostname or internal Gateway URL
             s3Url: http://truenas-scale.local:9000
-      
+
       # Use Kopia as the default volumes file-system uploader (modern, faster, and more robust than restic)
       defaultVolumesToFsBackup: true
       uploaderType: kopia

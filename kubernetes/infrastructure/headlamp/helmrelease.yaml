@@ -22,7 +22,7 @@ spec:
       type: ClusterIP
       port: 80
 
-    # Enable native plugins support. 
+    # Enable native plugins support.
     # Headlamp plugins can be dynamically loaded at the browser side or pre-served from the cluster
     config:
       pluginsDir: "/headlamp/plugins"

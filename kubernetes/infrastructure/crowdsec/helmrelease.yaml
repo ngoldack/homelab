@@ -40,11 +40,11 @@ spec:
       persistentVolume:
         config:
           enabled: true
-          storageClassName: tns-csi-medium-nfs
+          storageClassName: tns-csi-fast-nfs
           size: 1Gi
         data:
           enabled: true
-          storageClassName: tns-csi-medium-nfs
+          storageClassName: tns-csi-fast-nfs
           size: 1Gi
 
     # Agent configuration running as a DaemonSet on every node
@@ -65,11 +65,12 @@ spec:
         - namespace: kube-system
           podName: "cilium-*"
           program: "cilium"
+        - namespace: authentik
+          podName: "authentik-*"
+          program: "authentik"
       env:
         - name: COLLECTIONS
           value: >-
             crowdsecurity/kubernetes
-            crowdsecurity/nginx-ingress
             crowdsecurity/http-cve
-            crowdsecurity/base-httping
-            crowdsecurity/cilium
+            crowdsecurity/authentik

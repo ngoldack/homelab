@@ -7,7 +7,7 @@ spec:
   instances: 1
   storage:
     size: 10Gi
-    storageClass: tns-csi-fast-nvmeof
+    storageClass: tns-csi-fast-nfs
   bootstrap:
     initdb:
       database: authentik

@@ -41,9 +41,26 @@ data:
                         ak_logger.warning(f"CrowdSec BLOCK: suspicious IP address detected: {client_ip}")
                         ak_message("Access denied. Your IP is flagged on CrowdSec.")
                         return False
+                else:
+                    # Unexpected LAPI status — fail closed.
+                    ak_logger.error(f"CrowdSec LAPI returned status {response.status_code}; denying access.")
+                    ak_message("Access denied. Security verification is unavailable.")
+                    return False
             except Exception as e:
+                # Fail closed: if the reputation check cannot be performed, deny access
+                # so login interfaces cannot be brute-forced while CrowdSec is unreachable.
                 ak_logger.error(f"Error querying CrowdSec LAPI: {str(e)}")
-                # Default to true (fail open to avoid lockouts) or false depending on threat appetite
-                return True
+                ak_message("Access denied. Security verification is unavailable.")
+                return False
 
             return True
+
+      # Bind the reputation policy to the default authentication flow so it is
+      # actually evaluated on every login attempt.
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          policy: !Find [authentik_policies_expression.expressionpolicy, [name, crowdsec-ip-rep]]
+          order: 0
+        attrs:
+          enabled: true

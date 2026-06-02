@@ -13,6 +13,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: open-telemetry
+        namespace: flux-system
   install:
     crds: CreateReplace
   upgrade:
@@ -34,8 +35,9 @@ spec:
           endpoint: "http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428/api/v1/write"
           tls:
             insecure: true
-        otlp/loki:
-          endpoint: "http://loki-single-binary.monitoring.svc.cluster.local:3100"
+        otlphttp/loki:
+          # Loki ingests OTLP over HTTP at the /otlp path (not gRPC on 3100).
+          endpoint: "http://loki.monitoring.svc.cluster.local:3100/otlp"
           tls:
             insecure: true
 
@@ -63,7 +65,7 @@ spec:
           logs:
             receivers: [otlp, filelog]
             processors: [memory_limiter, k8sattributes, batch]
-            exporters: [otlp/loki]
+            exporters: [otlphttp/loki]
 
     resources:
       requests:

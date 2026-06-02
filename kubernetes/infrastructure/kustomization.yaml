@@ -1,6 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - configs/sources.yaml
   - gateway-api
   - cilium
   - cert-manager
@@ -19,4 +20,3 @@ resources:
   - s3-provisioner
   - keda
   - headlamp
-  - gatekeeper

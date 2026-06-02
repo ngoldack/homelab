@@ -16,3 +16,4 @@ resources:
   - gateway.yaml
   - s3-bucket.yaml
   - s3-credentials.sops.yaml
+  - rustfs-admin-credentials.sops.yaml

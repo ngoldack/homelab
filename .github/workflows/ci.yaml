@@ -99,6 +99,11 @@ jobs:
           echo "Scanning workspace for unencrypted SOPS files..."
           unencrypted=0
           while IFS= read -r -d '' f; do
+            # Skip the SOPS configuration file itself (creation rules), which
+            # is not an encrypted secret despite matching the *.sops.yaml glob.
+            if [ "$(basename "$f")" = ".sops.yaml" ]; then
+              continue
+            fi
             # A properly encrypted SOPS file has a top-level "sops:" block
             # AND at least one ENC[...] encrypted value.
             if ! grep -q '^sops:' "$f" || ! grep -q 'ENC\[' "$f"; then
@@ -123,6 +128,10 @@ jobs:
     defaults:
       run:
         working-directory: tofu
+    env:
+      # Offline syntax/validate only — no real state is read or written, so a
+      # throwaway passphrase satisfies the pbkdf2 key provider (min 16 chars).
+      TF_ENCRYPTION_PASSPHRASE_statekey: ci-offline-validate-dummy-passphrase
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -151,7 +160,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy Config Scanner
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: tofu
@@ -213,23 +222,32 @@ jobs:
           infra=kubernetes/clusters/production/infrastructure.yaml
           apps=kubernetes/clusters/production/apps.yaml
 
+          # Assert a value on a specific document (selected by metadata.name)
+          # inside a possibly multi-document Flux Kustomization file.
           assert() {
-            local file="$1" expr="$2" expected="$3" desc="$4"
-            actual="$(yq "$expr" "$file")"
+            local file="$1" name="$2" expr="$3" expected="$4" desc="$5"
+            actual="$(yq "select(.metadata.name == \"$name\") | $expr" "$file")"
             if [ "$actual" != "$expected" ]; then
-              echo "::error file=$file::$desc (got '$actual', expected '$expected')"
+              echo "::error file=$file::[$name] $desc (got '$actual', expected '$expected')"
               exit 1
             fi
-            echo "OK: $file — $desc"
+            echo "OK: $file [$name] — $desc"
           }
 
-          # Both Flux Kustomizations must keep SOPS decryption wired up.
-          for f in "$infra" "$apps"; do
-            assert "$f" '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
-            assert "$f" '.spec.decryption.secretRef.name' 'sops-age' 'decryption.secretRef.name must be sops-age'
-            assert "$f" '.spec.prune' 'true' 'prune must be enabled'
+          # Every Flux Kustomization must keep SOPS decryption + prune wired up.
+          for name in infra-controllers infra-configs; do
+            assert "$infra" "$name" '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
+            assert "$infra" "$name" '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
+            assert "$infra" "$name" '.spec.prune' 'true' 'prune must be enabled'
           done
+          assert "$apps" 'apps' '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
+          assert "$apps" 'apps' '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
+          assert "$apps" 'apps' '.spec.prune' 'true' 'prune must be enabled'
 
-          # apps must depend on infrastructure so ordering is preserved.
-          assert "$apps" '.spec.dependsOn[] | select(.name == "infrastructure") | .name' \
-            'infrastructure' 'apps must dependsOn infrastructure'
+          # Ordering: configs depend on controllers, apps depend on configs.
+          assert "$infra" 'infra-configs' \
+            '.spec.dependsOn[] | select(.name == "infra-controllers") | .name' \
+            'infra-controllers' 'infra-configs must dependsOn infra-controllers'
+          assert "$apps" 'apps' \
+            '.spec.dependsOn[] | select(.name == "infra-configs") | .name' \
+            'infra-configs' 'apps must dependsOn infra-configs'

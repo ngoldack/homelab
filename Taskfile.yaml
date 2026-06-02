@@ -133,6 +133,6 @@ tasks:
     desc: Force Flux to reconcile all sources immediately
     cmds:
       - flux reconcile source git flux-system
-      - flux reconcile kustomization infrastructure
+      - flux reconcile kustomization infra-controllers
+      - flux reconcile kustomization infra-configs
       - flux reconcile kustomization apps
-

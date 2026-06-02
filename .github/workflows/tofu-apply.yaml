@@ -1,0 +1,90 @@
+name: OpenTofu Apply
+
+# Mutating apply against private Proxmox/Talos infrastructure.
+# Manual dispatch ONLY, gated behind the protected "production" GitHub
+# Environment (configure required reviewers there for human approval).
+# Optionally nudges Flux to reconcile immediately after a successful apply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reconcile_flux:
+        description: 'Force Flux to reconcile after apply'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tofu-state
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: OpenTofu Apply
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: tofu
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Connect to NetBird VPN Mesh
+        uses: Alemiz112/netbird-connect@v1
+        with:
+          setup-key: ${{ secrets.NETBIRD_SETUP_KEY }}
+
+      - name: Setup Age Decryption Key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/sops/age
+          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          chmod 600 ~/.config/sops/age/keys.txt
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.7.2
+
+      - name: Install SOPS & yq
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/sops \
+            https://github.com/getsops/sops/releases/latest/download/sops-v3.9.1.linux.amd64
+          sudo chmod +x /usr/local/bin/sops
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: OpenTofu Init
+        env:
+          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
+        run: |
+          set -euo pipefail
+          export TOFU_ENCRYPTION_PASSPHRASE_statekey="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          tofu init -lockfile=readonly
+
+      - name: OpenTofu Apply
+        env:
+          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
+        run: |
+          set -euo pipefail
+          export TOFU_ENCRYPTION_PASSPHRASE_statekey="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
+          tofu apply -auto-approve -no-color -input=false
+
+      - name: Flux Reconcile
+        if: ${{ inputs.reconcile_flux }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_DATA }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          curl -s https://fluxcd.io/install.sh | sudo bash
+          flux reconcile source git flux-system
+          flux reconcile kustomization infrastructure
+          flux reconcile kustomization apps

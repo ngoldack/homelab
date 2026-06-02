@@ -4,17 +4,31 @@ age.key
 
 # OpenTofu state and lock files
 tofu/.terraform/
-tofu/.terraform.lock.hcl
+# Commit the dependency lock file so provider versions are reproducible in CI
+!tofu/.terraform.lock.hcl
 # Track encrypted state in Git while ignoring plaintext backups
 !tofu/terraform.tfstate
 tofu/terraform.tfstate.backup
+
+# OpenTofu plan files may contain secrets (even though plan encryption is enabled,
+# avoid committing them by accident)
+tofu/*.tfplan
+*.tfplan
 
 # tfvars files may contain plaintext secrets
 tofu/*.tfvars
 tofu/*.tfvars.json
 
+# Environment files used for SOPS/encryption passphrases
+.env
+.env.*
+
 # Generated kubeconfig and talosconfig outputs
 kubeconfig
 talosconfig
+kubeconfig.yaml
+talosconfig.yaml
 *.kubeconfig
 *.talosconfig
+*.kubeconfig.yaml
+*.talosconfig.yaml

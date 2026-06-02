@@ -19,7 +19,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: 1.6.2
+          tofu_version: 1.7.2
 
       - name: OpenTofu Format Check
         run: tofu fmt -check

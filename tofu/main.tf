@@ -18,7 +18,7 @@ locals {
 }
 
 # Download the Talos OS ISO directly onto the Proxmox node
-resource "proxmox_virtual_environment_download_file" "talos_iso" {
+resource "proxmox_download_file" "talos_iso" {
   node_name    = var.proxmox_node
   content_type = "iso"
   datastore_id = "local"
@@ -71,7 +71,7 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
 
   # CDROM drive to boot into Talos live installation ISO
   cdrom {
-    file_id = proxmox_virtual_environment_download_file.talos_iso.id
+    file_id = proxmox_download_file.talos_iso.id
   }
 
   operating_system {

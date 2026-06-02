@@ -4,7 +4,7 @@ age.key
 
 # OpenTofu state and lock files
 tofu/.terraform/
-tofu/.terraform.lock.hcl
+# The provider lock file IS committed so CI validates against pinned versions.
 # Track encrypted state in Git while ignoring plaintext backups
 !tofu/terraform.tfstate
 tofu/terraform.tfstate.backup

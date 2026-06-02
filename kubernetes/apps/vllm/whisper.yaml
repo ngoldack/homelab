@@ -1,0 +1,51 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: whisper
+  namespace: vllm
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    serving.kserve.io/autoscalerClass: none
+    serving.kserve.io/secretName: vllm-s3-credentials
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    nodeSelector:
+      ai: "true"
+    tolerations:
+      - key: "ai"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    model:
+      modelFormat:
+        name: whisper
+      storageUri: "s3://vllm-models/whisper-large-v3"
+      runtime: kserve-vllm-whisper
+      args:
+        - "--device=cpu"
+        - "--dtype=bfloat16"
+      env:
+        # Pin Whisper to the top E-cores, isolated from voice LLM and big models.
+        - name: VLLM_CPU_OMP_THREADS_BIND
+          value: "28-31"
+        - name: VLLM_CPU_KVCACHE_SPACE
+          value: "2"
+      resources:
+        requests:
+          cpu: "2"
+          memory: "3Gi"
+        limits:
+          cpu: "4"
+          memory: "6Gi"
+      storageSpec:
+        storageClassName: tns-csi-fast-nfs
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi

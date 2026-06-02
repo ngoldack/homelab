@@ -25,16 +25,26 @@ spec:
   values:
     truenas:
       url: wss://YOUR-TRUENAS-IP:443/api/current
-    
-    # Pre-scaffolded StorageClasses managed by the CSI Driver
+
+    # Storage tiers managed by the CSI driver.
+    # - bulk: tank (HDD RAIDZ1) for capacity-focused workloads
+    # - medium: fast pool over NFS for general-purpose PVCs (default tier)
+    # - fast: fast pool over NVMeoF for latency-sensitive/block workloads (DBs)
     storageClasses:
-      - name: tns-csi-fast-nfs
+      - name: tns-csi-bulk-nfs
+        protocol: nfs
+        pool: tank
+        defaultClass: false
+      - name: tns-csi-medium-nfs
         protocol: nfs
         pool: fast
+        defaultClass: true
       - name: tns-csi-fast-nvmeof
         protocol: nvmeof
         pool: fast
-        enabled: false # Comment out or disable as per preference
-      - name: tns-csi-tank-nfs
+        defaultClass: false
+      # Compatibility class to keep legacy references working during migration.
+      - name: tns-csi-fast-nfs
         protocol: nfs
-        pool: tank
+        pool: fast
+        defaultClass: false

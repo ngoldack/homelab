@@ -1,0 +1,55 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen25-coder-7b
+  namespace: vllm
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    serving.kserve.io/autoscalerClass: none
+    serving.kserve.io/secretName: vllm-s3-credentials
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  predictor:
+    minReplicas: 0
+    maxReplicas: 1
+    nodeSelector:
+      ai: "true"
+    tolerations:
+      - key: "ai"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    model:
+      modelFormat:
+        name: huggingface
+      storageUri: "s3://vllm-models/qwen2.5-coder-7b"
+      runtime: kserve-vllmserver
+      args:
+        - "--device=cpu"
+        - "--dtype=bfloat16"
+        - "--max-model-len=4096"
+        - "--max-num-batched-tokens=2048"
+        - "--max-num-seqs=64"
+      env:
+        - name: VLLM_CPU_OMP_THREADS_BIND
+          value: "0-15"
+        - name: VLLM_CPU_NUM_OF_RESERVED_CPU
+          value: "1"
+        - name: VLLM_CPU_KVCACHE_SPACE
+          value: "8"
+      resources:
+        requests:
+          cpu: "8"
+          memory: "18Gi"
+        limits:
+          cpu: "14"
+          memory: "26Gi"
+      storageSpec:
+        storageClassName: tns-csi-fast-nfs
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi

@@ -3,9 +3,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helmrepository.yaml
-  - secrets.sops.yaml
-  - cnpg-cluster.yaml
-  - valkey.yaml
   - helmrelease.yaml
-  - s3-bucket.yaml
-  - s3-credentials.sops.yaml
+  - helmrelease-http.yaml
+  - referencegrant.yaml

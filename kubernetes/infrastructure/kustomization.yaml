@@ -1,8 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - gateway-api
   - cilium
   - cert-manager
+  - storage/local-path
   - storage/tns-csi
   - observability
   - security
@@ -13,3 +15,8 @@ resources:
   - backup
   - cnpg-operator
   - valkey-operator
+  - kserve-operator
+  - s3-provisioner
+  - keda
+  - headlamp
+  - gatekeeper

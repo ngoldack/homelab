@@ -1,8 +1,8 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: localai
+  name: gatekeeper
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://go-skynet.github.io/helm-charts/
+  url: https://open-policy-agent.github.io/gatekeeper/charts

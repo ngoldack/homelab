@@ -1,0 +1,36 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: kserve-vllmserver
+  namespace: vllm
+spec:
+  supportedModelFormats:
+    - name: huggingface
+      version: "1"
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      # CPU-only image (AVX2 path; node has no AVX-512). Pin to a known-good tag.
+      # GPU upgrade path (Intel Arc): switch to vllm/vllm-openai:<ver> and add --device=xpu.
+      image: vllm/vllm-openai-cpu:v0.22.0-x86_64
+      command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+      args:
+        - "--model"
+        - "$(storageUri)"
+        - "--port"
+        - "8080"
+      securityContext:
+        capabilities:
+          # vLLM CPU backend uses sched_setaffinity for OMP thread pinning.
+          add: ["SYS_NICE"]
+      volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 4Gi

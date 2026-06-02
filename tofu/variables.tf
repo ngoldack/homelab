@@ -53,10 +53,10 @@ variable "talos_default_extensions" {
   description = "Talos system extension images installed on every node. Applied before per-pool extensions. See https://github.com/siderolabs/extensions for available images."
   type        = list(string)
   default = [
-    "ghcr.io/siderolabs/netbird:0.71.2",       # WireGuard-based Zero Trust overlay network
-    "ghcr.io/siderolabs/nvme-cli:v2.14",       # NVMe-oF command line interface
-    "ghcr.io/siderolabs/iscsi-tools:v0.2.0",   # iSCSI initiator tools (required for Longhorn, etc.)
-    "ghcr.io/siderolabs/nfs-utils:v0.1.1",     # rpcbind + rpc.statd for NFSv3 file locking
+    "ghcr.io/siderolabs/netbird:0.71.2",     # WireGuard-based Zero Trust overlay network
+    "ghcr.io/siderolabs/nvme-cli:v2.14",     # NVMe-oF command line interface
+    "ghcr.io/siderolabs/iscsi-tools:v0.2.0", # iSCSI initiator tools (required for Longhorn, etc.)
+    "ghcr.io/siderolabs/nfs-utils:v0.1.1",   # rpcbind + rpc.statd for NFSv3 file locking
   ]
 }
 
@@ -81,13 +81,13 @@ variable "network_secure_vlan_id" {
 variable "node_pools" {
   type = map(object({
     cpu_cores         = number
-    memory            = number            # MB
-    disk_size         = number            # GB
+    memory            = number # MB
+    disk_size         = number # GB
     count             = number
-    talos_role        = string            # "controlplane" or "worker"
+    talos_role        = string                     # "controlplane" or "worker"
     extensions        = optional(list(string), []) # per-pool Talos system extension images (merged with talos_default_extensions)
-    enable_secure_nic = optional(bool, false) # attach the secondary VLAN-isolated NIC to nodes in this pool
-    taints            = optional(list(object({
+    enable_secure_nic = optional(bool, false)      # attach the secondary VLAN-isolated NIC to nodes in this pool
+    taints = optional(list(object({
       key    = string
       value  = optional(string, "")
       effect = string # NoSchedule | PreferNoSchedule | NoExecute
@@ -105,24 +105,24 @@ variable "node_pools" {
       taints            = []
     }
     "worker-default" = {
-      cpu_cores         = 8
-      memory            = 24576 # 24 GB
-      disk_size         = 64
-      count             = 1
-      talos_role        = "worker"
-      extensions        = [
+      cpu_cores  = 8
+      memory     = 24576 # 24 GB
+      disk_size  = 64
+      count      = 1
+      talos_role = "worker"
+      extensions = [
         "ghcr.io/siderolabs/gvisor:20240115.0",
       ]
       enable_secure_nic = false
       taints            = []
     }
     "worker-ai" = {
-      cpu_cores         = 12
-      memory            = 65536 # 64 GB
-      disk_size         = 128
-      count             = 1
-      talos_role        = "worker"
-      extensions        = [
+      cpu_cores  = 12
+      memory     = 65536 # 64 GB
+      disk_size  = 128
+      count      = 1
+      talos_role = "worker"
+      extensions = [
         "ghcr.io/siderolabs/gvisor:20240115.0",
       ]
       enable_secure_nic = false

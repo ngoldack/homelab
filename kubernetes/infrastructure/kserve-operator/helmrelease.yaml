@@ -25,5 +25,5 @@ spec:
   values:
     kserve:
       controller:
-        # RawDeployment: no Istio or Knative required
+        # Raw deployment mode (Standard is the canonical value; RawDeployment remains accepted as a legacy alias).
         deploymentMode: "RawDeployment"

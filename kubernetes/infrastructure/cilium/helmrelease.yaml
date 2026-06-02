@@ -18,6 +18,10 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
+    # Enable Cilium Gateway API support (K8s Service Mesh / Ingress)
+    gatewayAPI:
+      enabled: true
+
     # Use standard K8s-based PodCIDR allocation
     ipam:
       mode: kubernetes

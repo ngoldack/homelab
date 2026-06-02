@@ -1,0 +1,38 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: kserve-vllmserver
+  namespace: vllm
+spec:
+  supportedModelFormats:
+    - name: huggingface
+      version: "1"
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: vllm/vllm-openai:v0.4.3
+      command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+      args:
+        - "--model"
+        - "$(storageUri)"
+        - "--port"
+        - "8080"
+        - "--kv-transfer-config"
+        - '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+      env:
+        - name: LMCACHE_CONFIG_FILE
+          value: /etc/lmcache/config.yaml
+        # Keep hashing deterministic across workers for cross-process cache reuse.
+        - name: PYTHONHASHSEED
+          value: "0"
+      volumeMounts:
+        - name: lmcache-config
+          mountPath: /etc/lmcache
+          readOnly: true
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+  volumes:
+    - name: lmcache-config
+      configMap:
+        name: vllm-lmcache-config

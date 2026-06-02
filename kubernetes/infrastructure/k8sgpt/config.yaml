@@ -1,14 +1,14 @@
 apiVersion: k8sgpt.ai/v1alpha1
 kind: K8sgpt
 metadata:
-  name: k8sgpt-localai
+  name: k8sgpt-vllm
   namespace: k8sgpt-operator-system
 spec:
   ai:
     enabled: true
     model: fast
-    backend: localai
-    baseUrl: http://localai.localai.svc.cluster.local:8080/v1
+    backend: openai
+    baseUrl: http://llama-8b-predictor.vllm.svc.cluster.local/v1
   noCache: false
   filters:
     - Pod

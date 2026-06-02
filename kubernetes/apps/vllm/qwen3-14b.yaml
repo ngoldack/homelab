@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: llama-8b
+  name: qwen3-14b
   namespace: vllm
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
@@ -12,7 +12,7 @@ metadata:
     prometheus.io/path: "/metrics"
 spec:
   predictor:
-    minReplicas: 1
+    minReplicas: 0
     maxReplicas: 2
     autoScaling:
       metrics:
@@ -21,7 +21,7 @@ spec:
             metric:
               backend: prometheus
               serverAddress: http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428
-              query: sum(rate(vllm:num_requests_waiting{pod=~"llama-8b-predictor.*"}[2m]))
+              query: sum(rate(vllm:num_requests_waiting{pod=~"qwen3-14b-predictor.*"}[2m]))
             target:
               type: Value
               value: "1"
@@ -32,18 +32,12 @@ spec:
         operator: "Equal"
         value: "true"
         effect: "NoSchedule"
-
     model:
       modelFormat:
         name: huggingface
-      storageUri: "s3://vllm-models/llama-3.1-8b"
+      storageUri: "s3://vllm-models/qwen3-14b"
       runtime: kserve-vllmserver
       args:
-        # ── CPU-only (current) ────────────────────────────────────────
-        # Upgrade path for Intel Arc Pro B65:
-        #   - change --device=cpu  → --device=xpu
-        #   - change --dtype=bfloat16 → --dtype=float16
-        #   - add resources.limits: gpu.intel.com/i915: "1"
         - "--device=cpu"
         - "--dtype=bfloat16"
         - "--block-size=128"
@@ -52,7 +46,6 @@ spec:
         - "--max-num-batched-tokens=2048"
         - "--max-num-seqs=64"
       env:
-        # CPU tuning from vLLM docs: reserve framework cores and size CPU KV cache explicitly.
         - name: VLLM_CPU_OMP_THREADS_BIND
           value: "auto"
         - name: VLLM_CPU_NUM_OF_RESERVED_CPU
@@ -61,12 +54,11 @@ spec:
           value: "24"
       resources:
         requests:
-          cpu: "8"
-          memory: "24Gi"
-        limits:
           cpu: "12"
-          memory: "48Gi"
-      # Model weights are staged on fast NFS for local caching after the RustFS cold start.
+          memory: "32Gi"
+        limits:
+          cpu: "16"
+          memory: "64Gi"
       storageSpec:
         storageClassName: tns-csi-fast-nfs
         accessModes:

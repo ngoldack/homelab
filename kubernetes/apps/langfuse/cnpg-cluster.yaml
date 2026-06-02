@@ -9,7 +9,7 @@ spec:
   # Set up a volume claim spec
   storage:
     size: 10Gi
-    storageClass: tns-csi-fast-nfs
+    storageClass: tns-csi-fast-nvmeof
 
   # Database configuration
   bootstrap:

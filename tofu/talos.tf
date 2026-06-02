@@ -10,6 +10,7 @@ data "talos_machine_configuration" "controlplane" {
   machine_type     = "controlplane"
   machine_secrets  = talos_machine_secrets.this.machine_secrets
   talos_version    = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   # Patch control plane nodes to:
   # 1. Disable the default Flannel CNI (so we can use Cilium)
@@ -89,6 +90,7 @@ data "talos_machine_configuration" "worker" {
   machine_type     = "worker"
   machine_secrets  = talos_machine_secrets.this.machine_secrets
   talos_version    = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   config_patches = concat(
     [
@@ -161,7 +163,7 @@ data "talos_machine_configuration" "worker" {
 resource "talos_machine_configuration_apply" "controlplane" {
   for_each                    = { for k, v in local.vm_instances : k => v if v.talos_role == "controlplane" }
   client_configuration        = talos_machine_secrets.this.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.controlplane.machine_config
+  machine_configuration_input = data.talos_machine_configuration.controlplane.machine_configuration
   node                        = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
 }
 
@@ -169,7 +171,7 @@ resource "talos_machine_configuration_apply" "controlplane" {
 resource "talos_machine_configuration_apply" "worker" {
   for_each                    = { for k, v in local.vm_instances : k => v if v.talos_role == "worker" }
   client_configuration        = talos_machine_secrets.this.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.worker[each.value.pool_name].machine_config
+  machine_configuration_input = data.talos_machine_configuration.worker[each.value.pool_name].machine_configuration
   node                        = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
 }
 
@@ -181,7 +183,7 @@ data "talos_client_configuration" "this" {
 }
 
 # Bootstrap the cluster on the first master node
-resource "talos_cluster_bootstrap" "this" {
+resource "talos_machine_bootstrap" "this" {
   depends_on           = [talos_machine_configuration_apply.controlplane]
   client_configuration = talos_machine_secrets.this.client_configuration
   node                 = [for k, v in local.vm_instances : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
@@ -189,7 +191,7 @@ resource "talos_cluster_bootstrap" "this" {
 
 # Retrieve kubeconfig from the bootstrapped cluster
 resource "talos_cluster_kubeconfig" "this" {
-  depends_on           = [talos_cluster_bootstrap.this]
+  depends_on           = [talos_machine_bootstrap.this]
   client_configuration = talos_machine_secrets.this.client_configuration
   node                 = [for k, v in local.vm_instances : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
 }

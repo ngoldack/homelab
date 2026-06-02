@@ -1,17 +1,17 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.6.0"
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = ">= 0.60.0"
+      version = "~> 0.60"
     }
     talos = {
       source  = "siderolabs/talos"
-      version = ">= 0.4.0"
+      version = "~> 0.5"
     }
     sops = {
       source  = "carlpett/sops"
-      version = ">= 1.0.0"
+      version = "~> 1.0"
     }
   }
 
@@ -26,6 +26,10 @@ terraform {
     }
 
     state {
+      method = method.aes_gcm.aes
+    }
+
+    plan {
       method = method.aes_gcm.aes
     }
   }

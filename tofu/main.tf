@@ -9,7 +9,6 @@ locals {
         disk_size         = pool.disk_size
         talos_role        = pool.talos_role
         index             = idx
-        enable_gvisor     = pool.enable_gvisor
         enable_secure_nic = pool.enable_secure_nic
         extensions        = pool.extensions
         taints            = pool.taints
@@ -79,6 +78,8 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     type = "l26" # Linux 2.6+ Kernel
   }
 
-  # Define VM boot order to ensure it boots from CDROM first to boot into the Talos live ISO
-  boot_order = ["cdrom", "scsi0"]
+  # Define VM boot order. Disk (scsi0) is preferred so that after Talos installs to
+  # disk on first boot and reboots, the VM boots the installed system rather than the
+  # live ISO again. The CDROM remains as a fallback for the initial install boot.
+  boot_order = ["scsi0", "cdrom"]
 }

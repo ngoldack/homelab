@@ -129,9 +129,13 @@ jobs:
       run:
         working-directory: tofu
     env:
-      # Offline syntax/validate only — no real state is read or written, so a
-      # throwaway passphrase satisfies the pbkdf2 key provider (min 16 chars).
-      TF_ENCRYPTION_PASSPHRASE_statekey: ci-offline-validate-dummy-passphrase
+      # Offline syntax/validate only — no real state is read or written. The
+      # pbkdf2 key provider still builds its key eagerly during init, so supply
+      # a throwaway passphrase via TF_ENCRYPTION (merged over the code block).
+      TF_ENCRYPTION: >-
+        key_provider "pbkdf2" "statekey" {
+          passphrase = "ci-offline-validate-dummy-passphrase"
+        }
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

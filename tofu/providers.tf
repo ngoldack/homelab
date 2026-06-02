@@ -18,7 +18,7 @@ terraform {
   # Enable native OpenTofu state file encryption
   encryption {
     key_provider "pbkdf2" "statekey" {
-      passphrase = "" # Empty indicates statekey should be supplied via TF_ENCRYPTION_PASSPHRASE_statekey/TOFU_ENCRYPTION_PASSPHRASE_statekey env vars
+      passphrase = "" # Supplied at runtime via the TF_ENCRYPTION env var (key_provider.pbkdf2.statekey passphrase); never hardcoded.
     }
 
     method "aes_gcm" "aes" {

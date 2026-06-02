@@ -109,8 +109,9 @@ tasks:
     desc: Validate all Kustomize overlays
     cmds:
       - kustomize build kubernetes/clusters/production > /dev/null && echo "OK clusters/production"
-      - kustomize build kubernetes/infrastructure > /dev/null && echo "OK infrastructure"
-      - kustomize build kubernetes/apps > /dev/null && echo "OK apps"
+      - kustomize build kubernetes/infrastructure/controllers > /dev/null && echo "OK infrastructure/controllers"
+      - kustomize build kubernetes/infrastructure/configs > /dev/null && echo "OK infrastructure/configs"
+      - kustomize build kubernetes/apps/production > /dev/null && echo "OK apps/production"
 
   flux:bootstrap:
     desc: Bootstrap Flux onto the cluster. Attempts SSH-based Git bootstrap to bypass GitHub API restrictions.

@@ -196,8 +196,9 @@ jobs:
               | kubeconform -strict -ignore-missing-schemas -summary -verbose=false
           }
           validate kubernetes/clusters/production
-          validate kubernetes/infrastructure
-          validate kubernetes/apps
+          validate kubernetes/infrastructure/controllers
+          validate kubernetes/infrastructure/configs
+          validate kubernetes/apps/production
 
       - name: Install yq
         run: |

@@ -5,7 +5,11 @@
 This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu for VM provisioning and Flux CD for GitOps delivery. Two main directories:
 
 - `tofu/` — OpenTofu infrastructure code (Proxmox VMs, Talos machine configs, secrets). Uses `bpg/proxmox` and `siderolabs/talos` providers.
-- `kubernetes/` — Kubernetes manifests reconciled by Flux. Core infrastructure (`cilium`, `cert-manager`, `crowdsec`) lives under `kubernetes/infrastructure/`; user apps (`langfuse`, `authentik`) go under `kubernetes/apps/`.
+- `kubernetes/` — Kubernetes manifests reconciled by Flux, following the canonical Flux layout:
+  - `kubernetes/clusters/production/` — Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`).
+  - `kubernetes/infrastructure/controllers/` — operators, agents, CNI/CSI, and the central Helm `sources.yaml` (e.g. `cilium`, `cert-manager`, `crowdsec`).
+  - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers (`cluster-issuers`, `kyverno-policies`).
+  - `kubernetes/apps/base/<app>/` — shared application manifests; `kubernetes/apps/production/<app>/` — per-cluster overlays (e.g. `langfuse`, `authentik`).
 
 ## Conventions
 
@@ -16,10 +20,10 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 - Node pools are defined as a single `map(object)` variable in `variables.tf`. Do not add individual variables per node type.
 
 ### Kubernetes (`kubernetes/`)
-- All HelmRelease resources reference a `HelmRepository` defined in `kubernetes/infrastructure/configs/sources.yaml`. Do not inline `chart.spec.url`.
+- All HelmRelease resources reference a `HelmRepository` defined in `kubernetes/infrastructure/controllers/sources.yaml`. Do not inline `chart.spec.url`.
 - Encrypted secrets must use the `.sops.yaml` filename suffix and be encrypted with the age key declared in `.sops.yaml`.
-- New applications belong in `kubernetes/apps/` as a subdirectory with their own `kustomization.yaml`. Add a `resources:` entry in `kubernetes/apps/kustomization.yaml`.
-- Both Flux `Kustomization` objects (`infrastructure` and `apps`) include a `decryption.provider: sops` block. Preserve this on edits.
+- New applications belong in `kubernetes/apps/base/<app>/` with their own `kustomization.yaml`, exposed per cluster via a thin overlay in `kubernetes/apps/production/<app>/`. Add a `resources:` entry to `kubernetes/apps/production/kustomization.yaml`.
+- All three Flux `Kustomization` objects (`infra-controllers`, `infra-configs`, `apps`) include a `decryption.provider: sops` block. Preserve this on edits.
 
 ### Secrets & Encryption
 - Encryption uses **age** via **SOPS**. The public key anchor is `homelab_age_key` in `.sops.yaml`. Do not add a second key provider without updating both path rules.
@@ -47,7 +51,7 @@ When installing or modifying any application in this cluster context, AI agents 
 
 ### 2. Security & Policy (Cilium & CrowdSec)
 - **Log Scraping Ingest**: If the application has public ingress, is an authentication provider, or handles sensitive routing, its logs must be fed into the CrowdSec engine. 
-- **Acquisition Additions**: Add matching target parameters inside `kubernetes/infrastructure/crowdsec/helmrelease.yaml` under `values.agent.acquisition` to target target namespaces and parse application pods.
+- **Acquisition Additions**: Add matching target parameters inside `kubernetes/infrastructure/controllers/crowdsec/helmrelease.yaml` under `values.agent.acquisition` to target target namespaces and parse application pods.
 - **Cilium Ingress Engine Linkages**: Ensure that custom application routing maps to Cilium's eBPF components. When possible, deploy Cilium-specific annotations to integrate and capture traffic drops.
 
 ### 3. Identity Provider (Authentik) Checks
@@ -55,7 +59,7 @@ When installing or modifying any application in this cluster context, AI agents 
 - **Environment API Integration**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `secrets.sops.yaml` (e.g., `CROWDSEC_BOUNCER_KEY` maps to the corresponding registered Local API bouncer identity).
 
 ### 4. Code compliance & Validation
-- **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps` and `kustomize build kubernetes/infrastructure`.
+- **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps/production` and `kustomize build kubernetes/infrastructure/controllers` (and `.../configs`).
 - **Linter Compliance**: Newly created templates must pass `yamllint -c .yamllint` checks cleanly before committing.
 - **Secrets Encryption**: When declaring secrets, make sure you write them to `.sops.yaml` files, configure encryption path rules under `.sops.yaml`, and then encrypt them instantly in place using active workstation tooling (`sops --encrypt --in-place ...`).
 
@@ -67,8 +71,9 @@ cd tofu && tofu init -backend=false && tofu validate
 
 # Validate Kubernetes manifests
 kustomize build kubernetes/clusters/production
-kustomize build kubernetes/infrastructure
-kustomize build kubernetes/apps
+kustomize build kubernetes/infrastructure/controllers
+kustomize build kubernetes/infrastructure/configs
+kustomize build kubernetes/apps/production
 
 # Lint YAML
 yamllint -c .yamllint kubernetes/

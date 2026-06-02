@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: qwen25-coder-7b
+  name: whisper
   namespace: vllm
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
@@ -12,7 +12,7 @@ metadata:
     prometheus.io/path: "/metrics"
 spec:
   predictor:
-    minReplicas: 0
+    minReplicas: 1
     maxReplicas: 1
     nodeSelector:
       ai: "true"
@@ -23,33 +23,29 @@ spec:
         effect: "NoSchedule"
     model:
       modelFormat:
-        name: huggingface
-      storageUri: "s3://vllm-models/qwen2.5-coder-7b"
-      runtime: kserve-vllmserver
+        name: whisper
+      storageUri: "s3://vllm-models/whisper-large-v3"
+      runtime: kserve-vllm-whisper
       args:
         - "--device=cpu"
         - "--dtype=bfloat16"
-        - "--max-model-len=4096"
-        - "--max-num-batched-tokens=2048"
-        - "--max-num-seqs=64"
       env:
+        # Pin Whisper to the top E-cores, isolated from voice LLM and big models.
         - name: VLLM_CPU_OMP_THREADS_BIND
-          value: "0-15"
-        - name: VLLM_CPU_NUM_OF_RESERVED_CPU
-          value: "1"
+          value: "28-31"
         - name: VLLM_CPU_KVCACHE_SPACE
-          value: "8"
+          value: "2"
       resources:
         requests:
-          cpu: "8"
-          memory: "18Gi"
+          cpu: "2"
+          memory: "3Gi"
         limits:
-          cpu: "14"
-          memory: "26Gi"
+          cpu: "4"
+          memory: "6Gi"
       storageSpec:
         storageClassName: tns-csi-fast-nfs
         accessModes:
           - ReadWriteOnce
         resources:
           requests:
-            storage: 50Gi
+            storage: 10Gi

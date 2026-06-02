@@ -8,7 +8,7 @@ spec:
     enabled: true
     model: fast
     backend: openai
-    baseUrl: http://llama-8b-predictor.vllm.svc.cluster.local/v1
+    baseUrl: http://llama-3-2-3b-predictor.vllm.svc.cluster.local/v1
   noCache: false
   filters:
     - Pod

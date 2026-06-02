@@ -5,26 +5,17 @@ metadata:
   namespace: vllm
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
-    serving.kserve.io/autoscalerClass: keda
+    # Scale-from-zero is driven by the KEDA http-add-on interceptor (see
+    # http-scaledobjects.yaml), not by KServe's own autoscaler.
+    serving.kserve.io/autoscalerClass: none
     serving.kserve.io/secretName: vllm-s3-credentials
     prometheus.io/scrape: "true"
     prometheus.io/port: "8080"
     prometheus.io/path: "/metrics"
 spec:
   predictor:
-    minReplicas: 1
-    maxReplicas: 2
-    autoScaling:
-      metrics:
-        - type: External
-          external:
-            metric:
-              backend: prometheus
-              serverAddress: http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428
-              query: sum(rate(vllm:num_requests_waiting{pod=~"llama-8b-predictor.*"}[2m]))
-            target:
-              type: Value
-              value: "1"
+    minReplicas: 0
+    maxReplicas: 1
     nodeSelector:
       ai: "true"
     tolerations:
@@ -32,7 +23,6 @@ spec:
         operator: "Equal"
         value: "true"
         effect: "NoSchedule"
-
     model:
       modelFormat:
         name: huggingface
@@ -46,26 +36,24 @@ spec:
         #   - add resources.limits: gpu.intel.com/i915: "1"
         - "--device=cpu"
         - "--dtype=bfloat16"
-        - "--block-size=128"
         - "--max-model-len=4096"
-        - "--cpu-memory-utilization=0.85"
         - "--max-num-batched-tokens=2048"
         - "--max-num-seqs=64"
       env:
-        # CPU tuning from vLLM docs: reserve framework cores and size CPU KV cache explicitly.
+        # Bind to the 8 P-cores (logical 0-15); reserve 1 core for the framework.
         - name: VLLM_CPU_OMP_THREADS_BIND
-          value: "auto"
+          value: "0-15"
         - name: VLLM_CPU_NUM_OF_RESERVED_CPU
-          value: "2"
+          value: "1"
         - name: VLLM_CPU_KVCACHE_SPACE
-          value: "24"
+          value: "8"
       resources:
         requests:
           cpu: "8"
-          memory: "24Gi"
+          memory: "20Gi"
         limits:
-          cpu: "12"
-          memory: "48Gi"
+          cpu: "14"
+          memory: "28Gi"
       # Model weights are staged on fast NFS for local caching after the RustFS cold start.
       storageSpec:
         storageClassName: tns-csi-fast-nfs

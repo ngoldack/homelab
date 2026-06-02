@@ -5,7 +5,7 @@ metadata:
   namespace: vllm
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
-    serving.kserve.io/autoscalerClass: keda
+    serving.kserve.io/autoscalerClass: none
     serving.kserve.io/secretName: vllm-s3-credentials
     prometheus.io/scrape: "true"
     prometheus.io/port: "8080"
@@ -13,18 +13,7 @@ metadata:
 spec:
   predictor:
     minReplicas: 0
-    maxReplicas: 2
-    autoScaling:
-      metrics:
-        - type: External
-          external:
-            metric:
-              backend: prometheus
-              serverAddress: http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428
-              query: sum(rate(vllm:num_requests_waiting{pod=~"qwen3-14b-predictor.*"}[2m]))
-            target:
-              type: Value
-              value: "1"
+    maxReplicas: 1
     nodeSelector:
       ai: "true"
     tolerations:
@@ -40,25 +29,23 @@ spec:
       args:
         - "--device=cpu"
         - "--dtype=bfloat16"
-        - "--block-size=128"
         - "--max-model-len=4096"
-        - "--cpu-memory-utilization=0.85"
         - "--max-num-batched-tokens=2048"
         - "--max-num-seqs=64"
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
-          value: "auto"
+          value: "0-15"
         - name: VLLM_CPU_NUM_OF_RESERVED_CPU
-          value: "2"
+          value: "1"
         - name: VLLM_CPU_KVCACHE_SPACE
-          value: "24"
+          value: "10"
       resources:
         requests:
-          cpu: "12"
-          memory: "32Gi"
+          cpu: "8"
+          memory: "36Gi"
         limits:
-          cpu: "16"
-          memory: "64Gi"
+          cpu: "14"
+          memory: "52Gi"
       storageSpec:
         storageClassName: tns-csi-fast-nfs
         accessModes:

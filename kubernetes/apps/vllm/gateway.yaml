@@ -14,6 +14,9 @@ spec:
         namespaces:
           from: Same
 ---
+# ── On-demand models ─────────────────────────────────────────────────────────
+# Routed through the KEDA http-add-on interceptor so the first request scales the
+# target from zero. The interceptor uses the Host header to pick the backend.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -30,8 +33,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: llama-8b-predictor
-          port: 80
+        - name: keda-add-ons-http-interceptor-proxy
+          namespace: keda
+          port: 8080
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -49,8 +53,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: qwen3-14b-predictor
-          port: 80
+        - name: keda-add-ons-http-interceptor-proxy
+          namespace: keda
+          port: 8080
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -68,5 +73,46 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: qwen25-coder-7b-predictor
+        - name: keda-add-ons-http-interceptor-proxy
+          namespace: keda
+          port: 8080
+---
+# ── Always-on services ───────────────────────────────────────────────────────
+# Voice LLM and Whisper are minReplicas:1, so route straight to their predictors.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: voice-llm
+  namespace: vllm
+spec:
+  parentRefs:
+    - name: vllm-gateway
+  hostnames:
+    - voice.vllm.home.arpa
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: llama-3-2-3b-predictor
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: whisper
+  namespace: vllm
+spec:
+  parentRefs:
+    - name: vllm-gateway
+  hostnames:
+    - whisper.vllm.home.arpa
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: whisper-predictor
           port: 80

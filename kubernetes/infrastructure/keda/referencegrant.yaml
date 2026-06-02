@@ -1,0 +1,16 @@
+# Allow HTTPRoutes in the vllm namespace to reference the http-add-on
+# interceptor Service that lives in the keda namespace.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: vllm-to-interceptor
+  namespace: keda
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: vllm
+  to:
+    - group: ""
+      kind: Service
+      name: keda-add-ons-http-interceptor-proxy

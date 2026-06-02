@@ -5,15 +5,17 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m0s
-  path: ./kubernetes/apps
+  path: ./kubernetes/apps/production
   prune: true
+  wait: true
+  timeout: 15m
+  retryInterval: 1m
   sourceRef:
     kind: GitRepository
     name: flux-system
-  timeout: 5m
   decryption:
     provider: sops
     secretRef:
       name: sops-age
   dependsOn:
-    - name: infrastructure
+    - name: infra-configs

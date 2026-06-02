@@ -1,0 +1,31 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: local-path-provisioner
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: storage
+  chart:
+    spec:
+      chart: local-path-provisioner
+      version: "0.0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: local-path
+        namespace: flux-system
+  install:
+    createNamespace: true
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    storageClass:
+      create: true
+      name: local-ephemeral
+      defaultClass: false
+      reclaimPolicy: Delete
+      volumeBindingMode: WaitForFirstConsumer
+
+    # Keep local PVs node-local and disposable for ephemeral/cached workloads.
+    pathPattern: "{{ .PVC.Namespace }}-{{ .PVC.Name }}"

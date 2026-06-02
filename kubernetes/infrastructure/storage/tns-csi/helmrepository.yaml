@@ -1,9 +1,0 @@
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: tns-csi
-  namespace: flux-system
-spec:
-  interval: 2h
-  type: oci
-  url: oci://registry-1.docker.io/bfenski

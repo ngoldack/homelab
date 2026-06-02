@@ -5,11 +5,12 @@ resource "talos_machine_secrets" "this" {
 
 # Generate control plane machine configuration
 data "talos_machine_configuration" "controlplane" {
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = "controlplane"
-  machine_secrets  = talos_machine_secrets.this.machine_secrets
-  talos_version    = var.talos_version
+  cluster_name       = var.cluster_name
+  cluster_endpoint   = var.cluster_endpoint
+  machine_type       = "controlplane"
+  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   # Patch control plane nodes to:
   # 1. Disable the default Flannel CNI (so we can use Cilium)
@@ -84,11 +85,12 @@ data "talos_machine_configuration" "controlplane" {
 data "talos_machine_configuration" "worker" {
   for_each = { for k, v in var.node_pools : k => v if v.talos_role == "worker" }
 
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = "worker"
-  machine_secrets  = talos_machine_secrets.this.machine_secrets
-  talos_version    = var.talos_version
+  cluster_name       = var.cluster_name
+  cluster_endpoint   = var.cluster_endpoint
+  machine_type       = "worker"
+  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   config_patches = concat(
     [

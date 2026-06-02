@@ -1,24 +1,24 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.6.0"
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = ">= 0.60.0"
+      version = "~> 0.60"
     }
     talos = {
       source  = "siderolabs/talos"
-      version = ">= 0.4.0"
+      version = "~> 0.5"
     }
     sops = {
       source  = "carlpett/sops"
-      version = ">= 1.0.0"
+      version = "~> 1.0"
     }
   }
 
   # Enable native OpenTofu state file encryption
   encryption {
     key_provider "pbkdf2" "statekey" {
-      passphrase = "" # Empty indicates statekey should be supplied via TF_ENCRYPTION_PASSPHRASE_statekey/TOFU_ENCRYPTION_PASSPHRASE_statekey env vars
+      passphrase = "" # Supplied at runtime via the TF_ENCRYPTION env var (key_provider.pbkdf2.statekey passphrase); never hardcoded.
     }
 
     method "aes_gcm" "aes" {
@@ -26,6 +26,10 @@ terraform {
     }
 
     state {
+      method = method.aes_gcm.aes
+    }
+
+    plan {
       method = method.aes_gcm.aes
     }
   }

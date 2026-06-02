@@ -35,7 +35,8 @@ variable "cluster_name" {
 variable "talos_version" {
   description = "Talos OS version"
   type        = string
-  default     = "v1.7.5"
+  # renovate: datasource=github-releases depName=siderolabs/talos
+  default = "v1.7.5"
 }
 
 variable "kubernetes_version" {
@@ -130,5 +131,29 @@ variable "node_pools" {
         { key = "ai", value = "true", effect = "NoSchedule" },
       ]
     }
+  }
+
+  validation {
+    condition     = alltrue([for p in values(var.node_pools) : contains(["controlplane", "worker"], p.talos_role)])
+    error_message = "Each node pool talos_role must be either \"controlplane\" or \"worker\"."
+  }
+
+  validation {
+    condition     = alltrue([for p in values(var.node_pools) : p.count > 0])
+    error_message = "Each node pool count must be greater than 0."
+  }
+
+  validation {
+    condition     = alltrue([for p in values(var.node_pools) : p.cpu_cores > 0 && p.memory > 0 && p.disk_size > 0])
+    error_message = "Each node pool must have positive cpu_cores, memory, and disk_size."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in values(var.node_pools) : alltrue([
+        for t in p.taints : contains(["NoSchedule", "PreferNoSchedule", "NoExecute"], t.effect)
+      ])
+    ])
+    error_message = "Taint effect must be one of NoSchedule, PreferNoSchedule, or NoExecute."
   }
 }

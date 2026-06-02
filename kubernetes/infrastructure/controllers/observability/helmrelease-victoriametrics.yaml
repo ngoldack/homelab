@@ -1,0 +1,34 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-metrics-single
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: monitoring
+  chart:
+    spec:
+      chart: victoria-metrics-single
+      version: "0.24.x"
+      sourceRef:
+        kind: HelmRepository
+        name: vm
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    server:
+      retentionPeriod: "14d"
+      persistentVolume:
+        enabled: true
+        storageClassName: tns-csi-fast-nfs
+        size: 10Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi

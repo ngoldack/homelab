@@ -1,0 +1,51 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tns-csi-driver
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: storage
+  chart:
+    spec:
+      chart: tns-csi
+      version: "0.17.6"
+      sourceRef:
+        kind: HelmRepository
+        name: tns-csi
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  valuesFrom:
+    - kind: Secret
+      name: tns-csi-credentials
+      valuesKey: apiKey
+      targetPath: truenas.apiKey
+  values:
+    truenas:
+      url: wss://YOUR-TRUENAS-IP:443/api/current  # TODO: set to your TrueNAS API websocket endpoint
+
+    # Storage tiers managed by the CSI driver.
+    # - bulk: tank (HDD RAIDZ1) for capacity-focused workloads
+    # - medium: fast pool over NFS for general-purpose PVCs (default tier)
+    # - fast: fast pool over NVMeoF for latency-sensitive/block workloads (DBs)
+    storageClasses:
+      - name: tns-csi-bulk-nfs
+        protocol: nfs
+        pool: tank
+        defaultClass: false
+      - name: tns-csi-medium-nfs
+        protocol: nfs
+        pool: fast
+        defaultClass: true
+      - name: tns-csi-fast-nvmeof
+        protocol: nvmeof
+        pool: fast
+        defaultClass: false
+      # Compatibility class to keep legacy references working during migration.
+      - name: tns-csi-fast-nfs
+        protocol: nfs
+        pool: fast
+        defaultClass: false

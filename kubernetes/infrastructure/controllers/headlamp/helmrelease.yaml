@@ -1,0 +1,68 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: headlamp
+  chart:
+    spec:
+      chart: headlamp
+      version: "0.24.x"
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    # Service settings to expose locally or ingress configuration
+    service:
+      type: ClusterIP
+      port: 80
+
+    # Enable native plugins support.
+    # Headlamp plugins can be dynamically loaded at the browser side or pre-served from the cluster
+    config:
+      pluginsDir: "/headlamp/plugins"
+      # Secure login config
+      oidc:
+        clientID: ""
+        clientSecret: ""
+        issuerURL: ""
+        scopes: ""
+
+    # Enable native Node.js pluginsManager for automatic plug-and-play plugin resolution by Flux config!
+    # Instead of manual bash wget downloads, we provide a unified plugin configuration file.
+    # The sidecar will install, index, and load all these extensions on-the-fly dynamically.
+    pluginsManager:
+      enabled: true
+      configFile: "plugin.yaml"
+      configContent: |
+        plugins:
+          - name: "@headlamp-k8s/gatekeeper"
+            source: "https://github.com/sozercan/gatekeeper-headlamp-plugin"
+          - name: "@headlamp-k8s/ai-assistant"
+            source: "https://github.com/headlamp-k8s/plugins/tree/main/ai-assistant"
+          - name: "@headlamp-k8s/knative"
+            source: "https://github.com/headlamp-k8s/plugins/tree/main/knative"
+          - name: "@headlamp-k8s/cert-manager"
+            source: "https://github.com/headlamp-k8s/plugins/tree/main/cert-manager"
+          - name: "@headlamp-k8s/flux"
+            source: "https://github.com/headlamp-k8s/plugins/tree/main/flux"
+          - name: "@headlamp-k8s/keda"
+            source: "https://github.com/headlamp-k8s/plugins/tree/main/keda"
+          - name: "@headlamp-k8s/trivy"
+            source: "https://github.com/kubebeam/trivy-headlamp-plugin"
+
+    # Enable initContainers or script logic to configure relevant default plugins:
+    # 1. Prometheus / Metrics plugin
+    # 2. Local-storage or Volume manager viewer
+    # 3. Knative / KServe visualizer elements
+    volumeMounts:
+      - name: plugins
+        mountPath: /headlamp/plugins
+    volumes:
+      - name: plugins
+        emptyDir: {}

@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Helm chart sources (HelmRepository definitions) consumed by the controllers below
+  - sources.yaml
+  # Networking & CRDs
+  - gateway-api
+  - cilium
+  # Certificates
+  - cert-manager
+  # Storage
+  - storage/local-path
+  - storage/tns-csi
+  # Observability
+  - observability
+  # Security & runtime enforcement
+  - security
+  - tetragon
+  - crowdsec
+  # Networking overlay
+  - netbird
+  # Data operators
+  - cnpg-operator
+  - valkey-operator
+  # AI/ML serving & autoscaling
+  - kserve-operator
+  - keda
+  # Object storage
+  - s3-provisioner
+  # Platform services
+  - backup
+  - k8sgpt
+  - headlamp

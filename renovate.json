@@ -1,28 +1,76 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
   ],
-  "flux": {
-    "fileMatch": ["(^|/)kubernetes/.+\\.yaml$"]
-  },
-  "kubernetes": {
-    "fileMatch": ["(^|/)kubernetes/.+\\.yaml$"]
-  },
-  "opentofu": {
-    "enabled": true,
-    "fileMatch": ["(^|/)tofu/.+\\.tf$"]
-  },
   "minimumReleaseAge": "7d",
+  "flux": {
+    "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"]
+  },
+  "terraform": {
+    "enabled": true,
+    "managerFilePatterns": ["/(^|/)tofu/.+\\.tf$/"]
+  },
+  "customManagers": [
+    {
+      "description": "Container images referenced directly in manifests, CRDs (e.g. KServe ServingRuntime) and HelmRelease values — covers what the built-in kubernetes manager cannot parse",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)kubernetes/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "image:\\s+[\"']?(?<depName>[^\\s:\"']+):(?<currentValue>[^\\s\"'@]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?[\"']?"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Talos system-extension images pinned in OpenTofu",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)tofu/.+\\.tf$/"],
+      "matchStrings": [
+        "\"(?<depName>ghcr\\.io/siderolabs/[^:\"]+):(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Versions annotated with an inline `# renovate:` comment (Talos OS, Gateway API CRDs, …)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)tofu/.+\\.tf$/", "/(^|/)kubernetes/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n[^\\n]*?(?<currentValue>v?\\d+\\.\\d+\\.\\d+[^\\s\"'/]*)"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    }
+  ],
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
+      "description": "Automerge low-risk updates after the cooldown window",
+      "matchUpdateTypes": ["minor", "patch", "digest"],
       "automerge": true,
       "labels": ["automerge", "dependencies"]
     },
     {
+      "description": "Cluster-critical components are never automerged, even for minor/patch",
+      "matchPackageNames": [
+        "/talos/",
+        "/cilium/",
+        "/cert-manager/",
+        "/kyverno/",
+        "bpg/proxmox"
+      ],
+      "automerge": false,
+      "labels": ["needs-review", "dependencies"]
+    },
+    {
+      "description": "Surface major updates for manual review",
       "matchUpdateTypes": ["major"],
+      "automerge": false,
       "labels": ["major-upgrade", "dependencies"]
+    },
+    {
+      "description": "Group Talos OS and its system extensions into a single PR",
+      "matchPackageNames": ["siderolabs/talos", "/^ghcr\\.io\\/siderolabs\\//"],
+      "groupName": "talos"
     }
   ]
 }

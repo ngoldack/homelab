@@ -1,0 +1,75 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: authentik
+  chart:
+    spec:
+      chart: authentik
+      version: "2024.4.2"
+      sourceRef:
+        kind: HelmRepository
+        name: authentik
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Disable embedded stateful services in favor of cloud-native operators
+    postgresql:
+      enabled: false
+    redis:
+      enabled: false
+
+    # Core Authentik configuration. The chart maps authentik.* onto AUTHENTIK_* settings.
+    authentik:
+      postgresql:
+        host: "authentik-postgres-rw.authentik.svc.cluster.local"
+        name: "authentik"
+        user: "authentik"
+        port: 5432
+      redis:
+        host: "authentik-valkey.authentik.svc.cluster.local"
+        port: 6379
+      email:
+        host: "localhost"
+        port: 25
+        use_tls: false
+
+    # Secrets and the CrowdSec bouncer key are injected via env so they can reference
+    # SOPS-managed Kubernetes Secrets instead of being inlined as plaintext values.
+    # global.env applies to both the server and worker deployments.
+    global:
+      env:
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-postgres-app
+              key: password
+        - name: AUTHENTIK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: secret-key
+        - name: CROWDSEC_BOUNCER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: authentik-bouncer-key
+
+    server:
+      replicas: 1
+
+    worker:
+      replicas: 1
+
+    # Load the CrowdSec IP-reputation policy blueprint via the chart-native mechanism
+    # so it is reliably discovered and imported by the worker.
+    blueprints:
+      configMaps:
+        - crowdsec-authentik-blueprint

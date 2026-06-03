@@ -29,7 +29,6 @@ resources:
   - minio-operator
   # Infrastructure-as-data control plane (provisions MinIO buckets/users/policies)
   - crossplane
-  - s3-provisioner
   # Platform services
   - backup
   - k8sgpt

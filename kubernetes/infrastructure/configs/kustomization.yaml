@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - cluster-issuers
   - kyverno-policies
+  - object-storage

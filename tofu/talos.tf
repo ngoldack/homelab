@@ -1,6 +1,13 @@
 # Generate Talos cluster-wide machine secrets
 resource "talos_machine_secrets" "this" {
   talos_version = var.talos_version
+
+  # These secrets are the root of trust for the whole cluster (etcd CA, Talos PKI,
+  # bootstrap tokens). Losing them means re-bootstrapping from scratch, so guard
+  # against accidental `tofu destroy`/replacement.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Generate control plane machine configuration
@@ -83,6 +90,18 @@ data "talos_machine_configuration" "controlplane" {
           }
         }
       }),
+      # Pin the Talos install target explicitly. Each VM has a single root disk
+      # (scsi0); selecting by size avoids ambiguity and prevents Talos from ever
+      # picking an unexpected device.
+      yamlencode({
+        machine = {
+          install = {
+            diskSelector = {
+              size = ">= 10GB"
+            }
+          }
+        }
+      }),
     ],
     length(var.talos_default_extensions) > 0 ? [
       yamlencode({
@@ -146,6 +165,16 @@ data "talos_machine_configuration" "worker" {
                 readOnly  = true
               }
             ]
+          }
+        }
+      }),
+      # Pin the Talos install target explicitly (single root disk per VM).
+      yamlencode({
+        machine = {
+          install = {
+            diskSelector = {
+              size = ">= 10GB"
+            }
           }
         }
       }),

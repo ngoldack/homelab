@@ -22,9 +22,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: khoj
-          # Pinned to the latest stable 1.x line for reproducible GitOps (was
-          # :latest). The 2.0.0-beta line is intentionally avoided for stability.
-          image: ghcr.io/khoj-ai/khoj:1.42.10
+          # Pinned to the latest 2.0.0-beta build for reproducible GitOps (was
+          # :latest). Self-host image entrypoint is `python3 src/khoj/main.py`, so
+          # the CLI args below remain valid in the 2.0 line.
+          image: ghcr.io/khoj-ai/khoj:2.0.0-beta.28
           # NOTE: the Khoj image runs as root (HOME=/root, PVCs mount under
           # /root/.khoj and /root/.cache), so runAsNonRoot/readOnlyRootFilesystem
           # are not enforced here. Capabilities are still dropped and privilege
@@ -118,6 +119,14 @@ spec:
               port: http
             initialDelaySeconds: 30
             periodSeconds: 20
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: config
           persistentVolumeClaim:

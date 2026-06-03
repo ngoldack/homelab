@@ -31,7 +31,7 @@ spec:
       port: 5432
       username: n8n
       database: n8n
-      existingSecret: n8n-app-secrets
+      existingSecret: n8n-postgres-credentials
 
     # ── Queue mode backed by the Valkey operator instance ───────────────────
     redis:

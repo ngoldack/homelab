@@ -1,7 +1,6 @@
-# CloudNativePG uses n8n-postgres-credentials (basic-auth) for the owner role so the
-# password is known and can be shared with the n8n chart (which needs a secret key
-# named `postgres-password`). Keep the password value in sync across both secrets in
-# secret.sops.yaml.
+# CloudNativePG uses n8n-postgres-credentials (basic-auth) for the owner role. That
+# same secret also carries a `postgres-password` key consumed by the n8n chart, so
+# the password is defined once (single source of truth). See secret.sops.yaml.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:

@@ -28,18 +28,25 @@ spec:
           - mountPath: /plugins
             name: plugins
 
-    # S3-compatible Backup Storage Location
+    # S3-compatible Backup Storage Location — OVH Object Storage (offsite DR).
+    # All backup streams share one OVH bucket, separated by object prefixes:
+    #   k8s-backups/   -> Velero (this BSL)
+    #   etcd-backups/  -> talos-backup
+    #   cnpg/<app>/    -> CloudNativePG Barman
     configuration:
       backupStorageLocation:
-        - name: truenas-rustfs
+        - name: ovh-dr
           provider: aws
-          bucket: k8s-backups-rustfs
+          # CHANGEME: replace with your OVH Object Storage (S3) bucket name.
+          bucket: changeme-ovh-dr-bucket
+          prefix: k8s-backups
           default: true
           config:
-            region: us-east-1
+            # CHANGEME: set to your OVH region (e.g. gra, sbg, de, waw, bhs).
+            region: gra
             s3ForcePathStyle: true
-            # TrueNAS RustFS S3 endpoint (canonical internal hostname).
-            s3Url: http://nas-main.server:9000
+            # CHANGEME: OVH S3 endpoint for the chosen region.
+            s3Url: https://s3.gra.io.cloud.ovh.net
 
       # Use Kopia as the default volumes file-system uploader (modern, faster, and more robust than restic)
       defaultVolumesToFsBackup: true
@@ -63,7 +70,7 @@ spec:
           ttl: 240h # Retain backups for 10 days
           includedNamespaces:
             - "*"
-          storageLocation: truenas-rustfs
+          storageLocation: ovh-dr
           # Skip filesystem backup of CNPG/Valkey volumes (tns-fast-nvmeof); their
           # state is owned by the Barman Cloud plugin. See velero-resource-policy.yaml.
           resourcePolicy:

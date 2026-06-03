@@ -1,6 +1,6 @@
 # Official Sidero Labs talos-backup tool (https://github.com/siderolabs/talos-backup).
 # Takes an etcd snapshot via the in-cluster Talos API, age-encrypts it, and uploads
-# it to the TrueNAS RustFS S3 endpoint. Replaces the previous hand-rolled CronJob.
+# it to the OVH Object Storage (S3) DR bucket. Replaces the previous hand-rolled CronJob.
 #
 # In-cluster Talos API access is granted by the controlplane machine-config patch
 # (tofu/talos.tf -> machine.features.kubernetesTalosAPIAccess) which allows the
@@ -54,15 +54,18 @@ spec:
               command:
                 - /talos-backup
               env:
-                # S3 (TrueNAS RustFS) destination.
+                # S3 (OVH Object Storage) destination — offsite DR, shared bucket.
                 - name: CUSTOM_S3_ENDPOINT
-                  value: "http://nas-main.server:9000"
+                  # CHANGEME: OVH S3 endpoint for the chosen region.
+                  value: "https://s3.gra.io.cloud.ovh.net"
                 - name: USE_PATH_STYLE
                   value: "true"
                 - name: AWS_REGION
-                  value: "us-east-1"
+                  # CHANGEME: OVH region (e.g. gra, sbg, de, waw, bhs).
+                  value: "gra"
                 - name: BUCKET
-                  value: "k8s-backups-rustfs"
+                  # CHANGEME: OVH Object Storage bucket name.
+                  value: "changeme-ovh-dr-bucket"
                 - name: S3_PREFIX
                   value: "etcd-backups"
                 - name: CLUSTER_NAME

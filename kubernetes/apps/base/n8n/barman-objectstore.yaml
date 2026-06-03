@@ -1,6 +1,7 @@
 # Barman Cloud object store for the n8n-postgres cluster.
-# WAL archive + base backups land in the cnpg-backups-rustfs bucket on TrueNAS RustFS,
-# enabling point-in-time recovery (PITR). Referenced from cnpg-cluster.yaml .spec.plugins.
+# WAL archive + base backups land in the OVH Object Storage DR bucket under the
+# cnpg/n8n prefix, enabling point-in-time recovery (PITR). Referenced from
+# cnpg-cluster.yaml .spec.plugins.
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
@@ -9,8 +10,10 @@ metadata:
 spec:
   retentionPolicy: "14d"
   configuration:
-    destinationPath: s3://cnpg-backups-rustfs/n8n
-    endpointURL: http://nas-main.server:9000
+    # CHANGEME: replace the bucket with your OVH Object Storage (S3) bucket name.
+    destinationPath: s3://changeme-ovh-dr-bucket/cnpg/n8n
+    # CHANGEME: OVH S3 endpoint for the chosen region.
+    endpointURL: https://s3.gra.io.cloud.ovh.net
     s3Credentials:
       accessKeyId:
         name: n8n-backup-s3

@@ -7,14 +7,17 @@ the procedures to recover from data loss or total cluster loss.
 
 | Layer | Tool | What it protects | Schedule | Destination |
 |-------|------|------------------|----------|-------------|
-| etcd / Kubernetes control plane | [`talos-backup`](https://github.com/siderolabs/talos-backup) CronJob (`velero` ns) | etcd snapshot (all K8s objects, Flux state) | daily 03:00 | `s3://k8s-backups-rustfs/etcd-backups`, age-encrypted |
-| PostgreSQL (authentik, khoj, n8n) | CloudNativePG + [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud) | continuous WAL archive + daily base backup (PITR) | WAL: continuous, base: daily 01:00 | `s3://cnpg-backups-rustfs/<app>` |
-| Cluster objects + non-DB PVCs | Velero (Kopia FS backup) | namespaced/cluster manifests, non-DB volumes | daily 02:00, 10-day TTL | `s3://k8s-backups-rustfs` |
+| etcd / Kubernetes control plane | [`talos-backup`](https://github.com/siderolabs/talos-backup) CronJob (`velero` ns) | etcd snapshot (all K8s objects, Flux state) | daily 03:00 | `s3://<ovh-bucket>/etcd-backups`, age-encrypted |
+| PostgreSQL (authentik, khoj, n8n) | CloudNativePG + [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud) | continuous WAL archive + daily base backup (PITR) | WAL: continuous, base: daily 01:00 | `s3://<ovh-bucket>/cnpg/<app>` |
+| Cluster objects + non-DB PVCs | Velero (Kopia FS backup) | namespaced/cluster manifests, non-DB volumes | daily 02:00, 10-day TTL | `s3://<ovh-bucket>/k8s-backups` |
 | Talos machine secrets (PKI) | OpenTofu state (`tofu/terraform.tfstate`, encrypted) | cluster CAs / identity | on `tofu apply` | committed to Git (AES-GCM encrypted) |
 
-All S3 targets live on the **same TrueNAS RustFS** endpoint (`truenas-scale.local:9000`).
-Velero explicitly **skips** filesystem backup of `tns-fast-nvmeof` volumes (CNPG + Valkey)
-via `velero-resource-policy.yaml`, because Postgres is backed up consistently by Barman.
+All S3 backup targets live **offsite** in a single **OVH Object Storage** bucket, separated
+by object prefixes (`etcd-backups/`, `k8s-backups/`, `cnpg/<app>/`). This is independent of
+the in-cluster MinIO tenant and the TrueNAS that serves primary storage, satisfying the
+offsite (3-2-1) requirement. Velero explicitly **skips** filesystem backup of
+`tns-fast-nvmeof` volumes (CNPG + Valkey) via `velero-resource-policy.yaml`, because Postgres
+is backed up consistently by Barman.
 
 ## What you must safeguard off-cluster
 
@@ -33,13 +36,20 @@ Recovery is impossible without these. Keep copies **outside** the cluster and Tr
 
 These are one-time setup steps. Until done, the jobs exist but fail/no-op.
 
-1. **Create the S3 buckets** on TrueNAS RustFS: `k8s-backups-rustfs` (exists) and
-   `cnpg-backups-rustfs` (new).
-2. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME`), then re-encrypt
+1. **Create the OVH Object Storage bucket** and an S3 user/credential with read/write on it.
+   All backup streams share this one bucket, separated by prefixes (`etcd-backups/`,
+   `k8s-backups/`, `cnpg/<app>/`).
+2. **Fill the OVH bucket name, region and endpoint** (replace `changeme-ovh-dr-bucket` and the
+   `s3.gra.io.cloud.ovh.net` endpoint / `gra` region) in:
+   - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
+   - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
+   - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-objectstore.yaml`
+3. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME`), then re-encrypt
    in place with `sops --encrypt --in-place <file>`:
+   - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
    - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
    - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-s3.sops.yaml`
-3. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
+4. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
    API access (`tofu/talos.tf` -> `machine.features.kubernetesTalosAPIAccess`):
    ```bash
    cd tofu && tofu apply
@@ -74,8 +84,8 @@ kubectl -n velero get backups
    ```
 2. Fetch and decrypt the latest etcd snapshot from S3, then decrypt with age:
    ```bash
-   aws --endpoint-url http://truenas-scale.local:9000 s3 cp \
-     s3://k8s-backups-rustfs/etcd-backups/<snapshot>.age ./snapshot.age
+   aws --endpoint-url https://s3.gra.io.cloud.ovh.net s3 cp \
+     s3://<ovh-bucket>/etcd-backups/<snapshot>.age ./snapshot.age
    age -d -i <homelab-age-identity> -o db.snapshot snapshot.age
    ```
 3. Bootstrap the first control-plane node recovering from the snapshot:
@@ -137,9 +147,9 @@ Use this for accidentally deleted manifests/PVCs that are **not** CNPG/Valkey vo
 
 ## Known gaps / follow-ups
 
-- **No offsite copy (3-2-1).** All backups share fate with the TrueNAS that serves primary
-  storage. Add a second/offsite target (cloud S3 or second NAS) and replicate at least the
-  etcd snapshots, CNPG base+WAL, and the age key / tfstate.
+- **Offsite copy (3-2-1): satisfied.** All backups are replicated to OVH Object Storage,
+  independent of the in-cluster MinIO tenant and the TrueNAS serving primary storage. Ensure
+  the OVH credentials and the age key / tfstate are themselves recoverable off-cluster.
 - **No automated backup-failure alerting.** The cluster runs `victoria-metrics-single`
   (no VM Operator / `VMRule` CRDs), so backup metrics are not yet alerted on. Follow-up:
   add scraping of Velero + CNPG backup metrics and alert on missed/failed backups.

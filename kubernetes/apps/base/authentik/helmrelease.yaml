@@ -56,6 +56,30 @@ spec:
             secretKeyRef:
               name: authentik-secrets
               key: secret-key
+        # ── Media storage on RustFS (S3-compatible) ────────────────────────────
+        # Bucket + authentik-media-rw user are provisioned by the central
+        # s3-provisioner Job. ENDPOINT overrides region/USE_SSL; SECURE_URLS=false
+        # because the RustFS endpoint is served over plain HTTP on the LAN.
+        - name: AUTHENTIK_STORAGE__BACKEND
+          value: s3
+        - name: AUTHENTIK_STORAGE__S3__BUCKET_NAME
+          value: authentik-media
+        - name: AUTHENTIK_STORAGE__S3__ENDPOINT
+          value: http://nas-main.server:9000
+        - name: AUTHENTIK_STORAGE__S3__CUSTOM_DOMAIN
+          value: nas-main.server:9000/authentik-media
+        - name: AUTHENTIK_STORAGE__S3__SECURE_URLS
+          value: "false"
+        - name: AUTHENTIK_STORAGE__S3__ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-media-s3
+              key: access-key
+        - name: AUTHENTIK_STORAGE__S3__SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-media-s3
+              key: secret-key
 
     server:
       replicas: 1

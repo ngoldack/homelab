@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: crowdsec
-      version: "0.19.x"
+      version: "0.24.x"
       sourceRef:
         kind: HelmRepository
         name: crowdsec

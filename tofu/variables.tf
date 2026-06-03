@@ -36,13 +36,13 @@ variable "talos_version" {
   description = "Talos OS version"
   type        = string
   # renovate: datasource=github-releases depName=siderolabs/talos
-  default = "v1.7.5"
+  default = "v1.13.3"
 }
 
 variable "kubernetes_version" {
   description = "Kubernetes version loaded by Talos"
   type        = string
-  default     = "1.30.2"
+  default     = "1.36.1"
 }
 
 variable "cluster_endpoint" {

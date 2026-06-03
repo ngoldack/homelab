@@ -8,9 +8,11 @@ spec:
   targetNamespace: netbird
   chart:
     spec:
+      # Upstream renamed the chart from "netbird-operator" to "kubernetes-operator"
+      # and moved publishing to https://netbirdio.github.io/helms.
       # Check latest: https://github.com/netbirdio/kubernetes-operator/releases
-      chart: netbird-operator
-      version: "0.1.x"
+      chart: kubernetes-operator
+      version: "0.3.x"
       sourceRef:
         kind: HelmRepository
         name: netbird
@@ -19,12 +21,13 @@ spec:
     crds: CreateReplace
   upgrade:
     crds: CreateReplace
-  valuesFrom:
-    - kind: Secret
-      name: netbird-operator-credentials
-      valuesKey: apiToken
-      targetPath: operator.apiToken
   values:
-    operator:
-      # Cloud-hosted NetBird. Change to your self-hosted management URL if applicable.
-      managementURL: "https://api.netbird.io:443"
+    # The operator reads the NetBird Management API key from a referenced Secret
+    # (replaces the old operator.apiToken value). See secret.sops.yaml.
+    netbirdAPI:
+      keyFromSecret:
+        name: netbird-mgmt-api-key
+        key: NB_API_KEY
+    webhook:
+      # Provision webhook certificates via cert-manager (recommended).
+      enableCertManager: true

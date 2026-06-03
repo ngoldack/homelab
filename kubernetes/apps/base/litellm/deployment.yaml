@@ -24,7 +24,7 @@ spec:
       containers:
         - name: litellm
           # Pinned stable release for reproducible GitOps (was main-latest).
-          image: ghcr.io/berriai/litellm:main-v1.66.0-stable
+          image: ghcr.io/berriai/litellm:main-v1.83.14-stable
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

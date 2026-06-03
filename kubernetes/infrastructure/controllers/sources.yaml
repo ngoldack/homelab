@@ -23,7 +23,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://netbirdio.github.io/helm-charts
+  url: https://netbirdio.github.io/helms
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
@@ -143,14 +143,15 @@ spec:
   interval: 2h
   url: https://kedacore.github.io/charts
 ---
-apiVersion: source.toolkit.fluxcd.io/v1
+apiVersion: source.toolkit.fluxcd.io/v1beta2
 kind: HelmRepository
 metadata:
   name: kserve
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://kserve.github.io/charts
+  type: oci
+  url: oci://ghcr.io/kserve/charts
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
@@ -168,7 +169,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://charts.rancher.io
+  url: https://charts.containeroo.ch
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository

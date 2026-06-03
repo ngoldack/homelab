@@ -9,7 +9,6 @@ metadata:
     policies.kyverno.io/description: >-
       Privileged containers share namespaces and capabilities, bypassing security boundaries.
 spec:
-  validationFailureAction: Audit
   background: true
   rules:
     - name: privileged-containers
@@ -19,6 +18,7 @@ spec:
               kinds:
                 - Pod
       validate:
+        failureAction: Audit
         message: "Privileged containers are disallowed."
         pattern:
           spec:
@@ -36,7 +36,6 @@ metadata:
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/description: "Requires dropping ALL capabilities and only adding back necessary ones."
 spec:
-  validationFailureAction: Audit
   background: true
   rules:
     - name: drop-all-capabilities
@@ -46,6 +45,7 @@ spec:
               kinds:
                 - Pod
       validate:
+        failureAction: Audit
         message: "Containers must drop ALL capabilities in securityContext.capabilities.drop."
         pattern:
           spec:
@@ -65,7 +65,6 @@ metadata:
     policies.kyverno.io/severity: "medium"
     policies.kyverno.io/description: "Requires containers to run with a read-only root filesystem."
 spec:
-  validationFailureAction: Audit
   background: true
   rules:
     - name: read-only-root-filesystem
@@ -75,6 +74,7 @@ spec:
               kinds:
                 - Pod
       validate:
+        failureAction: Audit
         message: "Containers must run with a read-only root filesystem."
         pattern:
           spec:

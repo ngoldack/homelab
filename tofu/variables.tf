@@ -112,7 +112,7 @@ variable "node_pools" {
       count      = 1
       talos_role = "worker"
       extensions = [
-        "ghcr.io/siderolabs/gvisor:20240115.0",
+        "ghcr.io/siderolabs/gvisor:20260427.0",
       ]
       enable_secure_nic = false
       taints            = []
@@ -124,7 +124,7 @@ variable "node_pools" {
       count      = 1
       talos_role = "worker"
       extensions = [
-        "ghcr.io/siderolabs/gvisor:20240115.0",
+        "ghcr.io/siderolabs/gvisor:20260427.0",
       ]
       enable_secure_nic = false
       taints = [

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: khoj-config
+  namespace: khoj
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-csi-fast-nfs
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: khoj-models
+  namespace: khoj
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-csi-fast-nfs
+  resources:
+    requests:
+      storage: 10Gi

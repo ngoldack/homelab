@@ -6,8 +6,10 @@ resources:
   - valkey.yaml
   - secrets.sops.yaml
   - blueprint.yaml
+  - proxy-blueprint.yaml
   - helmrelease.yaml
   - gateway.yaml
+  - netbird.yaml
   - s3-bucket.yaml
   - s3-credentials.sops.yaml
   - rustfs-admin-credentials.sops.yaml

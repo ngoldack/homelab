@@ -1,0 +1,74 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: searxng
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: searxng
+  chart:
+    spec:
+      chart: searxng
+      version: "1.1.x"
+      sourceRef:
+        kind: HelmRepository
+        name: kubitodev
+        namespace: flux-system
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+  values:
+    replicaCount: 1
+    service:
+      type: ClusterIP
+      port: 8080
+    # The secret_key below is overridden at runtime by the SEARXNG_SECRET env var,
+    # which is sourced from the SOPS-managed searxng-secrets Secret.
+    env:
+      - name: SEARXNG_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: searxng-secrets
+            key: secret-key
+    config:
+      settings:
+        enabled: true
+        data: |-
+          use_default_settings: true
+
+          server:
+            secret_key: "overridden-by-SEARXNG_SECRET-env"
+            limiter: false
+            image_proxy: true
+            port: 8080
+            bind_address: "0.0.0.0"
+
+          ui:
+            static_use_hash: true
+
+          search:
+            safe_search: 0
+            autocomplete: ""
+            default_lang: ""
+            # JSON format is required so Khoj can consume search results.
+            formats:
+              - html
+              - json
+      # Private instance: no IP limiter, so no Valkey/Redis dependency is needed.
+      limiter:
+        enabled: false
+      # Granian is the default server; tuned modestly for homelab load.
+      granian:
+        enabled: true
+        workers: 2
+        blocking_threads: 4
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi

@@ -1,0 +1,22 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: khoj-postgres
+  namespace: khoj
+spec:
+  instances: 1
+  # pgvector-enabled image; Khoj stores embeddings via the pgvector extension.
+  imageName: ghcr.io/cloudnative-pg/postgresql:16-pgvector
+
+  storage:
+    size: 10Gi
+    storageClass: tns-csi-fast-nfs
+
+  bootstrap:
+    initdb:
+      database: khoj
+      owner: khoj
+      # Enable the pgvector extension on first bootstrap so Khoj can create its
+      # embedding columns without a manual initContainer step.
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;

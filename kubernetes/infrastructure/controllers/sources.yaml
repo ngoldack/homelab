@@ -83,15 +83,6 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: langfuse
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://langfuse.github.io/langfuse-k8s/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
   name: k8sgpt
   namespace: flux-system
 spec:
@@ -196,3 +187,21 @@ metadata:
 spec:
   interval: 2h
   url: https://valkey-io.github.io/valkey-operator/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kubitodev
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://charts.kubito.dev
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: community-charts
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://community-charts.github.io/helm-charts

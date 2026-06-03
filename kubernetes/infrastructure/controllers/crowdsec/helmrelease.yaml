@@ -68,6 +68,12 @@ spec:
         - namespace: authentik
           podName: "authentik-*"
           program: "authentik"
+        - namespace: khoj
+          podName: "khoj-*"
+          program: "khoj"
+        - namespace: n8n
+          podName: "n8n-*"
+          program: "n8n"
       env:
         - name: COLLECTIONS
           value: >-

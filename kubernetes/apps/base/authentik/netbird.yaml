@@ -1,0 +1,60 @@
+# NetBird exposure for the Authentik-proxied applications.
+#
+# Access path:  NetBird peer -> NetworkRouter (routing peer) -> authentik-server
+#               -> Authentik embedded outpost (proxy provider) -> upstream app.
+#
+# Both khoj.<zone> and n8n.<zone> resolve to the authentik-server service; Authentik
+# routes to the correct upstream by Host header (external_host in proxy-blueprint.yaml).
+#
+# TODO: replace the DNS zone, group name, and resource hostnames with values that match
+# your NetBird account (Cloud at api.netbird.io). DNS record name = <NetworkResource
+# metadata.name> + dnsZone, e.g. resource "khoj" in zone "netbird.example.com" =>
+# khoj.netbird.example.com.
+apiVersion: netbird.io/v1alpha1
+kind: Group
+metadata:
+  name: perplexity-stack
+  namespace: authentik
+spec:
+  name: perplexity-stack
+---
+apiVersion: netbird.io/v1alpha1
+kind: NetworkRouter
+metadata:
+  name: perplexity-stack-router
+  namespace: authentik
+spec:
+  # TODO: set to an existing NetBird DNS zone in your account.
+  dnsZoneRef:
+    name: netbird.example.com
+  logLevel: info
+---
+apiVersion: netbird.io/v1alpha1
+kind: NetworkResource
+metadata:
+  name: khoj
+  namespace: authentik
+spec:
+  networkRouterRef:
+    name: perplexity-stack-router
+    namespace: authentik
+  serviceRef:
+    name: authentik-server
+  groups:
+    - localRef:
+        name: perplexity-stack
+---
+apiVersion: netbird.io/v1alpha1
+kind: NetworkResource
+metadata:
+  name: n8n
+  namespace: authentik
+spec:
+  networkRouterRef:
+    name: perplexity-stack-router
+    namespace: authentik
+  serviceRef:
+    name: authentik-server
+  groups:
+    - localRef:
+        name: perplexity-stack

@@ -1,0 +1,45 @@
+# LiteLLM proxy configuration.
+#
+# LiteLLM presents a single OpenAI-compatible endpoint and routes each model_name
+# to the matching KServe vLLM backend. Because the vLLM gateway routes per-model by
+# HTTP Host header (and on-demand models scale from zero behind the KEDA http-add-on
+# interceptor), every backend points at the interceptor proxy and sets the Host
+# header that selects the target model. This preserves scale-from-zero behaviour.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+data:
+  config.yaml: |
+    model_list:
+      - model_name: fast
+        litellm_params:
+          model: openai/llama-8b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: llama.vllm.home.arpa
+      - model_name: default
+        litellm_params:
+          model: openai/qwen3-14b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: qwen3.vllm.home.arpa
+      - model_name: research
+        litellm_params:
+          model: openai/qwen3-14b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: qwen3.vllm.home.arpa
+      - model_name: coder
+        litellm_params:
+          model: openai/qwen25-coder-7b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: qwen-coder.vllm.home.arpa
+    litellm_settings:
+      drop_params: true

@@ -30,3 +30,18 @@ spec:
   writeConnectionSecretToRef:
     name: authentik-media-credentials
     namespace: authentik
+---
+apiVersion: minio.crossplane.io/v1
+kind: User
+metadata:
+  name: tempo
+spec:
+  forProvider:
+    userName: tempo
+    policies:
+      - tempo-traces-rw
+  providerConfigRef:
+    name: minio-provider
+  writeConnectionSecretToRef:
+    name: tempo-s3-credentials
+    namespace: monitoring

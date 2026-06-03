@@ -21,3 +21,14 @@ spec:
     region: us-east-1
   providerConfigRef:
     name: minio-provider
+---
+apiVersion: minio.crossplane.io/v1
+kind: Bucket
+metadata:
+  name: tempo-traces
+spec:
+  forProvider:
+    bucketName: tempo-traces
+    region: us-east-1
+  providerConfigRef:
+    name: minio-provider

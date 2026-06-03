@@ -47,7 +47,7 @@ spec:
           cpu: "14"
           memory: "52Gi"
       storageSpec:
-        storageClassName: tns-csi-fast-nfs
+        storageClassName: tns-fast-nfs
         accessModes:
           - ReadWriteOnce
         resources:

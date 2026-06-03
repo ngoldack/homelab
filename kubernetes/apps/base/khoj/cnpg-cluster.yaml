@@ -10,7 +10,7 @@ spec:
 
   storage:
     size: 10Gi
-    storageClass: tns-csi-fast-nfs
+    storageClass: tns-fast-nvmeof
 
   bootstrap:
     initdb:

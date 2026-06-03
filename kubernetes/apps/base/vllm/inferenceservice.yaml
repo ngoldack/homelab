@@ -56,7 +56,7 @@ spec:
           memory: "28Gi"
       # Model weights are staged on fast NFS for local caching after the RustFS cold start.
       storageSpec:
-        storageClassName: tns-csi-fast-nfs
+        storageClassName: tns-fast-nfs
         accessModes:
           - ReadWriteOnce
         resources:

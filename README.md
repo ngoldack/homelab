@@ -10,7 +10,7 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 | OS | Talos Linux |
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
 | CNI | Cilium (eBPF, kube-proxy replacement) |
-| Storage | TrueNAS CSI Driver (`tns-csi`) |
+| Storage | TrueNAS CSI (`tns-csi`, NFS + NVMe-oF) + local-path |
 | VPN Overlay | NetBird (Operator + Node Extension) |
 | TLS | cert-manager + Let's Encrypt |
 | Observability | VictoriaMetrics + Loki + OTel Collector + Grafana |

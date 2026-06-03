@@ -44,7 +44,7 @@ spec:
       replicas: 1
       persistence:
         enabled: true
-        storageClass: tns-csi-fast-nfs
+        storageClass: tns-fast-nfs
         size: 10Gi
       resources:
         requests:

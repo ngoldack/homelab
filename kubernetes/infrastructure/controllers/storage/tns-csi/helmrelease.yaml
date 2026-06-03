@@ -27,25 +27,20 @@ spec:
     truenas:
       url: wss://YOUR-TRUENAS-IP:443/api/current  # TODO: set to your TrueNAS API websocket endpoint
 
-    # Storage tiers managed by the CSI driver.
-    # - bulk: tank (HDD RAIDZ1) for capacity-focused workloads
-    # - medium: fast pool over NFS for general-purpose PVCs (default tier)
-    # - fast: fast pool over NVMeoF for latency-sensitive/block workloads (DBs)
+    # Storage tiers managed by the CSI driver. Nodes are interconnected at 10GbE.
+    # - tns-tank-nfs:    tank (HDD) over NFS — huge files / media libraries (Emby)
+    # - tns-fast-nfs:    fast (NVMe) over NFS — default tier for config/general PVCs
+    # - tns-fast-nvmeof: fast (NVMe) over NVMe-oF — databases / high-performance block
     storageClasses:
-      - name: tns-csi-bulk-nfs
+      - name: tns-tank-nfs
         protocol: nfs
         pool: tank
         defaultClass: false
-      - name: tns-csi-medium-nfs
+      - name: tns-fast-nfs
         protocol: nfs
         pool: fast
         defaultClass: true
-      - name: tns-csi-fast-nvmeof
+      - name: tns-fast-nvmeof
         protocol: nvmeof
-        pool: fast
-        defaultClass: false
-      # Compatibility class to keep legacy references working during migration.
-      - name: tns-csi-fast-nfs
-        protocol: nfs
         pool: fast
         defaultClass: false

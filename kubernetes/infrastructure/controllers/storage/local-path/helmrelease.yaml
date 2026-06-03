@@ -22,10 +22,10 @@ spec:
   values:
     storageClass:
       create: true
-      name: local-ephemeral
+      name: local-storage
       defaultClass: false
       reclaimPolicy: Delete
       volumeBindingMode: WaitForFirstConsumer
 
-    # Keep local PVs node-local and disposable for ephemeral/cached workloads.
+    # Node-local, disposable PVs for non-persistent / small scratch workloads only.
     pathPattern: "{{ .PVC.Namespace }}-{{ .PVC.Name }}"

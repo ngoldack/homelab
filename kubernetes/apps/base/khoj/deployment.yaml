@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: khoj
+  namespace: khoj
+  labels:
+    app.kubernetes.io/name: khoj
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: khoj
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: khoj
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: khoj
+          # Pinned to the latest stable 1.x line for reproducible GitOps (was
+          # :latest). The 2.0.0-beta line is intentionally avoided for stability.
+          image: ghcr.io/khoj-ai/khoj:1.42.10
+          # NOTE: the Khoj image runs as root (HOME=/root, PVCs mount under
+          # /root/.khoj and /root/.cache), so runAsNonRoot/readOnlyRootFilesystem
+          # are not enforced here. Capabilities are still dropped and privilege
+          # escalation blocked. Direct access is locked down via CiliumNetworkPolicy.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          args:
+            - "--host=0.0.0.0"
+            - "--port=42110"
+            - "-vv"
+            - "--anonymous-mode"
+            - "--non-interactive"
+          ports:
+            - name: http
+              containerPort: 42110
+          env:
+            # ── PostgreSQL (CloudNativePG) ──────────────────────────────────
+            - name: POSTGRES_HOST
+              value: khoj-postgres-rw.khoj.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: khoj
+            - name: POSTGRES_USER
+              value: khoj
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: khoj-postgres-app
+                  key: password
+            # ── Django / app ────────────────────────────────────────────────
+            - name: KHOJ_DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: khoj-secrets
+                  key: django-secret-key
+            - name: KHOJ_DEBUG
+              value: "False"
+            - name: KHOJ_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: khoj-secrets
+                  key: admin-email
+            - name: KHOJ_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: khoj-secrets
+                  key: admin-password
+            - name: KHOJ_TELEMETRY_DISABLE
+              value: "True"
+            # TLS is terminated by the NetBird mesh / Authentik proxy in front.
+            - name: KHOJ_NO_HTTPS
+              value: "True"
+            # Public host the mobile app / browser uses (NetBird mesh FQDN).
+            # TODO: set to your NetBird-resolvable Khoj hostname.
+            - name: KHOJ_DOMAIN
+              value: khoj.netbird.example.com
+            # Internal host the Authentik proxy uses to reach Khoj (CSRF allow-list).
+            - name: KHOJ_ALLOWED_DOMAIN
+              value: khoj.khoj.svc.cluster.local
+            # ── Integrations ────────────────────────────────────────────────
+            - name: OPENAI_BASE_URL
+              value: http://litellm.litellm.svc.cluster.local:4000/v1
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: khoj-secrets
+                  key: openai-api-key
+            - name: KHOJ_DEFAULT_CHAT_MODEL
+              value: default
+            - name: KHOJ_SEARXNG_URL
+              value: http://searxng.searxng.svc.cluster.local:8080
+          volumeMounts:
+            - name: config
+              mountPath: /root/.khoj
+            - name: models
+              mountPath: /root/.cache
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: khoj-config
+        - name: models
+          persistentVolumeClaim:
+            claimName: khoj-models

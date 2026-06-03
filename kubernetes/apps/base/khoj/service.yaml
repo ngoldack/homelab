@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: khoj
+  namespace: khoj
+  labels:
+    app.kubernetes.io/name: khoj
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: khoj
+  ports:
+    - name: http
+      port: 42110
+      targetPort: http

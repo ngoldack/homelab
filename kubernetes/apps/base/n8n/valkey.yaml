@@ -1,8 +1,8 @@
 apiVersion: valkey.io/v1alpha1
 kind: Valkey
 metadata:
-  name: langfuse-valkey
-  namespace: langfuse
+  name: n8n-valkey
+  namespace: n8n
 spec:
   replicas: 1
   storage:

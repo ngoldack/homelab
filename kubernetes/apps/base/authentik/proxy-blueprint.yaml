@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: perplexity-stack-proxy-blueprint
+  namespace: authentik
+data:
+  perplexity-stack-proxy.yaml: |
+    version: 1
+    metadata:
+      name: "Perplexity Stack Proxy Applications"
+    entries:
+      # ── Khoj proxy provider + application ──────────────────────────────────
+      - model: authentik_providers_proxy.proxyprovider
+        identifiers:
+          name: khoj-proxy
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          # TODO: set external_host to the NetBird-resolvable Khoj FQDN.
+          external_host: https://khoj.netbird.example.com
+          internal_host: http://khoj.khoj.svc.cluster.local:42110
+          internal_host_ssl_validation: false
+          mode: proxy
+      - model: authentik_core.application
+        identifiers:
+          slug: khoj
+        attrs:
+          name: Khoj
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, khoj-proxy]]
+
+      # ── n8n proxy provider + application ───────────────────────────────────
+      - model: authentik_providers_proxy.proxyprovider
+        identifiers:
+          name: n8n-proxy
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          # TODO: set external_host to the NetBird-resolvable n8n FQDN.
+          external_host: https://n8n.netbird.example.com
+          internal_host: http://n8n.n8n.svc.cluster.local:5678
+          internal_host_ssl_validation: false
+          mode: proxy
+      - model: authentik_core.application
+        identifiers:
+          slug: n8n
+        attrs:
+          name: n8n
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, n8n-proxy]]
+
+      # ── Attach both providers to the embedded outpost ──────────────────────
+      # The embedded outpost is exposed over the NetBird mesh and reverse-proxies
+      # each app. The crowdsec-ip-rep policy bound to default-authentication-flow
+      # is enforced on every login, fail-closed per AGENTS.md.
+      - model: authentik_outposts.outpost
+        identifiers:
+          name: "authentik Embedded Outpost"
+        attrs:
+          type: proxy
+          providers:
+            - !Find [authentik_providers_proxy.proxyprovider, [name, khoj-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, n8n-proxy]]

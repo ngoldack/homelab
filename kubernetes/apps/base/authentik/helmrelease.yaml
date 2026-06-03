@@ -73,3 +73,4 @@ spec:
     blueprints:
       configMaps:
         - crowdsec-authentik-blueprint
+        - perplexity-stack-proxy-blueprint

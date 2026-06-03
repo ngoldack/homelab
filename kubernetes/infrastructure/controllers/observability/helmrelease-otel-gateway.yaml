@@ -1,7 +1,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: otel-collector
+  name: otel-gateway
   namespace: flux-system
 spec:
   interval: 1h
@@ -19,31 +19,33 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
-    mode: daemonset
-    # Node-local agent: ships pod/host logs and host metrics. Application traces
-    # and OTLP telemetry go to the otel-gateway (deployment) for tail sampling.
+    mode: deployment
+    replicaCount: 1
+    # Stable in-cluster DNS name (otel-gateway.monitoring.svc) for app exporters.
+    fullnameOverride: otel-gateway
 
-    # contrib distro: includes filelog, hostmetrics, k8sattributes,
-    # prometheusremotewrite (the chart requires image.repository to be set).
+    # contrib distro: includes tail_sampling, prometheusremotewrite, k8sattributes.
     image:
       repository: otel/opentelemetry-collector-contrib
 
     presets:
-      logsCollection:
-        enabled: true
-      hostMetrics:
-        enabled: true
       kubernetesAttributes:
         enabled: true
 
     config:
       exporters:
+        # Traces -> Grafana Tempo (OTLP gRPC).
+        otlp/tempo:
+          endpoint: "tempo.monitoring.svc.cluster.local:4317"
+          tls:
+            insecure: true
+        # Metrics -> VictoriaMetrics.
         prometheusremotewrite:
           endpoint: "http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428/api/v1/write"
           tls:
             insecure: true
+        # Logs -> Loki (OTLP over HTTP).
         otlphttp/loki:
-          # Loki ingests OTLP over HTTP at the /otlp path (not gRPC on 3100).
           endpoint: "http://loki.monitoring.svc.cluster.local:3100/otlp"
           tls:
             insecure: true
@@ -62,22 +64,43 @@ spec:
           check_interval: 1s
           limit_percentage: 75
           spike_limit_percentage: 15
+        # Tail-based sampling: always keep errors and slow spans, sample the rest.
+        tail_sampling:
+          decision_wait: 10s
+          num_traces: 50000
+          policies:
+            - name: errors
+              type: status_code
+              status_code:
+                status_codes: [ERROR]
+            - name: slow
+              type: latency
+              latency:
+                threshold_ms: 1000
+            - name: baseline
+              type: probabilistic
+              probabilistic:
+                sampling_percentage: 10
 
       service:
         pipelines:
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, k8sattributes, tail_sampling, batch]
+            exporters: [otlp/tempo]
           metrics:
-            receivers: [otlp, hostmetrics]
+            receivers: [otlp]
             processors: [memory_limiter, k8sattributes, batch]
             exporters: [prometheusremotewrite]
           logs:
-            receivers: [otlp, filelog]
+            receivers: [otlp]
             processors: [memory_limiter, k8sattributes, batch]
             exporters: [otlphttp/loki]
 
     resources:
       requests:
         cpu: 50m
-        memory: 64Mi
+        memory: 128Mi
       limits:
-        cpu: 200m
-        memory: 256Mi
+        cpu: 500m
+        memory: 512Mi

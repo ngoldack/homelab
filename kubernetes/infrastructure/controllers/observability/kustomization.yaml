@@ -10,5 +10,6 @@ resources:
   - helmrelease-victoriametrics.yaml
   - helmrelease-loki.yaml
   - helmrelease-otel-collector.yaml
+  - helmrelease-otel-gateway.yaml
   - helmrelease-tempo.yaml
   - dashboards

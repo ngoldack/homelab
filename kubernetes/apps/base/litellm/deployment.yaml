@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: litellm
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: "/metrics"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,6 +49,11 @@ spec:
                 secretKeyRef:
                   name: litellm-secrets
                   key: master-key
+            # OpenTelemetry tracing -> otel-gateway (OTLP gRPC) -> Tempo.
+            - name: OTEL_EXPORTER
+              value: "otlp_grpc"
+            - name: OTEL_ENDPOINT
+              value: "http://otel-gateway.monitoring.svc.cluster.local:4317"
           volumeMounts:
             - name: config
               mountPath: /etc/litellm

@@ -43,3 +43,6 @@ data:
             Host: qwen-coder.vllm.home.arpa
     litellm_settings:
       drop_params: true
+      # Emit OTLP traces (-> otel-gateway -> Tempo) and expose Prometheus metrics
+      # at /metrics on the proxy port. OTEL endpoint is set via env in the Deployment.
+      callbacks: ["otel", "prometheus"]

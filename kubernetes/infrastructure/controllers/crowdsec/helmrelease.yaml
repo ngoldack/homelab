@@ -40,11 +40,11 @@ spec:
       persistentVolume:
         config:
           enabled: true
-          storageClassName: tns-csi-fast-nfs
+          storageClassName: tns-fast-nfs
           size: 1Gi
         data:
           enabled: true
-          storageClassName: tns-csi-fast-nfs
+          storageClassName: tns-fast-nfs
           size: 1Gi
 
     # Agent configuration running as a DaemonSet on every node

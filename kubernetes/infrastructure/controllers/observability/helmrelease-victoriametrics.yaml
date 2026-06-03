@@ -23,7 +23,7 @@ spec:
       retentionPeriod: "14d"
       persistentVolume:
         enabled: true
-        storageClassName: tns-csi-fast-nfs
+        storageClassName: tns-fast-nfs
         size: 10Gi
       resources:
         requests:

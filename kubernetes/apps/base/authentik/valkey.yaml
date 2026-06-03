@@ -10,7 +10,7 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: tns-csi-fast-nfs
+        storageClassName: tns-fast-nvmeof
         resources:
           requests:
             storage: 2Gi

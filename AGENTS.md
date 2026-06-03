@@ -45,9 +45,13 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 When installing or modifying any application in this cluster context, AI agents **MUST** respect and implement the following cross-system integration guidelines:
 
 ### 1. Storage Considerations
-- **No Local Storage**: Do not use `hostPath` or local volume claims unless explicitly requested.
-- **Provider Storage Class**: All persistent configurations, database states, and active key storage must target the cluster's high-speed TrueNAS NFS volume manager utilizing `storageClassName: tns-csi-fast-nfs`.
-- **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references.
+- **No node-local Storage for state**: Do not use `hostPath`. The `local-storage` class (local-path provisioner) is only for non-persistent, small scratch data.
+- **Storage tiers**: Pick the StorageClass that matches the workload (TrueNAS has two pools — `fast`=NVMe, `tank`=HDD — served over a 10GbE link):
+  - `tns-fast-nfs` — fast pool over NFS. **Default** tier; use for config, caches, app state, model weights, and general-purpose PVCs.
+  - `tns-fast-nvmeof` — fast pool over NVMe-oF (block). Use for databases / high-performance, latency-sensitive workloads (CloudNativePG Postgres, Valkey).
+  - `tns-tank-nfs` — tank (HDD) pool over NFS. Use only for huge files / media libraries (e.g. Emby).
+  - `local-storage` — node-local, disposable. Small scratch only.
+- **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`.
 
 ### 2. Security & Policy (Cilium & CrowdSec)
 - **Log Scraping Ingest**: If the application has public ingress, is an authentication provider, or handles sensitive routing, its logs must be fed into the CrowdSec engine. 

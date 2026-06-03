@@ -16,7 +16,7 @@ data:
         attrs:
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           # TODO: set external_host to the NetBird-resolvable Khoj FQDN.
-          external_host: https://khoj.netbird.example.com
+          external_host: https://khoj.netbird.${DOMAIN}
           internal_host: http://khoj.khoj.svc.cluster.local:42110
           internal_host_ssl_validation: false
           mode: proxy
@@ -34,7 +34,7 @@ data:
         attrs:
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           # TODO: set external_host to the NetBird-resolvable n8n FQDN.
-          external_host: https://n8n.netbird.example.com
+          external_host: https://n8n.netbird.${DOMAIN}
           internal_host: http://n8n.n8n.svc.cluster.local:5678
           internal_host_ssl_validation: false
           mode: proxy

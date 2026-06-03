@@ -84,7 +84,7 @@ spec:
             # Public host the mobile app / browser uses (NetBird mesh FQDN).
             # TODO: set to your NetBird-resolvable Khoj hostname.
             - name: KHOJ_DOMAIN
-              value: khoj.netbird.example.com
+              value: khoj.netbird.${DOMAIN}
             # Internal host the Authentik proxy uses to reach Khoj (CSRF allow-list).
             - name: KHOJ_ALLOWED_DOMAIN
               value: khoj.khoj.svc.cluster.local

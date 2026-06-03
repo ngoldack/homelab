@@ -1,14 +1,14 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: apps
+  name: cluster-vars
   namespace: flux-system
 spec:
   interval: 10m0s
-  path: ./kubernetes/apps/production
+  path: ./kubernetes/clusters/production/cluster-vars
   prune: true
   wait: true
-  timeout: 15m
+  timeout: 5m
   retryInterval: 1m
   sourceRef:
     kind: GitRepository
@@ -17,9 +17,3 @@ spec:
     provider: sops
     secretRef:
       name: sops-age
-  dependsOn:
-    - name: infra-configs
-  postBuild:
-    substituteFrom:
-      - kind: Secret
-        name: cluster-secrets

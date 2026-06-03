@@ -10,7 +10,7 @@ spec:
   retentionPolicy: "14d"
   configuration:
     destinationPath: s3://cnpg-backups-rustfs/khoj
-    endpointURL: http://truenas-scale.local:9000
+    endpointURL: http://nas-main.server:9000
     s3Credentials:
       accessKeyId:
         name: khoj-backup-s3

@@ -56,7 +56,7 @@ spec:
               env:
                 # S3 (TrueNAS RustFS) destination.
                 - name: CUSTOM_S3_ENDPOINT
-                  value: "http://truenas-scale.local:9000"
+                  value: "http://nas-main.server:9000"
                 - name: USE_PATH_STYLE
                   value: "true"
                 - name: AWS_REGION

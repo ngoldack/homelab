@@ -14,6 +14,3 @@ resources:
   - qwen25-coder-7b.yaml
   - http-scaledobjects.yaml
   - gateway.yaml
-  - s3-bucket.yaml
-  - s3-credentials.sops.yaml
-  - rustfs-admin-credentials.sops.yaml

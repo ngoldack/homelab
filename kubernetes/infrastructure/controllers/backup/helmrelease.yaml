@@ -38,8 +38,8 @@ spec:
           config:
             region: us-east-1
             s3ForcePathStyle: true
-            # Replace with your actual TrueNAS RustFS S3 IP/Hostname or internal Gateway URL
-            s3Url: http://truenas-scale.local:9000
+            # TrueNAS RustFS S3 endpoint (canonical internal hostname).
+            s3Url: http://nas-main.server:9000
 
       # Use Kopia as the default volumes file-system uploader (modern, faster, and more robust than restic)
       defaultVolumesToFsBackup: true

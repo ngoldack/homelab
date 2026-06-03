@@ -58,3 +58,20 @@ spec:
   groups:
     - localRef:
         name: perplexity-stack
+---
+# SearXNG is forward-auth proxied through the embedded outpost, so its NetBird
+# resource also targets authentik-server (Host-header routed to searxng-proxy).
+apiVersion: netbird.io/v1alpha1
+kind: NetworkResource
+metadata:
+  name: searxng
+  namespace: authentik
+spec:
+  networkRouterRef:
+    name: perplexity-stack-router
+    namespace: authentik
+  serviceRef:
+    name: authentik-server
+  groups:
+    - localRef:
+        name: perplexity-stack

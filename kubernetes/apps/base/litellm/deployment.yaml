@@ -49,6 +49,26 @@ spec:
                 secretKeyRef:
                   name: litellm-secrets
                   key: master-key
+            # ── Authentik SSO for the LiteLLM proxy UI (generic OIDC) ─────────
+            # Reached directly over the NetBird mesh; callback is
+            # <PROXY_BASE_URL>/sso/callback.
+            - name: PROXY_BASE_URL
+              value: "https://litellm.netbird.${DOMAIN}"
+            - name: GENERIC_CLIENT_ID
+              value: "litellm"
+            - name: GENERIC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: sso-client-secret
+            - name: GENERIC_AUTHORIZATION_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/authorize/"
+            - name: GENERIC_TOKEN_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/token/"
+            - name: GENERIC_USERINFO_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/userinfo/"
+            - name: GENERIC_SCOPE
+              value: "openid email profile"
             # OpenTelemetry tracing -> otel-gateway (OTLP gRPC) -> Tempo.
             - name: OTEL_EXPORTER
               value: "otlp_grpc"

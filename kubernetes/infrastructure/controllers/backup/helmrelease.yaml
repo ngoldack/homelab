@@ -64,3 +64,8 @@ spec:
           includedNamespaces:
             - "*"
           storageLocation: truenas-rustfs
+          # Skip filesystem backup of CNPG/Valkey volumes (tns-fast-nvmeof); their
+          # state is owned by the Barman Cloud plugin. See velero-resource-policy.yaml.
+          resourcePolicy:
+            kind: configmap
+            name: velero-volume-policy

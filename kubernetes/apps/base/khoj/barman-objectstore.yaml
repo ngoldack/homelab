@@ -1,0 +1,32 @@
+# Barman Cloud object store for the khoj-postgres cluster (pgvector embeddings).
+# WAL archive + base backups land in the cnpg-backups-rustfs bucket on TrueNAS RustFS,
+# enabling point-in-time recovery (PITR). Referenced from cnpg-cluster.yaml .spec.plugins.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: khoj-backup-store
+  namespace: khoj
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    destinationPath: s3://cnpg-backups-rustfs/khoj
+    endpointURL: http://truenas-scale.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: khoj-backup-s3
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: khoj-backup-s3
+        key: AWS_SECRET_ACCESS_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi

@@ -21,6 +21,7 @@ resources:
   - netbird
   # Data operators
   - cnpg-operator
+  - cnpg-barman-plugin
   - valkey-operator
   # AI/ML serving & autoscaling
   - kserve-operator

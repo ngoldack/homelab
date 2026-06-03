@@ -4,5 +4,8 @@ resources:
   - namespace.yaml
   - secret.sops.yaml
   - cnpg-cluster.yaml
+  - barman-objectstore.yaml
+  - barman-s3.sops.yaml
+  - scheduledbackup.yaml
   - valkey.yaml
   - helmrelease.yaml

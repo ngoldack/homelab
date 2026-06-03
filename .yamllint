@@ -1,5 +1,10 @@
 extends: default
 
+# Vendored third-party manifests are kept verbatim from upstream releases and are
+# not subject to our formatting rules (re-formatting would complicate upgrades).
+ignore: |
+  kubernetes/infrastructure/controllers/cnpg-barman-plugin/manifest.yaml
+
 rules:
   line-length:
     max: 120

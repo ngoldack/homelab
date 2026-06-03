@@ -9,7 +9,9 @@ spec:
   chart:
     spec:
       chart: cloudnative-pg
-      version: "0.21.x"
+      # 0.26.x => operator 1.26.x, the minimum version required by the Barman Cloud
+      # CNPG-I plugin (kubernetes/infrastructure/controllers/cnpg-barman-plugin).
+      version: "0.26.x"
       sourceRef:
         kind: HelmRepository
         name: cnpg

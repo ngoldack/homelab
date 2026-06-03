@@ -12,6 +12,15 @@ spec:
     size: 10Gi
     storageClass: tns-fast-nvmeof
 
+  # Continuous WAL archiving + base backups to S3 (PITR) via the Barman Cloud plugin.
+  # The referenced ObjectStore is defined in barman-objectstore.yaml; daily base
+  # backups are scheduled by scheduledbackup.yaml.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: khoj-backup-store
+
   bootstrap:
     initdb:
       database: khoj

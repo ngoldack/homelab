@@ -4,6 +4,7 @@ namespace: velero
 resources:
   - namespace.yaml
   - secret.sops.yaml
-  - talos-secret.sops.yaml
   - helmrelease.yaml
-  - talos-etcd-backup.yaml
+  - velero-resource-policy.yaml
+  - talos-backup-s3.sops.yaml
+  - talos-backup.yaml

@@ -7,17 +7,18 @@ the procedures to recover from data loss or total cluster loss.
 
 | Layer | Tool | What it protects | Schedule | Destination |
 |-------|------|------------------|----------|-------------|
-| etcd / Kubernetes control plane | [`talos-backup`](https://github.com/siderolabs/talos-backup) CronJob (`velero` ns) | etcd snapshot (all K8s objects, Flux state) | daily 03:00 | `s3://<ovh-bucket>/etcd-backups`, age-encrypted |
-| PostgreSQL (authentik, khoj, n8n) | CloudNativePG + [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud) | continuous WAL archive + daily base backup (PITR) | WAL: continuous, base: daily 01:00 | `s3://<ovh-bucket>/cnpg/<app>` |
-| Cluster objects + non-DB PVCs | Velero (Kopia FS backup) | namespaced/cluster manifests, non-DB volumes | daily 02:00, 10-day TTL | `s3://<ovh-bucket>/k8s-backups` |
+| etcd / Kubernetes control plane | [`talos-backup`](https://github.com/siderolabs/talos-backup) CronJob (`velero` ns) | etcd snapshot (all K8s objects, Flux state) | daily 03:00 | `s3://<hetzner-bucket>/etcd-backups`, age-encrypted |
+| PostgreSQL (authentik, khoj, n8n) | CloudNativePG + [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud) | continuous WAL archive + daily base backup (PITR) | WAL: continuous, base: daily 01:00 | `s3://<hetzner-bucket>/cnpg/<app>` |
+| Cluster objects + non-DB PVCs | Velero (Kopia FS backup) | namespaced/cluster manifests, non-DB volumes | daily 02:00, 10-day TTL | `s3://<hetzner-bucket>/k8s-backups` |
 | Talos machine secrets (PKI) | OpenTofu state (`tofu/terraform.tfstate`, encrypted) | cluster CAs / identity | on `tofu apply` | committed to Git (AES-GCM encrypted) |
 
-All S3 backup targets live **offsite** in a single **OVH Object Storage** bucket, separated
-by object prefixes (`etcd-backups/`, `k8s-backups/`, `cnpg/<app>/`). This is independent of
-the in-cluster MinIO tenant and the TrueNAS that serves primary storage, satisfying the
-offsite (3-2-1) requirement. Velero explicitly **skips** filesystem backup of
-`tns-fast-nvmeof` volumes (CNPG + Valkey) via `velero-resource-policy.yaml`, because Postgres
-is backed up consistently by Barman.
+All S3 backup targets live **offsite** in a single **Hetzner Object Storage** bucket
+(provisioned by OpenTofu — `tofu/object-storage.tf`, default name `ngoldack-homelab-dr`,
+location `fsn1`), separated by object prefixes (`etcd-backups/`, `k8s-backups/`,
+`cnpg/<app>/`). This is independent of the in-cluster MinIO tenant and the TrueNAS that
+serves primary storage, satisfying the offsite (3-2-1) requirement. Velero explicitly
+**skips** filesystem backup of `tns-fast-nvmeof` volumes (CNPG + Valkey) via
+`velero-resource-policy.yaml`, because Postgres is backed up consistently by Barman.
 
 ## What you must safeguard off-cluster
 
@@ -36,20 +37,32 @@ Recovery is impossible without these. Keep copies **outside** the cluster and Tr
 
 These are one-time setup steps. Until done, the jobs exist but fail/no-op.
 
-1. **Create the OVH Object Storage bucket** and an S3 user/credential with read/write on it.
-   All backup streams share this one bucket, separated by prefixes (`etcd-backups/`,
-   `k8s-backups/`, `cnpg/<app>/`).
-2. **Fill the OVH bucket name, region and endpoint** (replace `changeme-ovh-dr-bucket` and the
-   `s3.gra.io.cloud.ovh.net` endpoint / `gra` region) in:
+1. **Generate Hetzner Object Storage S3 credentials.** Hetzner has **no API/Terraform** for
+   credentials — create them in the Hetzner Cloud Console (Security -> S3 Credentials ->
+   Generate). The secret key is shown only once. Put both keys in `tofu/secret.sops.yaml`
+   (`hetzner_s3_access_key` / `hetzner_s3_secret_key`) and re-encrypt:
+   ```bash
+   SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/secret.sops.yaml
+   ```
+2. **Provision the bucket with OpenTofu.** The bucket, versioning and lifecycle rules are
+   declared in `tofu/object-storage.tf` (the AWS provider is pointed at the Hetzner S3
+   endpoint). The default name is `var.hetzner_dr_bucket_name = "ngoldack-homelab-dr"` and
+   location `var.hetzner_objectstorage_location = "fsn1"`:
+   ```bash
+   cd tofu && tofu apply
+   ```
+   If you change the bucket name/location, update the Kubernetes manifests in step 3 to match.
+3. **Set the bucket name, region and endpoint** (these are pre-filled for the defaults —
+   `ngoldack-homelab-dr`, `fsn1`, `https://fsn1.your-objectstorage.com`) in:
    - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
    - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
    - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-objectstore.yaml`
-3. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME`), then re-encrypt
-   in place with `sops --encrypt --in-place <file>`:
+4. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME` with the same Hetzner
+   keys from step 1), then re-encrypt in place with `sops --encrypt --in-place <file>`:
    - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
    - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
    - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-s3.sops.yaml`
-4. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
+5. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
    API access (`tofu/talos.tf` -> `machine.features.kubernetesTalosAPIAccess`):
    ```bash
    cd tofu && tofu apply
@@ -84,8 +97,8 @@ kubectl -n velero get backups
    ```
 2. Fetch and decrypt the latest etcd snapshot from S3, then decrypt with age:
    ```bash
-   aws --endpoint-url https://s3.gra.io.cloud.ovh.net s3 cp \
-     s3://<ovh-bucket>/etcd-backups/<snapshot>.age ./snapshot.age
+   aws --endpoint-url https://fsn1.your-objectstorage.com s3 cp \
+     s3://<hetzner-bucket>/etcd-backups/<snapshot>.age ./snapshot.age
    age -d -i <homelab-age-identity> -o db.snapshot snapshot.age
    ```
 3. Bootstrap the first control-plane node recovering from the snapshot:
@@ -147,9 +160,9 @@ Use this for accidentally deleted manifests/PVCs that are **not** CNPG/Valkey vo
 
 ## Known gaps / follow-ups
 
-- **Offsite copy (3-2-1): satisfied.** All backups are replicated to OVH Object Storage,
+- **Offsite copy (3-2-1): satisfied.** All backups are replicated to Hetzner Object Storage,
   independent of the in-cluster MinIO tenant and the TrueNAS serving primary storage. Ensure
-  the OVH credentials and the age key / tfstate are themselves recoverable off-cluster.
+  the Hetzner credentials and the age key / tfstate are themselves recoverable off-cluster.
 - **No automated backup-failure alerting.** The cluster runs `victoria-metrics-single`
   (no VM Operator / `VMRule` CRDs), so backup metrics are not yet alerted on. Follow-up:
   add scraping of Velero + CNPG backup metrics and alert on missed/failed backups.

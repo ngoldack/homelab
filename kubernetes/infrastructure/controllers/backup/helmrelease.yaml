@@ -28,25 +28,26 @@ spec:
           - mountPath: /plugins
             name: plugins
 
-    # S3-compatible Backup Storage Location — OVH Object Storage (offsite DR).
-    # All backup streams share one OVH bucket, separated by object prefixes:
+    # S3-compatible Backup Storage Location — Hetzner Object Storage (offsite DR).
+    # The bucket is provisioned by OpenTofu (tofu/object-storage.tf). All backup
+    # streams share one Hetzner bucket, separated by object prefixes:
     #   k8s-backups/   -> Velero (this BSL)
     #   etcd-backups/  -> talos-backup
     #   cnpg/<app>/    -> CloudNativePG Barman
     configuration:
       backupStorageLocation:
-        - name: ovh-dr
+        - name: hetzner-dr
           provider: aws
-          # CHANGEME: replace with your OVH Object Storage (S3) bucket name.
-          bucket: changeme-ovh-dr-bucket
+          # Bucket name must match tofu var.hetzner_dr_bucket_name.
+          bucket: ngoldack-homelab-dr
           prefix: k8s-backups
           default: true
           config:
-            # CHANGEME: set to your OVH region (e.g. gra, sbg, de, waw, bhs).
-            region: gra
+            # Hetzner Object Storage location (fsn1=Falkenstein, nbg1=Nuremberg, hel1=Helsinki).
+            region: fsn1
             s3ForcePathStyle: true
-            # CHANGEME: OVH S3 endpoint for the chosen region.
-            s3Url: https://s3.gra.io.cloud.ovh.net
+            # Hetzner S3 endpoint for the chosen location.
+            s3Url: https://fsn1.your-objectstorage.com
 
       # Use Kopia as the default volumes file-system uploader (modern, faster, and more robust than restic)
       defaultVolumesToFsBackup: true
@@ -70,7 +71,7 @@ spec:
           ttl: 240h # Retain backups for 10 days
           includedNamespaces:
             - "*"
-          storageLocation: ovh-dr
+          storageLocation: hetzner-dr
           # Skip filesystem backup of CNPG/Valkey volumes (tns-fast-nvmeof); their
           # state is owned by the Barman Cloud plugin. See velero-resource-policy.yaml.
           resourcePolicy:

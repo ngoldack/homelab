@@ -1,5 +1,5 @@
 # Barman Cloud object store for the n8n-postgres cluster.
-# WAL archive + base backups land in the OVH Object Storage DR bucket under the
+# WAL archive + base backups land in the Hetzner Object Storage DR bucket under the
 # cnpg/n8n prefix, enabling point-in-time recovery (PITR). Referenced from
 # cnpg-cluster.yaml .spec.plugins.
 apiVersion: barmancloud.cnpg.io/v1
@@ -10,10 +10,10 @@ metadata:
 spec:
   retentionPolicy: "14d"
   configuration:
-    # CHANGEME: replace the bucket with your OVH Object Storage (S3) bucket name.
-    destinationPath: s3://changeme-ovh-dr-bucket/cnpg/n8n
-    # CHANGEME: OVH S3 endpoint for the chosen region.
-    endpointURL: https://s3.gra.io.cloud.ovh.net
+    # Bucket name must match tofu var.hetzner_dr_bucket_name.
+    destinationPath: s3://ngoldack-homelab-dr/cnpg/n8n
+    # Hetzner S3 endpoint for the chosen location.
+    endpointURL: https://fsn1.your-objectstorage.com
     s3Credentials:
       accessKeyId:
         name: n8n-backup-s3

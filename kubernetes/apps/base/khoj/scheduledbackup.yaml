@@ -1,0 +1,16 @@
+# Daily base backup of khoj-postgres via the Barman Cloud plugin.
+# Continuous WAL archiving (configured on the Cluster) provides PITR between bases.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: khoj-postgres-daily
+  namespace: khoj
+spec:
+  # 6-field cron (CNPG includes a seconds field). Daily at 01:00.
+  schedule: "0 0 1 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: khoj-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

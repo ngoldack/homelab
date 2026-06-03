@@ -1,0 +1,17 @@
+# Barman Cloud CNPG-I plugin (https://cloudnative-pg.io/plugin-barman-cloud).
+# Provides the ObjectStore CRD (barmancloud.cnpg.io) and the barman-cloud plugin
+# deployment that CloudNativePG Clusters reference via .spec.plugins for S3 backups
+# (continuous WAL archiving + base backups => PITR).
+#
+# Requirements (both satisfied in this cluster):
+#   - CloudNativePG operator >= 1.26 (cnpg-operator chart 0.26.x)
+#   - cert-manager (used to issue the plugin's mTLS certs)
+#
+# manifest.yaml is vendored verbatim from the upstream v0.12.0 release so that
+# `kustomize build` stays deterministic and offline. To upgrade: re-download
+#   https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/<ver>/manifest.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - manifest.yaml

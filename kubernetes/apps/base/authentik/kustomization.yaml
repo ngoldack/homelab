@@ -3,6 +3,9 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
+  - barman-objectstore.yaml
+  - barman-s3.sops.yaml
+  - scheduledbackup.yaml
   - valkey.yaml
   - secrets.sops.yaml
   - blueprint.yaml

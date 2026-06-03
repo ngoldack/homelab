@@ -65,6 +65,24 @@ data "talos_machine_configuration" "controlplane" {
           }
         }
       }),
+      # Grant the in-cluster talos-backup CronJob (velero namespace) scoped Talos API
+      # access so it can run `etcd snapshot` without a mounted admin talosconfig.
+      # Pods request a projected talosconfig via a talos.dev/v1alpha1 ServiceAccount.
+      yamlencode({
+        machine = {
+          features = {
+            kubernetesTalosAPIAccess = {
+              enabled = true
+              allowedRoles = [
+                "os:etcd:backup",
+              ]
+              allowedKubernetesNamespaces = [
+                "velero",
+              ]
+            }
+          }
+        }
+      }),
     ],
     length(var.talos_default_extensions) > 0 ? [
       yamlencode({

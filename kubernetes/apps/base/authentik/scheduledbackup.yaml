@@ -1,0 +1,16 @@
+# Daily base backup of authentik-postgres via the Barman Cloud plugin.
+# Continuous WAL archiving (configured on the Cluster) provides PITR between bases.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: authentik-postgres-daily
+  namespace: authentik
+spec:
+  # 6-field cron (CNPG includes a seconds field). Daily at 01:00.
+  schedule: "0 0 1 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: authentik-postgres
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

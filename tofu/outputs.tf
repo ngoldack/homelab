@@ -19,3 +19,12 @@ output "node_ips" {
     }
   }
 }
+
+output "hetzner_dr_bucket" {
+  description = "Name and S3 endpoint of the Hetzner Object Storage offsite DR bucket"
+  value = {
+    bucket   = aws_s3_bucket.dr.id
+    endpoint = "https://${var.hetzner_objectstorage_location}.your-objectstorage.com"
+    region   = var.hetzner_objectstorage_location
+  }
+}

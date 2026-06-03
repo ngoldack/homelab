@@ -13,6 +13,14 @@ terraform {
       source  = "carlpett/sops"
       version = "~> 1.4"
     }
+    # Used only to provision Hetzner Object Storage (S3-compatible) buckets. The
+    # Hetzner Cloud provider has no Object Storage resources, and Hetzner exposes
+    # no API for buckets/credentials — only the S3 API itself — so we drive it
+    # through the standard AWS S3 resources pointed at the Hetzner endpoint.
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
   }
 
   # Enable native OpenTofu state file encryption
@@ -49,4 +57,24 @@ provider "proxmox" {
 
 provider "talos" {
   # Configuration parameters if needed; defaults are generally fine.
+}
+
+# AWS provider aimed at Hetzner Object Storage (not AWS). All AWS-specific
+# metadata/credential validation is disabled because the endpoint is S3-compatible
+# but not actually AWS. Credentials are the Hetzner Console-generated S3 keys.
+provider "aws" {
+  region     = var.hetzner_objectstorage_location # cosmetic; Hetzner ignores it
+  access_key = local.proxmox_secrets.hetzner_s3_access_key
+  secret_key = local.proxmox_secrets.hetzner_s3_secret_key
+
+  skip_credentials_validation = true # no AWS STS
+  skip_region_validation      = true # fsn1/nbg1/hel1 are not AWS regions
+  skip_requesting_account_id  = true # no IAM/STS GetCallerIdentity
+  skip_metadata_api_check     = true
+
+  s3_use_path_style = true
+
+  endpoints {
+    s3 = "https://${var.hetzner_objectstorage_location}.your-objectstorage.com"
+  }
 }

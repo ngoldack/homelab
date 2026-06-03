@@ -26,6 +26,9 @@ resources:
   - kserve-operator
   - keda
   # Object storage
+  - minio-operator
+  # Infrastructure-as-data control plane (provisions MinIO buckets/users/policies)
+  - crossplane
   - s3-provisioner
   # Platform services
   - backup

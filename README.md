@@ -98,4 +98,4 @@ flux bootstrap github \
 
 ## Developer and Agent Guidelines
 
-For comprehensive cross-system checklists, custom GitOps conventions (Cilium integration, CrowdSec parsing rules, and CloudNativePG storage policies), and rules of engagement (SOPS secrets and validation workflows) designed specifically for human developers and AI coding agents, please refer directly to [AGENTS.md](AGENTS.md).
+For comprehensive cross-system checklists, custom GitOps conventions (Cilium integration and CloudNativePG storage policies), and rules of engagement (SOPS secrets and validation workflows) designed specifically for human developers and AI coding agents, please refer directly to [AGENTS.md](AGENTS.md).

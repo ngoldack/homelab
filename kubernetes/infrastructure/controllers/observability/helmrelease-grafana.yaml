@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: grafana
-      version: "8.x"
+      version: "10.5.x"
       sourceRef:
         kind: HelmRepository
         name: grafana
@@ -22,6 +22,32 @@ spec:
     admin:
       existingSecret: "grafana-admin-credentials"
       passwordKey: "admin-password"
+
+    # ── Authentik SSO (OpenID Connect via generic_oauth) ───────────────────
+    # NOTE: this HelmRelease lives in the infra-controllers layer, which has no
+    # Flux postBuild var substitution (enabling it would clobber the
+    # ${datasource}/${DS_VICTORIAMETRICS} tokens in the dashboard JSON). The
+    # public domain is therefore written literally here; only the client secret
+    # is sourced from SOPS via envValueFrom.
+    grafana.ini:
+      server:
+        root_url: https://grafana.netbird.ngoldack.xyz
+      auth.generic_oauth:
+        enabled: true
+        name: Authentik
+        client_id: grafana
+        scopes: "openid email profile"
+        auth_url: https://auth.ngoldack.xyz/application/o/authorize/
+        token_url: https://auth.ngoldack.xyz/application/o/token/
+        api_url: https://auth.ngoldack.xyz/application/o/userinfo/
+        # Authentik returns groups; map the akadmin group to Grafana admin.
+        role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
+        use_pkce: true
+    envValueFrom:
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+        secretKeyRef:
+          name: grafana-admin-credentials
+          key: oauth-client-secret
     sidecar:
       dashboards:
         enabled: true
@@ -49,6 +75,21 @@ spec:
         url: http://loki.monitoring.svc.cluster.local:3100
         jsonData:
           maxLines: 1000
+      - name: Tempo
+        type: tempo
+        access: proxy
+        url: http://tempo.monitoring.svc.cluster.local:3200
+        jsonData:
+          # Correlate spans with logs (Loki) and exemplar metrics (VictoriaMetrics).
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+          tracesToMetrics:
+            datasourceUid: victoriametrics
+          serviceMap:
+            datasourceUid: victoriametrics
+          nodeGraph:
+            enabled: true
 
     resources:
       requests:

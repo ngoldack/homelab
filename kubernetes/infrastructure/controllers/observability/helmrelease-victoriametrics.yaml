@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: victoria-metrics-single
-      version: "0.24.x"
+      version: "0.39.x"
       sourceRef:
         kind: HelmRepository
         name: vm

@@ -19,3 +19,7 @@ spec:
       name: sops-age
   dependsOn:
     - name: infra-configs
+  postBuild:
+    substituteFrom:
+      - kind: Secret
+        name: cluster-secrets

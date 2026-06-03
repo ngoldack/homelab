@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: keda
-      version: "2.14.x"
+      version: "2.20.x"
       sourceRef:
         kind: HelmRepository
         name: keda

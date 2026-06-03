@@ -1,0 +1,13 @@
+# Binds provider-minio to the in-cluster Tenant over plain HTTP. minioURL host is
+# parsed for the S3 endpoint; credentials come from the admin secret above.
+apiVersion: minio.crossplane.io/v1
+kind: ProviderConfig
+metadata:
+  name: minio-provider
+spec:
+  minioURL: http://minio.minio.svc.cluster.local
+  credentials:
+    source: InjectedIdentity
+    apiSecretRef:
+      name: minio-provider-credentials
+      namespace: crossplane-system

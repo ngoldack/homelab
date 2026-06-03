@@ -16,7 +16,6 @@ resources:
   # Security & runtime enforcement
   - security
   - tetragon
-  - crowdsec
   # Networking overlay
   - netbird
   # Data operators
@@ -27,7 +26,9 @@ resources:
   - kserve-operator
   - keda
   # Object storage
-  - s3-provisioner
+  - minio-operator
+  # Infrastructure-as-data control plane (provisions MinIO buckets/users/policies)
+  - crossplane
   # Platform services
   - backup
   - k8sgpt

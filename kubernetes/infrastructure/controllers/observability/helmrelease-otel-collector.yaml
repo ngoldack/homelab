@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: opentelemetry-collector
-      version: "0.100.x"
+      version: "0.158.x"
       sourceRef:
         kind: HelmRepository
         name: open-telemetry
@@ -20,6 +20,13 @@ spec:
     crds: CreateReplace
   values:
     mode: daemonset
+    # Node-local agent: ships pod/host logs and host metrics. Application traces
+    # and OTLP telemetry go to the otel-gateway (deployment) for tail sampling.
+
+    # contrib distro: includes filelog, hostmetrics, k8sattributes,
+    # prometheusremotewrite (the chart requires image.repository to be set).
+    image:
+      repository: otel/opentelemetry-collector-contrib
 
     presets:
       logsCollection:

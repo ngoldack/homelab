@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: velero
-      version: "7.2.x"
+      version: "12.0.x"
       sourceRef:
         kind: HelmRepository
         name: velero
@@ -23,23 +23,31 @@ spec:
     # Use AWS plugin for standard S3 compatible endpoints
     initContainers:
       - name: velero-plugin-for-aws
-        image: velero/velero-plugin-for-aws:v1.10.0
+        image: velero/velero-plugin-for-aws:v1.14.1
         volumeMounts:
           - mountPath: /plugins
             name: plugins
 
-    # S3-compatible Backup Storage Location
+    # S3-compatible Backup Storage Location — Hetzner Object Storage (offsite DR).
+    # The bucket is provisioned by OpenTofu (tofu/object-storage.tf). All backup
+    # streams share one Hetzner bucket, separated by object prefixes:
+    #   k8s-backups/   -> Velero (this BSL)
+    #   etcd-backups/  -> talos-backup
+    #   cnpg/<app>/    -> CloudNativePG Barman
     configuration:
       backupStorageLocation:
-        - name: truenas-rustfs
+        - name: hetzner-dr
           provider: aws
-          bucket: k8s-backups-rustfs
+          # Bucket name must match tofu var.hetzner_dr_bucket_name.
+          bucket: ngoldack-homelab-dr
+          prefix: k8s-backups
           default: true
           config:
-            region: us-east-1
+            # Hetzner Object Storage location (fsn1=Falkenstein, nbg1=Nuremberg, hel1=Helsinki).
+            region: fsn1
             s3ForcePathStyle: true
-            # Replace with your actual TrueNAS RustFS S3 IP/Hostname or internal Gateway URL
-            s3Url: http://truenas-scale.local:9000
+            # Hetzner S3 endpoint for the chosen location.
+            s3Url: https://fsn1.your-objectstorage.com
 
       # Use Kopia as the default volumes file-system uploader (modern, faster, and more robust than restic)
       defaultVolumesToFsBackup: true
@@ -63,7 +71,7 @@ spec:
           ttl: 240h # Retain backups for 10 days
           includedNamespaces:
             - "*"
-          storageLocation: truenas-rustfs
+          storageLocation: hetzner-dr
           # Skip filesystem backup of CNPG/Valkey volumes (tns-fast-nvmeof); their
           # state is owned by the Barman Cloud plugin. See velero-resource-policy.yaml.
           resourcePolicy:

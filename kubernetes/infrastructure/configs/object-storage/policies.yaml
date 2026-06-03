@@ -1,0 +1,30 @@
+# Least-privilege policies: allowBucket grants full access scoped to one bucket.
+apiVersion: minio.crossplane.io/v1
+kind: Policy
+metadata:
+  name: vllm-models-rw
+spec:
+  forProvider:
+    allowBucket: vllm-models
+  providerConfigRef:
+    name: minio-provider
+---
+apiVersion: minio.crossplane.io/v1
+kind: Policy
+metadata:
+  name: authentik-media-rw
+spec:
+  forProvider:
+    allowBucket: authentik-media
+  providerConfigRef:
+    name: minio-provider
+---
+apiVersion: minio.crossplane.io/v1
+kind: Policy
+metadata:
+  name: tempo-traces-rw
+spec:
+  forProvider:
+    allowBucket: tempo-traces
+  providerConfigRef:
+    name: minio-provider

@@ -5,7 +5,7 @@ metadata:
 spec:
   acme:
     server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: changeme@example.com  # TODO: set to your real ACME contact email
+    email: ${ACME_EMAIL}
     privateKeySecretRef:
       name: letsencrypt-staging-key
     solvers:
@@ -21,7 +21,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: changeme@example.com  # TODO: set to your real ACME contact email
+    email: ${ACME_EMAIL}
     privateKeySecretRef:
       name: letsencrypt-production-key
     solvers:

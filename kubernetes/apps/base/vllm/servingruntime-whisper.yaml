@@ -20,6 +20,9 @@ spec:
         # Whisper is an encoder-decoder STT model exposed via /v1/audio/transcriptions.
         - "--task"
         - "transcription"
+        # Emit request traces over OTLP gRPC to the otel-gateway (-> Tempo).
+        - "--otlp-traces-endpoint"
+        - "http://otel-gateway.monitoring.svc.cluster.local:4317"
       securityContext:
         capabilities:
           add: ["SYS_NICE"]

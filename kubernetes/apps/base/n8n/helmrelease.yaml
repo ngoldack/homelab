@@ -31,7 +31,7 @@ spec:
       port: 5432
       username: n8n
       database: n8n
-      existingSecret: n8n-app-secrets
+      existingSecret: n8n-postgres-credentials
 
     # ── Queue mode backed by the Valkey operator instance ───────────────────
     redis:
@@ -54,11 +54,11 @@ spec:
     timezone: "Europe/Berlin"
 
     # Public webhook/editor base URL on the NetBird mesh.
-    # TODO: set to your NetBird-resolvable n8n hostname.
+    # Public webhook host (DOMAIN substituted by Flux from cluster-secrets).
     extraEnvVars:
-      WEBHOOK_URL: "https://n8n.netbird.example.com/"
+      WEBHOOK_URL: "https://n8n.netbird.${DOMAIN}/"
       N8N_PROTOCOL: "https"
-      N8N_HOST: "n8n.netbird.example.com"
+      N8N_HOST: "n8n.netbird.${DOMAIN}"
 
     # No object storage; n8n stores binary data in the database/filesystem.
     minio:

@@ -1,6 +1,7 @@
 # Barman Cloud object store for the authentik-postgres cluster.
-# WAL archive + base backups land in the cnpg-backups-rustfs bucket on TrueNAS RustFS,
-# enabling point-in-time recovery (PITR). Referenced from cnpg-cluster.yaml .spec.plugins.
+# WAL archive + base backups land in the Hetzner Object Storage DR bucket under the
+# cnpg/authentik prefix, enabling point-in-time recovery (PITR). Referenced from
+# cnpg-cluster.yaml .spec.plugins.
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
 metadata:
@@ -10,8 +11,10 @@ spec:
   # Keep 14 days of backups + WALs; barman prunes older base backups on schedule.
   retentionPolicy: "14d"
   configuration:
-    destinationPath: s3://cnpg-backups-rustfs/authentik
-    endpointURL: http://truenas-scale.local:9000
+    # Bucket name must match tofu var.hetzner_dr_bucket_name.
+    destinationPath: s3://ngoldack-homelab-dr/cnpg/authentik
+    # Hetzner S3 endpoint for the chosen location.
+    endpointURL: https://fsn1.your-objectstorage.com
     s3Credentials:
       accessKeyId:
         name: authentik-backup-s3

@@ -10,6 +10,8 @@ spec:
   wait: true
   timeout: 15m
   retryInterval: 1m
+  dependsOn:
+    - name: cluster-vars
   sourceRef:
     kind: GitRepository
     name: flux-system
@@ -39,3 +41,7 @@ spec:
     provider: sops
     secretRef:
       name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: Secret
+        name: cluster-secrets

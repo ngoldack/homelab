@@ -7,7 +7,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 - `tofu/` — OpenTofu infrastructure code (Proxmox VMs, Talos machine configs, secrets). Uses `bpg/proxmox` and `siderolabs/talos` providers.
 - `kubernetes/` — Kubernetes manifests reconciled by Flux, following the canonical Flux layout:
   - `kubernetes/clusters/production/` — Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`).
-  - `kubernetes/infrastructure/controllers/` — operators, agents, CNI/CSI, and the central Helm `sources.yaml` (e.g. `cilium`, `cert-manager`, `crowdsec`).
+  - `kubernetes/infrastructure/controllers/` — operators, agents, CNI/CSI, and the central Helm `sources.yaml` (e.g. `cilium`, `cert-manager`).
   - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers (`cluster-issuers`, `kyverno-policies`).
   - `kubernetes/apps/base/<app>/` — shared application manifests; `kubernetes/apps/production/<app>/` — per-cluster overlays (e.g. `langfuse`, `authentik`).
 
@@ -33,7 +33,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 ### Commit Messages
 - Follow the **Conventional Commits** specification: `<type>(<scope>): <description>`
 - Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `ci`, `revert`
-- Scopes (optional): `tofu`, `kubernetes`, `cilium`, `cert-manager`, `flux`, `ci`, `crowdsec`, `authentik`
+- Scopes (optional): `tofu`, `kubernetes`, `cilium`, `cert-manager`, `flux`, `ci`, `authentik`
 - Examples:
   - `feat(tofu): add worker-large node pool`
   - `fix(cilium): correct kube-proxy replacement flag`
@@ -53,14 +53,11 @@ When installing or modifying any application in this cluster context, AI agents 
   - `local-storage` — node-local, disposable. Small scratch only.
 - **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`.
 
-### 2. Security & Policy (Cilium & CrowdSec)
-- **Log Scraping Ingest**: If the application has public ingress, is an authentication provider, or handles sensitive routing, its logs must be fed into the CrowdSec engine. 
-- **Acquisition Additions**: Add matching target parameters inside `kubernetes/infrastructure/controllers/crowdsec/helmrelease.yaml` under `values.agent.acquisition` to target target namespaces and parse application pods.
+### 2. Security & Policy (Cilium)
 - **Cilium Ingress Engine Linkages**: Ensure that custom application routing maps to Cilium's eBPF components. When possible, deploy Cilium-specific annotations to integrate and capture traffic drops.
 
 ### 3. Identity Provider (Authentik) Checks
-- **External Security Interlocks**: Ensure applications that use Authentik utilize the custom **CrowdSec IP Reputation Check** python expression policy blueprint (`crowdsec-ip-rep`). This guarantees that login interfaces fail-closed if targeted by malicious actors.
-- **Environment API Integration**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `secrets.sops.yaml` (e.g., `CROWDSEC_BOUNCER_KEY` maps to the corresponding registered Local API bouncer identity).
+- **Environment API Integration**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `secrets.sops.yaml`.
 
 ### 4. Code compliance & Validation
 - **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps/production` and `kustomize build kubernetes/infrastructure/controllers` (and `.../configs`).

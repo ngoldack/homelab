@@ -1,6 +1,6 @@
 # Official Sidero Labs talos-backup tool (https://github.com/siderolabs/talos-backup).
 # Takes an etcd snapshot via the in-cluster Talos API, age-encrypts it, and uploads
-# it to the TrueNAS RustFS S3 endpoint. Replaces the previous hand-rolled CronJob.
+# it to the Hetzner Object Storage (S3) DR bucket. Replaces the previous hand-rolled CronJob.
 #
 # In-cluster Talos API access is granted by the controlplane machine-config patch
 # (tofu/talos.tf -> machine.features.kubernetesTalosAPIAccess) which allows the
@@ -54,15 +54,18 @@ spec:
               command:
                 - /talos-backup
               env:
-                # S3 (TrueNAS RustFS) destination.
+                # S3 (Hetzner Object Storage) destination — offsite DR, shared bucket.
                 - name: CUSTOM_S3_ENDPOINT
-                  value: "http://truenas-scale.local:9000"
+                  # Hetzner S3 endpoint for the chosen location.
+                  value: "https://fsn1.your-objectstorage.com"
                 - name: USE_PATH_STYLE
                   value: "true"
                 - name: AWS_REGION
-                  value: "us-east-1"
+                  # Hetzner Object Storage location (fsn1, nbg1, hel1).
+                  value: "fsn1"
                 - name: BUCKET
-                  value: "k8s-backups-rustfs"
+                  # Bucket name must match tofu var.hetzner_dr_bucket_name.
+                  value: "ngoldack-homelab-dr"
                 - name: S3_PREFIX
                   value: "etcd-backups"
                 - name: CLUSTER_NAME

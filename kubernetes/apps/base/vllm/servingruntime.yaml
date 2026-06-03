@@ -19,6 +19,9 @@ spec:
         - "$(storageUri)"
         - "--port"
         - "8080"
+        # Emit request traces over OTLP gRPC to the otel-gateway (-> Tempo).
+        - "--otlp-traces-endpoint"
+        - "http://otel-gateway.monitoring.svc.cluster.local:4317"
       securityContext:
         capabilities:
           # vLLM CPU backend uses sched_setaffinity for OMP thread pinning.

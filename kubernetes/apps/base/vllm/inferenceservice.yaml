@@ -54,7 +54,7 @@ spec:
         limits:
           cpu: "14"
           memory: "28Gi"
-      # Model weights are staged on fast NFS for local caching after the RustFS cold start.
+      # Model weights are staged on fast NFS for local caching after the MinIO cold start.
       storageSpec:
         storageClassName: tns-fast-nfs
         accessModes:

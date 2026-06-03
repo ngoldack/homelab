@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: authentik
-      version: "2024.4.2"
+      version: "2026.5.2"
       sourceRef:
         kind: HelmRepository
         name: authentik
@@ -41,8 +41,8 @@ spec:
         port: 25
         use_tls: false
 
-    # Secrets and the CrowdSec bouncer key are injected via env so they can reference
-    # SOPS-managed Kubernetes Secrets instead of being inlined as plaintext values.
+    # Secrets are injected via env so they can reference SOPS-managed Kubernetes
+    # Secrets instead of being inlined as plaintext values.
     # global.env applies to both the server and worker deployments.
     global:
       env:
@@ -56,11 +56,41 @@ spec:
             secretKeyRef:
               name: authentik-secrets
               key: secret-key
-        - name: CROWDSEC_BOUNCER_KEY
+        # OAuth2 client secrets referenced by the SSO blueprint via the !Env tag.
+        # The worker reads these when importing perplexity-stack-proxy-blueprint.
+        - name: AUTHENTIK_GRAFANA_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
               name: authentik-secrets
-              key: authentik-bouncer-key
+              key: grafana-oauth-client-secret
+        - name: AUTHENTIK_LITELLM_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: litellm-oauth-client-secret
+        # ── Media storage on in-cluster MinIO (S3) ─────────────────────────────
+        # Bucket + service user/policy are provisioned by Crossplane
+        # (infrastructure/configs/object-storage). The pods talk to MinIO over the
+        # external Gateway hostname so that presigned media URLs (SECURE_URLS=true)
+        # are valid for browsers; the signature host matches the request host.
+        - name: AUTHENTIK_STORAGE__BACKEND
+          value: s3
+        - name: AUTHENTIK_STORAGE__S3__BUCKET_NAME
+          value: authentik-media
+        - name: AUTHENTIK_STORAGE__S3__ENDPOINT
+          value: https://s3.${DOMAIN}
+        - name: AUTHENTIK_STORAGE__S3__SECURE_URLS
+          value: "true"
+        - name: AUTHENTIK_STORAGE__S3__ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-media-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: AUTHENTIK_STORAGE__S3__SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-media-credentials
+              key: AWS_SECRET_ACCESS_KEY
 
     server:
       replicas: 1
@@ -68,9 +98,8 @@ spec:
     worker:
       replicas: 1
 
-    # Load the CrowdSec IP-reputation policy blueprint via the chart-native mechanism
-    # so it is reliably discovered and imported by the worker.
+    # Application proxy providers/outpost are imported from a chart-native blueprint
+    # ConfigMap so they are reliably discovered and imported by the worker.
     blueprints:
       configMaps:
-        - crowdsec-authentik-blueprint
         - perplexity-stack-proxy-blueprint

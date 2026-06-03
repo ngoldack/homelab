@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: litellm
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: "/metrics"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -24,7 +28,7 @@ spec:
       containers:
         - name: litellm
           # Pinned stable release for reproducible GitOps (was main-latest).
-          image: ghcr.io/berriai/litellm:main-v1.66.0-stable
+          image: ghcr.io/berriai/litellm:main-v1.83.14-stable
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -45,6 +49,31 @@ spec:
                 secretKeyRef:
                   name: litellm-secrets
                   key: master-key
+            # ── Authentik SSO for the LiteLLM proxy UI (generic OIDC) ─────────
+            # Reached directly over the NetBird mesh; callback is
+            # <PROXY_BASE_URL>/sso/callback.
+            - name: PROXY_BASE_URL
+              value: "https://litellm.netbird.${DOMAIN}"
+            - name: GENERIC_CLIENT_ID
+              value: "litellm"
+            - name: GENERIC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: sso-client-secret
+            - name: GENERIC_AUTHORIZATION_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/authorize/"
+            - name: GENERIC_TOKEN_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/token/"
+            - name: GENERIC_USERINFO_ENDPOINT
+              value: "https://auth.${DOMAIN}/application/o/userinfo/"
+            - name: GENERIC_SCOPE
+              value: "openid email profile"
+            # OpenTelemetry tracing -> otel-gateway (OTLP gRPC) -> Tempo.
+            - name: OTEL_EXPORTER
+              value: "otlp_grpc"
+            - name: OTEL_ENDPOINT
+              value: "http://otel-gateway.monitoring.svc.cluster.local:4317"
           volumeMounts:
             - name: config
               mountPath: /etc/litellm

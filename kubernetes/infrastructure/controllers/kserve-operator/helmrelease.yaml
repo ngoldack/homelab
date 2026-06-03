@@ -50,3 +50,15 @@ spec:
         # Raw deployment mode (Standard is the canonical value; RawDeployment
         # remains accepted as a legacy alias).
         deploymentMode: "RawDeployment"
+      # Global S3 defaults baked into the inferenceservice-config ConfigMap. The
+      # Crossplane-managed connection secret only carries access/secret keys, so
+      # the endpoint/region/scheme for the in-cluster MinIO tenant are supplied
+      # here (HTTP, no TLS, service minio.minio.svc.cluster.local:80).
+      storage:
+        s3:
+          endpoint: "minio.minio.svc.cluster.local"
+          useHttps: "0"
+          useVirtualBucket: "false"
+          region: "us-east-1"
+          accessKeyIdName: "AWS_ACCESS_KEY_ID"
+          secretAccessKeyName: "AWS_SECRET_ACCESS_KEY"

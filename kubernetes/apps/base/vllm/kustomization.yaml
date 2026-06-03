@@ -5,7 +5,6 @@ resources:
   - servingruntime.yaml
   - servingruntime-whisper.yaml
   - secrets.sops.yaml
-  - vllm-s3-credentials.sops.yaml
   - serviceaccount.yaml
   - voice-llm.yaml
   - whisper.yaml

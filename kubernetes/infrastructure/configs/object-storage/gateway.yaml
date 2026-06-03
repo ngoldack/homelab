@@ -1,0 +1,52 @@
+# External S3 endpoint for browser-reachable, presigned object URLs (e.g.
+# Authentik media). cert-manager issues the listener cert via the production
+# ClusterIssuer; traffic terminates TLS at the Cilium Gateway and forwards to the
+# in-cluster MinIO tenant service on plain HTTP (port 80 -> container 9000).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: minio-gateway
+  namespace: minio
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "s3.${DOMAIN}"
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "s3.${DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: minio-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-s3
+  namespace: minio
+spec:
+  parentRefs:
+    - name: minio-gateway
+  hostnames:
+    - s3.${DOMAIN}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: minio
+          port: 80

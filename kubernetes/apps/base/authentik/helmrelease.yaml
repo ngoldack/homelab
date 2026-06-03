@@ -41,8 +41,8 @@ spec:
         port: 25
         use_tls: false
 
-    # Secrets and the CrowdSec bouncer key are injected via env so they can reference
-    # SOPS-managed Kubernetes Secrets instead of being inlined as plaintext values.
+    # Secrets are injected via env so they can reference SOPS-managed Kubernetes
+    # Secrets instead of being inlined as plaintext values.
     # global.env applies to both the server and worker deployments.
     global:
       env:
@@ -56,11 +56,6 @@ spec:
             secretKeyRef:
               name: authentik-secrets
               key: secret-key
-        - name: CROWDSEC_BOUNCER_KEY
-          valueFrom:
-            secretKeyRef:
-              name: authentik-secrets
-              key: authentik-bouncer-key
 
     server:
       replicas: 1
@@ -68,9 +63,8 @@ spec:
     worker:
       replicas: 1
 
-    # Load the CrowdSec IP-reputation policy blueprint via the chart-native mechanism
-    # so it is reliably discovered and imported by the worker.
+    # Application proxy providers/outpost are imported from a chart-native blueprint
+    # ConfigMap so they are reliably discovered and imported by the worker.
     blueprints:
       configMaps:
-        - crowdsec-authentik-blueprint
         - perplexity-stack-proxy-blueprint

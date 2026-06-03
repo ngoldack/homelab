@@ -8,7 +8,6 @@ resources:
   - scheduledbackup.yaml
   - valkey.yaml
   - secrets.sops.yaml
-  - blueprint.yaml
   - proxy-blueprint.yaml
   - helmrelease.yaml
   - gateway.yaml

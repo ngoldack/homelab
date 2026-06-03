@@ -47,8 +47,7 @@ data:
 
       # ── Attach both providers to the embedded outpost ──────────────────────
       # The embedded outpost is exposed over the NetBird mesh and reverse-proxies
-      # each app. The crowdsec-ip-rep policy bound to default-authentication-flow
-      # is enforced on every login, fail-closed per AGENTS.md.
+      # each app.
       - model: authentik_outposts.outpost
         identifiers:
           name: "authentik Embedded Outpost"

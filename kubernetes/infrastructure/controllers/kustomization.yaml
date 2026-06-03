@@ -16,7 +16,6 @@ resources:
   # Security & runtime enforcement
   - security
   - tetragon
-  - crowdsec
   # Networking overlay
   - netbird
   # Data operators

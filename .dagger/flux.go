@@ -7,8 +7,13 @@ import (
 )
 
 // FluxReconcile forces Flux to reconcile the git source and all three
-// Kustomizations in dependency order. It joins the NetBird mesh first because
-// the cluster API server is only reachable over the private network.
+// Kustomizations in dependency order.
+//
+// Network access to the cluster API server (reachable only over the private
+// mesh) must be established by the caller before invoking this function — e.g.
+// a NetBird connect step in the workflow, or a local mesh connection. The
+// Dagger engine NATs outbound traffic through the host, so a host-side mesh
+// connection is sufficient.
 //
 // This fixes the previous workflow bug which reconciled non-existent
 // Kustomizations named "infrastructure"/"apps"; the real names are
@@ -17,27 +22,16 @@ func (m *Homelab) FluxReconcile(
 	ctx context.Context,
 	// A kubeconfig granting access to the cluster (env://KUBECONFIG or file).
 	kubeconfig *dagger.Secret,
-	// The NetBird setup key used to join the mesh (env://NETBIRD_SETUP_KEY).
-	netbirdSetupKey *dagger.Secret,
-	// +optional
-	managementURL string,
 ) (string, error) {
-	c := m.liveBase().
+	return m.liveBase().
 		WithMountedSecret("/root/.kube/config", kubeconfig).
 		WithEnvVariable("KUBECONFIG", "/root/.kube/config").
-		WithSecretVariable("NB_SETUP_KEY", netbirdSetupKey)
-	if managementURL != "" {
-		c = c.WithEnvVariable("NB_MANAGEMENT_URL", managementURL)
-	}
-	script := connectNetbird() + `
-		echo "==> Reconciling Flux"
-		flux reconcile source git flux-system
-		flux reconcile kustomization infra-controllers
-		flux reconcile kustomization infra-configs
-		flux reconcile kustomization apps
-	`
-	return c.
-		WithExec([]string{"sh", "-euc", script},
-			dagger.ContainerWithExecOpts{InsecureRootCapabilities: true}).
+		WithExec([]string{"bash", "-euc", `
+			echo "==> Reconciling Flux"
+			flux reconcile source git flux-system
+			flux reconcile kustomization infra-controllers
+			flux reconcile kustomization infra-configs
+			flux reconcile kustomization apps
+		`}).
 		Stdout(ctx)
 }

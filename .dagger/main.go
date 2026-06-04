@@ -7,26 +7,45 @@
 // Offline gates (no secrets) live in offline.go and are aggregated by `check`,
 // which is the required branch-protection entrypoint. Live, mutating
 // infrastructure operations (tofu plan/apply/destroy, flux reconcile) live in
-// tofu.go / flux.go and take Dagger secrets as arguments.
+// tofu.go / flux.go and take Dagger secrets as arguments. They assume network
+// connectivity to the cluster is already established by the caller (e.g. a
+// NetBird step before the `dagger call`, or your local mesh connection).
+//
+// All tool versions come from versions.json — the single source of truth.
 package main
 
 import (
+	_ "embed"
+	"encoding/json"
+	"fmt"
+
 	"dagger/homelab/internal/dagger"
 )
 
-// Pinned tool versions. Keep these in sync with .github/workflows and AGENTS.md.
-const (
-	debianImage      = "debian:bookworm-20250520-slim"
-	tofuVersion      = "1.7.2"
-	kubeconformVer   = "0.6.7"
-	kustomizeVersion = "5.4.3"
-	sopsVersion      = "3.9.1"
-	yqVersion        = "4.44.3"
-	actionlintVer    = "1.7.1"
-	trivyVersion     = "0.71.0"
-	fluxVersion      = "2.3.0"
-	netbirdVersion   = "0.28.4"
-)
+// versions.json is the single source of truth for every pinned tool version.
+//
+//go:embed versions.json
+var versionsJSON []byte
+
+type toolVersions struct {
+	Debian      string `json:"debian"`
+	Tofu        string `json:"tofu"`
+	Kustomize   string `json:"kustomize"`
+	Kubeconform string `json:"kubeconform"`
+	Sops        string `json:"sops"`
+	Yq          string `json:"yq"`
+	Actionlint  string `json:"actionlint"`
+	Trivy       string `json:"trivy"`
+	Flux        string `json:"flux"`
+}
+
+func ver() toolVersions {
+	var v toolVersions
+	if err := json.Unmarshal(versionsJSON, &v); err != nil {
+		panic(fmt.Sprintf("invalid versions.json: %v", err))
+	}
+	return v
+}
 
 type Homelab struct {
 	// The repository root, mounted read-only into every tool container.
@@ -45,70 +64,76 @@ func New(
 	return &Homelab{Source: source}
 }
 
+// Versions prints the pinned tool versions (the contents of versions.json).
+func (m *Homelab) Versions() string {
+	return string(versionsJSON)
+}
+
 // base returns the offline toolchain container: everything required by the
-// validation gates (no secrets, no network access to the cluster).
+// validation gates (no secrets, no cluster access).
 func (m *Homelab) base() *dagger.Container {
+	v := ver()
 	return dag.Container().
-		From(debianImage).
+		From("debian:"+v.Debian).
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "--no-install-recommends",
 			"ca-certificates", "curl", "wget", "git", "unzip", "tar", "gzip",
-			"yamllint", "age"}).
+			"bash", "yamllint", "age"}).
 		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists"}).
 		// Arch-aware tool installs (works on amd64 in CI and arm64 locally).
-		With(installTool("tofu", `
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /tmp/tofu.zip \
-			  "https://github.com/opentofu/opentofu/releases/download/v`+tofuVersion+`/tofu_`+tofuVersion+`_linux_${ARCH}.zip"
+			  "https://github.com/opentofu/opentofu/releases/download/v%[1]s/tofu_%[1]s_linux_${ARCH}.zip"
 			unzip -o /tmp/tofu.zip tofu -d /usr/local/bin
 			rm /tmp/tofu.zip
-		`)).
-		With(installTool("kustomize", `
+		`, v.Tofu))).
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /tmp/kustomize.tar.gz \
-			  "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv`+kustomizeVersion+`/kustomize_v`+kustomizeVersion+`_linux_${ARCH}.tar.gz"
+			  "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%%2Fv%[1]s/kustomize_v%[1]s_linux_${ARCH}.tar.gz"
 			tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin kustomize
 			rm /tmp/kustomize.tar.gz
-		`)).
-		With(installTool("kubeconform", `
+		`, v.Kustomize))).
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /tmp/kubeconform.tar.gz \
-			  "https://github.com/yannh/kubeconform/releases/download/v`+kubeconformVer+`/kubeconform-linux-${ARCH}.tar.gz"
+			  "https://github.com/yannh/kubeconform/releases/download/v%[1]s/kubeconform-linux-${ARCH}.tar.gz"
 			tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
 			rm /tmp/kubeconform.tar.gz
-		`)).
-		With(installTool("yq", `
+		`, v.Kubeconform))).
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /usr/local/bin/yq \
-			  "https://github.com/mikefarah/yq/releases/download/v`+yqVersion+`/yq_linux_${ARCH}"
+			  "https://github.com/mikefarah/yq/releases/download/v%[1]s/yq_linux_${ARCH}"
 			chmod +x /usr/local/bin/yq
-		`)).
-		With(installTool("actionlint", `
+		`, v.Yq))).
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /tmp/actionlint.tar.gz \
-			  "https://github.com/rhysd/actionlint/releases/download/v`+actionlintVer+`/actionlint_`+actionlintVer+`_linux_${ARCH}.tar.gz"
+			  "https://github.com/rhysd/actionlint/releases/download/v%[1]s/actionlint_%[1]s_linux_${ARCH}.tar.gz"
 			tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint
 			rm /tmp/actionlint.tar.gz
-		`)).
-		With(installTool("trivy", `
+		`, v.Actionlint))).
+		With(installTool(fmt.Sprintf(`
 			case "$(dpkg --print-architecture)" in
 			  amd64) T=64bit ;;
 			  arm64) T=ARM64 ;;
 			  *) T=64bit ;;
 			esac
 			curl -fsSL -o /tmp/trivy.tar.gz \
-			  "https://github.com/aquasecurity/trivy/releases/download/v`+trivyVersion+`/trivy_`+trivyVersion+`_Linux-${T}.tar.gz"
+			  "https://github.com/aquasecurity/trivy/releases/download/v%[1]s/trivy_%[1]s_Linux-${T}.tar.gz"
 			tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
 			rm /tmp/trivy.tar.gz
-		`)).
+		`, v.Trivy))).
 		WithWorkdir("/src").
 		WithMountedDirectory("/src", m.Source)
 }
 
 // installTool runs a shell snippet as a single cached layer.
-func installTool(name, script string) dagger.WithContainerFunc {
+func installTool(script string) dagger.WithContainerFunc {
 	return func(c *dagger.Container) *dagger.Container {
-		return c.WithExec([]string{"sh", "-euc", script})
+		return c.WithExec([]string{"bash", "-euc", script})
 	}
 }

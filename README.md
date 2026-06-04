@@ -89,10 +89,72 @@ flux bootstrap github \
 
 ## CI / CD
 
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| `validate.yaml` | push / PR | Lint, validate, security-scan configs, and verify raw secret leaks |
-| `tofu-run.yaml` | push / PR / manual | Run automated plans or approve apply/destroys over NetBird |
+All automation — locally and in CI — runs through a single **Dagger** module in
+[`.dagger`](.dagger). Every command executes inside a pinned container, so
+`dagger call check` on your laptop is byte-for-byte identical to the required
+GitHub branch-protection gate. There is no separate shell scripting to drift.
+
+- **Single source of truth for tool versions:** [`.dagger/versions.json`](.dagger/versions.json)
+  (`dagger call versions` / `task versions`).
+- **Single source of truth for the engine version:** `engineVersion` in
+  [`dagger.json`](dagger.json) — workflows do not re-pin it.
+- **Network is configured _before_ Dagger:** the Dagger module is network
+  agnostic. Live workflows connect NetBird in a dedicated step first; locally
+  you connect your own mesh (`netbird up`) before running live tasks.
+
+### Workflows
+
+| Workflow | Trigger | NetBird | Dagger call |
+|---|---|---|---|
+| `ci.yaml` | push / PR to `main` | no | `check` (all offline gates) |
+| `tofu-plan.yaml` | push to `main` (`tofu/**`) / manual | yes | `tofu-plan` |
+| `tofu-apply.yaml` | manual (protected `production` env) | yes | `tofu-apply` → `flux-reconcile` |
+| `tofu-destroy.yaml` | manual + typed confirmation | yes | `tofu-destroy` |
+
+### Pipeline overview
+
+```mermaid
+flowchart TD
+    subgraph local["Local — Taskfile"]
+        T["task check / task tofu:plan ..."]
+    end
+    subgraph gha["GitHub Actions"]
+        CI["ci.yaml"]
+        PLAN["tofu-plan.yaml"]
+        APPLY["tofu-apply.yaml"]
+        DESTROY["tofu-destroy.yaml"]
+    end
+
+    NB(["NetBird connect step / host mesh"])
+
+    subgraph dagger[".dagger module — dagger call"]
+        direction TB
+        CHECK["check"]
+        subgraph gates["offline gates (no secrets)"]
+            L["lint"]
+            S["sops-check"]
+            TV["tofu-validate"]
+            TS["tofu-security"]
+            KV["kube-validate"]
+        end
+        TP["tofu-plan"]
+        TA["tofu-apply"]
+        TD["tofu-destroy"]
+        FR["flux-reconcile"]
+        CHECK --> L & S & TV & TS & KV
+    end
+
+    T --> CHECK
+    T --> TP & TA & TD & FR
+    CI --> CHECK
+    PLAN --> NB --> TP
+    APPLY --> NB
+    NB --> TA --> FR
+    DESTROY --> NB --> TD
+```
+
+Required secrets/inputs: `SOPS_AGE_KEY` (all live calls), `NETBIRD_SETUP_KEY`
+(NetBird connect step), `KUBECONFIG_DATA` (`flux-reconcile`).
 
 ---
 

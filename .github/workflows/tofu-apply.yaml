@@ -5,10 +5,11 @@ name: OpenTofu Apply
 # Environment (configure required reviewers there for human approval).
 # Optionally nudges Flux to reconcile immediately after a successful apply.
 #
-# All logic lives in the Dagger module (.dagger). Locally this is:
-#   dagger call tofu-apply \
-#     --sops-age-key=env://SOPS_AGE_KEY \
-#     --netbird-setup-key=env://NETBIRD_SETUP_KEY
+# Network connectivity to the private cluster is established by the NetBird
+# step BELOW, before the Dagger calls - the Dagger module itself is network
+# agnostic. All tofu/flux logic lives in the Dagger module (.dagger). Locally
+# (with your mesh already connected) this is:
+#   dagger call tofu-apply --sops-age-key=env://SOPS_AGE_KEY
 
 on:
   workflow_dispatch:
@@ -35,29 +36,32 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Connect to NetBird mesh
+        env:
+          NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pkgs.netbird.io/install.sh | sh
+          sudo netbird up --setup-key "$NB_SETUP_KEY"
+          sudo netbird status
+
       - name: OpenTofu Apply (Dagger)
         uses: dagger/dagger-for-github@v8.3.0
         with:
-          version: "0.21.4"
           verb: call
           args: >-
             tofu-apply
             --sops-age-key=env://SOPS_AGE_KEY
-            --netbird-setup-key=env://NETBIRD_SETUP_KEY
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
 
       - name: Flux Reconcile (Dagger)
         if: ${{ inputs.reconcile_flux }}
         uses: dagger/dagger-for-github@v8.3.0
         with:
-          version: "0.21.4"
           verb: call
           args: >-
             flux-reconcile
             --kubeconfig=env://KUBECONFIG_DATA
-            --netbird-setup-key=env://NETBIRD_SETUP_KEY
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
-          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}

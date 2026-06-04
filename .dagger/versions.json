@@ -1,0 +1,11 @@
+{
+  "debian": "bookworm-20250520-slim",
+  "tofu": "1.7.2",
+  "kustomize": "5.4.3",
+  "kubeconform": "0.6.7",
+  "sops": "3.9.1",
+  "yq": "4.44.3",
+  "actionlint": "1.7.1",
+  "trivy": "0.71.0",
+  "flux": "2.3.0"
+}

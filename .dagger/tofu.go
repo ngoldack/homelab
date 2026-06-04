@@ -7,69 +7,44 @@ import (
 	"dagger/homelab/internal/dagger"
 )
 
-// liveBase extends the offline toolchain with the binaries needed to reach and
-// mutate live infrastructure: sops (decrypt secrets), flux (reconcile) and the
-// netbird client (join the private mesh).
+// liveBase extends the offline toolchain with the binaries needed to read and
+// mutate live infrastructure: sops (decrypt secrets) and flux (reconcile).
+//
+// It does NOT manage network connectivity. The caller is responsible for
+// establishing access to the private cluster network (e.g. a NetBird connect
+// step before the `dagger call`, or a local mesh connection); the Dagger
+// engine NATs outbound traffic through the host, so a host-side mesh
+// connection is reachable from inside these containers.
 func (m *Homelab) liveBase() *dagger.Container {
+	v := ver()
 	return m.base().
-		With(installTool("sops", `
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /usr/local/bin/sops \
-			  "https://github.com/getsops/sops/releases/download/v`+sopsVersion+`/sops-v`+sopsVersion+`.linux.${ARCH}"
+			  "https://github.com/getsops/sops/releases/download/v%[1]s/sops-v%[1]s.linux.${ARCH}"
 			chmod +x /usr/local/bin/sops
-		`)).
-		With(installTool("flux", `
+		`, v.Sops))).
+		With(installTool(fmt.Sprintf(`
 			ARCH="$(dpkg --print-architecture)"
 			curl -fsSL -o /tmp/flux.tar.gz \
-			  "https://github.com/fluxcd/flux2/releases/download/v`+fluxVersion+`/flux_`+fluxVersion+`_linux_${ARCH}.tar.gz"
+			  "https://github.com/fluxcd/flux2/releases/download/v%[1]s/flux_%[1]s_linux_${ARCH}.tar.gz"
 			tar -xzf /tmp/flux.tar.gz -C /usr/local/bin flux
 			rm /tmp/flux.tar.gz
-		`)).
-		With(installTool("netbird", `
-			ARCH="$(dpkg --print-architecture)"
-			curl -fsSL -o /tmp/netbird.tar.gz \
-			  "https://github.com/netbirdio/netbird/releases/download/v`+netbirdVersion+`/netbird_`+netbirdVersion+`_linux_${ARCH}.tar.gz"
-			tar -xzf /tmp/netbird.tar.gz -C /usr/local/bin netbird
-			rm /tmp/netbird.tar.gz
-		`))
+		`, v.Flux)))
 }
 
-// connectNetbird emits the shell prologue that joins the NetBird mesh. It must
-// run in an exec with InsecureRootCapabilities so the wireguard interface and
-// tun device can be created.
-//
-// NOTE (spike): the in-container NetBird bring-up is unverified against the live
-// cluster (greenfield). If tun creation proves unreliable in CI, fall back to
-// joining the mesh on the runner and running these steps outside Dagger.
-func connectNetbird() string {
-	return `
-		echo "==> Connecting to NetBird mesh"
-		mkdir -p /var/run/netbird
-		netbird service install || true
-		netbird service start || (netbird service run >/tmp/netbird.log 2>&1 &)
-		sleep 3
-		netbird up --setup-key "$NB_SETUP_KEY" ${NB_MANAGEMENT_URL:+--management-url "$NB_MANAGEMENT_URL"}
-		sleep 5
-		netbird status || true
-	`
-}
-
-// tofuContainer prepares a live container in tofu/ wired with NetBird + SOPS.
-func (m *Homelab) tofuContainer(sopsAgeKey, netbirdSetupKey *dagger.Secret, managementURL string) *dagger.Container {
-	c := m.liveBase().
+// tofuContainer prepares a live container in tofu/ with the SOPS age key.
+func (m *Homelab) tofuContainer(sopsAgeKey *dagger.Secret) *dagger.Container {
+	return m.liveBase().
 		WithWorkdir("/src/tofu").
-		WithSecretVariable("SOPS_AGE_KEY", sopsAgeKey).
-		WithSecretVariable("NB_SETUP_KEY", netbirdSetupKey)
-	if managementURL != "" {
-		c = c.WithEnvVariable("NB_MANAGEMENT_URL", managementURL)
-	}
-	return c
+		WithSecretVariable("SOPS_AGE_KEY", sopsAgeKey)
 }
 
-// runTofu executes a tofu command inside the live container with the elevated
-// capabilities NetBird needs, returning combined stdout.
+// runTofu decrypts the state passphrase, initialises the backend and executes
+// the supplied tofu command, returning combined stdout. Network access to the
+// cluster is assumed to be provided by the caller's environment.
 func runTofu(ctx context.Context, c *dagger.Container, tofuCmd string) (string, error) {
-	script := connectNetbird() + `
+	script := `
 		echo "==> Decrypting state-encryption passphrase"
 		passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
 		export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
@@ -78,8 +53,7 @@ func runTofu(ctx context.Context, c *dagger.Container, tofuCmd string) (string, 
 		tofu init -lockfile=readonly
 	` + tofuCmd
 	return c.
-		WithExec([]string{"sh", "-euc", script},
-			dagger.ContainerWithExecOpts{InsecureRootCapabilities: true}).
+		WithExec([]string{"bash", "-euc", script}).
 		Stdout(ctx)
 }
 
@@ -88,14 +62,8 @@ func (m *Homelab) TofuPlan(
 	ctx context.Context,
 	// The SOPS age private key (env://SOPS_AGE_KEY).
 	sopsAgeKey *dagger.Secret,
-	// The NetBird setup key used to join the mesh (env://NETBIRD_SETUP_KEY).
-	netbirdSetupKey *dagger.Secret,
-	// Optional NetBird management URL (self-hosted). Empty uses NetBird default.
-	// +optional
-	managementURL string,
 ) (string, error) {
-	c := m.tofuContainer(sopsAgeKey, netbirdSetupKey, managementURL)
-	return runTofu(ctx, c, `
+	return runTofu(ctx, m.tofuContainer(sopsAgeKey), `
 		echo "==> tofu plan"
 		tofu plan -no-color -input=false -out=tofu.tfplan
 	`)
@@ -105,12 +73,8 @@ func (m *Homelab) TofuPlan(
 func (m *Homelab) TofuApply(
 	ctx context.Context,
 	sopsAgeKey *dagger.Secret,
-	netbirdSetupKey *dagger.Secret,
-	// +optional
-	managementURL string,
 ) (string, error) {
-	c := m.tofuContainer(sopsAgeKey, netbirdSetupKey, managementURL)
-	return runTofu(ctx, c, `
+	return runTofu(ctx, m.tofuContainer(sopsAgeKey), `
 		echo "==> tofu apply"
 		tofu apply -auto-approve -no-color -input=false
 	`)
@@ -121,17 +85,13 @@ func (m *Homelab) TofuApply(
 func (m *Homelab) TofuDestroy(
 	ctx context.Context,
 	sopsAgeKey *dagger.Secret,
-	netbirdSetupKey *dagger.Secret,
 	// Safety guard: must equal "destroy-production".
 	confirm string,
-	// +optional
-	managementURL string,
 ) (string, error) {
 	if confirm != "destroy-production" {
 		return "", fmt.Errorf("confirmation string did not match; expected \"destroy-production\", got %q", confirm)
 	}
-	c := m.tofuContainer(sopsAgeKey, netbirdSetupKey, managementURL)
-	return runTofu(ctx, c, `
+	return runTofu(ctx, m.tofuContainer(sopsAgeKey), `
 		echo "==> tofu destroy"
 		tofu destroy -auto-approve -no-color -input=false
 	`)

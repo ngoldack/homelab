@@ -5,7 +5,11 @@ version: '3'
 # so `task check` locally is identical to the required branch-protection gate.
 #
 # Secrets are sourced from the environment as Dagger secrets (env://NAME).
-# Put SOPS_AGE_KEY / NETBIRD_SETUP_KEY / KUBECONFIG_DATA in .env (gitignored).
+# Put SOPS_AGE_KEY / KUBECONFIG_DATA in .env (gitignored).
+#
+# The live tasks (tofu:plan/apply/destroy, flux:reconcile) assume your host is
+# already connected to the private mesh (e.g. `netbird up`) before you run them
+# - the Dagger module is network agnostic and does not manage NetBird.
 
 dotenv:
   - .env
@@ -24,6 +28,11 @@ tasks:
     desc: Run every offline validation gate (the required CI gate)
     cmds:
       - dagger call check
+
+  versions:
+    desc: Print the pinned tool versions (single source of truth)
+    cmds:
+      - dagger call versions
 
   lint:
     desc: yamllint + actionlint
@@ -51,24 +60,18 @@ tasks:
       - dagger call kube-validate
 
   # -------------------------
-  # Live infrastructure (needs SOPS_AGE_KEY + NETBIRD_SETUP_KEY in env)
+  # Live infrastructure (needs SOPS_AGE_KEY in env + host connected to mesh)
   # -------------------------
 
   tofu:plan:
     desc: Plan against live infrastructure (read-only)
     cmds:
-      - >-
-        dagger call tofu-plan
-        --sops-age-key=env://SOPS_AGE_KEY
-        --netbird-setup-key=env://NETBIRD_SETUP_KEY
+      - dagger call tofu-plan --sops-age-key=env://SOPS_AGE_KEY
 
   tofu:apply:
     desc: Apply against live infrastructure
     cmds:
-      - >-
-        dagger call tofu-apply
-        --sops-age-key=env://SOPS_AGE_KEY
-        --netbird-setup-key=env://NETBIRD_SETUP_KEY
+      - dagger call tofu-apply --sops-age-key=env://SOPS_AGE_KEY
 
   tofu:destroy:
     desc: Destroy all managed infrastructure (requires explicit confirmation)
@@ -76,7 +79,6 @@ tasks:
       - >-
         dagger call tofu-destroy --confirm=destroy-production
         --sops-age-key=env://SOPS_AGE_KEY
-        --netbird-setup-key=env://NETBIRD_SETUP_KEY
 
   tofu:output:
     desc: Print all OpenTofu outputs
@@ -100,10 +102,7 @@ tasks:
   flux:reconcile:
     desc: Force Flux to reconcile (git source + all Kustomizations)
     cmds:
-      - >-
-        dagger call flux-reconcile
-        --kubeconfig=env://KUBECONFIG_DATA
-        --netbird-setup-key=env://NETBIRD_SETUP_KEY
+      - dagger call flux-reconcile --kubeconfig=env://KUBECONFIG_DATA
 
   # -------------------------
   # Secrets (interactive editing stays on the host via SOPS directly)

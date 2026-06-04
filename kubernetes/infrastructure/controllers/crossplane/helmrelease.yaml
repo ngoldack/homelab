@@ -10,7 +10,7 @@ spec:
     spec:
       chart: crossplane
       # Pinned: provider-minio (crossplane-runtime v1.18) requires crossplane >= v1.9.0.
-      version: "1.20.8"
+      version: "2.3.1"
       sourceRef:
         kind: HelmRepository
         name: crossplane-stable

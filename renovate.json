@@ -40,6 +40,88 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n[^\\n]*?(?<currentValue>v?\\d+\\.\\d+\\.\\d+[^\\s\"'/]*)"
       ],
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    },
+    {
+      "description": "Dagger engine version pinned in dagger.json (drives the Go SDK)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)dagger\\.json$/"],
+      "matchStrings": ["\"engineVersion\":\\s*\"(?<currentValue>v[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "dagger/dagger"
+    },
+    {
+      "description": "Debian base image pinned in the Dagger toolchain (.dagger/versions.json)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"debian\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "debian",
+      "versioningTemplate": "regex:^bookworm-(?<patch>\\d+)-slim$"
+    },
+    {
+      "description": "OpenTofu CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"tofu\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "opentofu/opentofu"
+    },
+    {
+      "description": "kustomize CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"kustomize\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "kubernetes-sigs/kustomize",
+      "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
+    },
+    {
+      "description": "kubeconform CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"kubeconform\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "yannh/kubeconform"
+    },
+    {
+      "description": "SOPS CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"sops\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "getsops/sops"
+    },
+    {
+      "description": "yq CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"yq\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "mikefarah/yq"
+    },
+    {
+      "description": "actionlint CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"actionlint\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "rhysd/actionlint"
+    },
+    {
+      "description": "Trivy CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"trivy\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "aquasecurity/trivy"
+    },
+    {
+      "description": "Flux CLI pinned in the Dagger toolchain",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"flux\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "fluxcd/flux2"
     }
   ],
   "packageRules": [
@@ -71,6 +153,19 @@
       "description": "Group Talos OS and its system extensions into a single PR",
       "matchPackageNames": ["siderolabs/talos", "/^ghcr\\.io\\/siderolabs\\//"],
       "groupName": "talos"
+    },
+    {
+      "description": "Dagger engine (dagger.json) and its generated Go SDK (.dagger) move together; run `dagger develop` after merging to regenerate the client",
+      "matchFileNames": ["dagger.json", ".dagger/go.mod", ".dagger/go.sum"],
+      "groupName": "dagger",
+      "automerge": false,
+      "labels": ["dagger", "dependencies", "needs-review"]
+    },
+    {
+      "description": "Pinned CLI tools in the Dagger toolchain; minor/patch still automerge via the rule above",
+      "matchFileNames": [".dagger/versions.json"],
+      "groupName": "dagger toolchain",
+      "labels": ["dagger", "dependencies"]
     }
   ]
 }

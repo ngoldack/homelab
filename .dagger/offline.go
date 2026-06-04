@@ -7,35 +7,58 @@ import (
 	"sync"
 )
 
+// gate is a single named validation function.
+type gate struct {
+	name string
+	fn   func(context.Context) (string, error)
+}
+
+// orderedGates is the stable order the gate results are rendered in, regardless
+// of the order they finish concurrently.
+func (m *Homelab) orderedGates() []gate {
+	return []gate{
+		{"lint", m.Lint},
+		{"sops-check", m.SopsCheck},
+		{"tofu-validate", m.TofuValidate},
+		{"tofu-security", m.TofuSecurity},
+		{"kube-validate", m.KubeValidate},
+	}
+}
+
 // Check runs every offline validation gate concurrently. This is the required
 // branch-protection entrypoint and needs no secrets or cluster access.
-func (m *Homelab) Check(ctx context.Context) (string, error) {
+//
+// When githubOutput is set (CI passes --github-output), each gate's output is
+// wrapped in a collapsible ::group:: section in the GitHub step log.
+//
+// Note on failures: Dagger only prints a function's return value on success, so
+// on a gate failure this report is suppressed and only the aggregated error is
+// shown. Per-gate detail for a failing run comes from the live-streamed step
+// log and, more richly, the Dagger Cloud trace linked in the job summary (each
+// gate is its own span). That observability works identically on success and
+// failure, which is why we do not hand-roll ::error:: annotations here.
+func (m *Homelab) Check(
+	ctx context.Context,
+	// Wrap each gate's output in a collapsible GitHub ::group:: section.
+	// +optional
+	githubOutput bool,
+) (string, error) {
 	type result struct {
 		name string
 		out  string
 		err  error
 	}
 
-	gates := map[string]func(context.Context) (string, error){
-		"lint":          m.Lint,
-		"sops-check":    m.SopsCheck,
-		"tofu-validate": m.TofuValidate,
-		"tofu-security": m.TofuSecurity,
-		"kube-validate": m.KubeValidate,
-	}
-
-	results := make([]result, 0, len(gates))
-	var mu sync.Mutex
+	gates := m.orderedGates()
+	results := make([]result, len(gates))
 	var wg sync.WaitGroup
-	for name, fn := range gates {
+	for i, g := range gates {
 		wg.Add(1)
-		go func(name string, fn func(context.Context) (string, error)) {
+		go func(i int, g gate) {
 			defer wg.Done()
-			out, err := fn(ctx)
-			mu.Lock()
-			results = append(results, result{name, out, err})
-			mu.Unlock()
-		}(name, fn)
+			out, err := g.fn(ctx)
+			results[i] = result{g.name, out, err}
+		}(i, g)
 	}
 	wg.Wait()
 
@@ -47,7 +70,12 @@ func (m *Homelab) Check(ctx context.Context) (string, error) {
 			status = "FAIL"
 			failed = append(failed, r.name)
 		}
-		fmt.Fprintf(&b, "==== %s: %s ====\n%s\n", r.name, status, strings.TrimSpace(r.out))
+		out := strings.TrimSpace(r.out)
+		if githubOutput {
+			fmt.Fprintf(&b, "::group::%s (%s)\n%s\n::endgroup::\n", r.name, status, out)
+		} else {
+			fmt.Fprintf(&b, "==== %s: %s ====\n%s\n", r.name, status, out)
+		}
 		if r.err != nil {
 			fmt.Fprintf(&b, "error: %v\n", r.err)
 		}

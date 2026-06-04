@@ -57,3 +57,4 @@ jobs:
             --sops-age-key=env://SOPS_AGE_KEY
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

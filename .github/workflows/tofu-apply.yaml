@@ -54,6 +54,7 @@ jobs:
             --sops-age-key=env://SOPS_AGE_KEY
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
       - name: Flux Reconcile (Dagger)
         if: ${{ inputs.reconcile_flux }}
@@ -65,3 +66,4 @@ jobs:
             --kubeconfig=env://KUBECONFIG_DATA
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

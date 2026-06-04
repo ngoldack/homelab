@@ -55,6 +55,6 @@ jobs:
           args: >-
             tofu-plan
             --sops-age-key=env://SOPS_AGE_KEY
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

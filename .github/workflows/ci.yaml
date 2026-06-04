@@ -48,5 +48,4 @@ jobs:
         with:
           verb: call
           args: ${{ matrix.gate }}
-        env:
-          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}

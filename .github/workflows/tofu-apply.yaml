@@ -52,9 +52,9 @@ jobs:
           args: >-
             tofu-apply
             --sops-age-key=env://SOPS_AGE_KEY
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
       - name: Flux Reconcile (Dagger)
         if: ${{ inputs.reconcile_flux }}
@@ -64,6 +64,6 @@ jobs:
           args: >-
             flux-reconcile
             --kubeconfig=env://KUBECONFIG_DATA
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
-          DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

@@ -6,6 +6,11 @@ name: OpenTofu Plan
 #   - pushes to main that touch tofu/**
 #   - manual dispatch
 # Plan is read-only: it never mutates infrastructure.
+#
+# All logic lives in the Dagger module (.dagger). Locally this is:
+#   dagger call tofu-plan \
+#     --sops-age-key=env://SOPS_AGE_KEY \
+#     --netbird-setup-key=env://NETBIRD_SETUP_KEY
 
 on:
   push:
@@ -13,6 +18,7 @@ on:
       - main
     paths:
       - 'tofu/**'
+      - '.dagger/**'
       - '.github/workflows/tofu-plan.yaml'
   workflow_dispatch:
 
@@ -28,63 +34,19 @@ jobs:
     name: OpenTofu Plan
     runs-on: ubuntu-latest
     environment: production
-    defaults:
-      run:
-        working-directory: tofu
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Connect to NetBird VPN Mesh
-        uses: Alemiz112/netbird-connect@v1
+      - name: OpenTofu Plan (Dagger)
+        uses: dagger/dagger-for-github@v8.3.0
         with:
-          setup-key: ${{ secrets.NETBIRD_SETUP_KEY }}
-
-      - name: Setup Age Decryption Key
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.config/sops/age
-          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
-          chmod 600 ~/.config/sops/age/keys.txt
-
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
-        with:
-          tofu_version: 1.7.2
-
-      - name: Install SOPS & yq
-        run: |
-          set -euo pipefail
-          sudo wget -qO /usr/local/bin/sops \
-            https://github.com/getsops/sops/releases/latest/download/sops-v3.9.1.linux.amd64
-          sudo chmod +x /usr/local/bin/sops
-          sudo wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: OpenTofu Init
+          version: "0.21.4"
+          verb: call
+          args: >-
+            tofu-plan
+            --sops-age-key=env://SOPS_AGE_KEY
+            --netbird-setup-key=env://NETBIRD_SETUP_KEY
         env:
-          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
-        run: |
-          set -euo pipefail
-          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
-          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
-          tofu init -lockfile=readonly
-
-      - name: OpenTofu Plan
-        env:
-          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
-        run: |
-          set -euo pipefail
-          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
-          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
-          tofu plan -no-color -input=false -out=tofu.tfplan | tee plan.txt
-
-      - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tofu-plan
-          path: |
-            tofu/tofu.tfplan
-            tofu/plan.txt
-          retention-days: 7
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}

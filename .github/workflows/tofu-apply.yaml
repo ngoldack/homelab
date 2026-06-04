@@ -4,6 +4,11 @@ name: OpenTofu Apply
 # Manual dispatch ONLY, gated behind the protected "production" GitHub
 # Environment (configure required reviewers there for human approval).
 # Optionally nudges Flux to reconcile immediately after a successful apply.
+#
+# All logic lives in the Dagger module (.dagger). Locally this is:
+#   dagger call tofu-apply \
+#     --sops-age-key=env://SOPS_AGE_KEY \
+#     --netbird-setup-key=env://NETBIRD_SETUP_KEY
 
 on:
   workflow_dispatch:
@@ -26,67 +31,33 @@ jobs:
     name: OpenTofu Apply
     runs-on: ubuntu-latest
     environment: production
-    defaults:
-      run:
-        working-directory: tofu
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Connect to NetBird VPN Mesh
-        uses: Alemiz112/netbird-connect@v1
+      - name: OpenTofu Apply (Dagger)
+        uses: dagger/dagger-for-github@v8.3.0
         with:
-          setup-key: ${{ secrets.NETBIRD_SETUP_KEY }}
-
-      - name: Setup Age Decryption Key
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.config/sops/age
-          echo "${{ secrets.SOPS_AGE_KEY }}" > ~/.config/sops/age/keys.txt
-          chmod 600 ~/.config/sops/age/keys.txt
-
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
-        with:
-          tofu_version: 1.7.2
-
-      - name: Install SOPS & yq
-        run: |
-          set -euo pipefail
-          sudo wget -qO /usr/local/bin/sops \
-            https://github.com/getsops/sops/releases/latest/download/sops-v3.9.1.linux.amd64
-          sudo chmod +x /usr/local/bin/sops
-          sudo wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: OpenTofu Init
+          version: "0.21.4"
+          verb: call
+          args: >-
+            tofu-apply
+            --sops-age-key=env://SOPS_AGE_KEY
+            --netbird-setup-key=env://NETBIRD_SETUP_KEY
         env:
-          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
-        run: |
-          set -euo pipefail
-          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
-          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
-          tofu init -lockfile=readonly
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
 
-      - name: OpenTofu Apply
-        env:
-          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
-        run: |
-          set -euo pipefail
-          passphrase="$(sops -d secret.sops.yaml | yq '.state_encryption_passphrase')"
-          export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"${passphrase}\" }"
-          tofu apply -auto-approve -no-color -input=false
-
-      - name: Flux Reconcile
+      - name: Flux Reconcile (Dagger)
         if: ${{ inputs.reconcile_flux }}
-        working-directory: .
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_DATA }}" > ~/.kube/config
-          chmod 600 ~/.kube/config
-          curl -s https://fluxcd.io/install.sh | sudo bash
-          flux reconcile source git flux-system
-          flux reconcile kustomization infrastructure
-          flux reconcile kustomization apps
+        uses: dagger/dagger-for-github@v8.3.0
+        with:
+          version: "0.21.4"
+          verb: call
+          args: >-
+            flux-reconcile
+            --kubeconfig=env://KUBECONFIG_DATA
+            --netbird-setup-key=env://NETBIRD_SETUP_KEY
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}

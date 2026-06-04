@@ -1,12 +1,14 @@
 name: CI
 
 # Offline validation only. Runs on every PR and on pushes to main.
-# Requires NO secrets, kubeconfig, VPN, or Proxmox access - this is the
-# required branch-protection check. Anything needing private network access
+# Requires NO secrets, kubeconfig, VPN, or Proxmox access - these are the
+# required branch-protection checks. Anything needing private network access
 # (tofu plan/apply, flux reconcile) lives in the tofu-* workflows.
 #
-# All validation logic lives in the Dagger module (.dagger). The exact same
-# command runs locally: `dagger call check`.
+# Each gate is an independent Dagger function, run here as a matrix so every
+# gate is its own GitHub check (granular branch protection + independent
+# re-run). The exact same gates run locally, either individually
+# (`dagger call kube-validate`) or all at once (`dagger call check`).
 
 on:
   push:
@@ -24,18 +26,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Offline Validation (Dagger)
+  gate:
+    name: ${{ matrix.gate }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - yamllint
+          - actionlint
+          - sops-check
+          - tofu-validate
+          - tofu-security
+          - kube-validate
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
 
-      - name: Run Offline Gates
+      - name: ${{ matrix.gate }} (Dagger)
         uses: dagger/dagger-for-github@v8.3.0
         with:
           verb: call
-          args: check --github-output
-          enable-github-summary: true
+          args: ${{ matrix.gate }}
         env:
           DAGGER_CLOUD_TOKEN: ${{ secrets.DAGGER_CLOUD_TOKEN }}

@@ -59,69 +59,11 @@
       "versioningTemplate": "regex:^bookworm-(?<patch>\\d+)-slim$"
     },
     {
-      "description": "OpenTofu CLI pinned in the Dagger toolchain",
+      "description": "CLI tool images pinned in the Dagger toolchain (.dagger/versions.json). Every value is a fully-qualified image:tag, so one docker manager covers them all; debian (no registry slash) is handled separately above.",
       "customType": "regex",
       "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"tofu\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "opentofu/opentofu"
-    },
-    {
-      "description": "kustomize CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"kustomize\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "kubernetes-sigs/kustomize",
-      "extractVersionTemplate": "^kustomize/v(?<version>.+)$"
-    },
-    {
-      "description": "kubeconform CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"kubeconform\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "yannh/kubeconform"
-    },
-    {
-      "description": "SOPS CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"sops\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "getsops/sops"
-    },
-    {
-      "description": "yq CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"yq\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "mikefarah/yq"
-    },
-    {
-      "description": "actionlint CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"actionlint\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "rhysd/actionlint"
-    },
-    {
-      "description": "Trivy CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"trivy\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "aquasecurity/trivy"
-    },
-    {
-      "description": "Flux CLI pinned in the Dagger toolchain",
-      "customType": "regex",
-      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
-      "matchStrings": ["\"flux\":\\s*\"(?<currentValue>[^\"]+)\""],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "fluxcd/flux2"
+      "matchStrings": ["\"(?<depName>[a-z0-9.-]+/[^\":]+):(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [

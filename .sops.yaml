@@ -1,11 +1,11 @@
 creation_rules:
   # Encrypt all SOPS secret files in the tofu directory
   - path_regex: tofu/secret\.sops\.yaml$
-    # Recipients: workstation key (homelab_age_key) + CI key (stored as the
+    # Recipients: workstation key (homelab) + CI key (stored as the
     # SOPS_AGE_KEY GitHub Actions secret) so pipelines can decrypt.
-    age: &homelab_age_key >-
+    age: &age_recipients >-
       age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k
 
   # Encrypt all SOPS secret files in the kubernetes directory
   - path_regex: kubernetes/.*\.sops\.yaml$
-    age: *homelab_age_key
+    age: *age_recipients

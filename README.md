@@ -91,11 +91,12 @@ flux bootstrap github \
 
 All automation — locally and in CI — runs through a single **Dagger** module in
 [`.dagger`](.dagger). Every command executes inside a pinned container, so
-`dagger call check` on your laptop is byte-for-byte identical to the required
-GitHub branch-protection gate. There is no separate shell scripting to drift.
+`dagger call check` on your laptop is byte-for-byte identical to the GitHub
+branch-protection gates. There is no separate shell scripting to drift.
 
 - **Single source of truth for tool versions:** [`.dagger/versions.json`](.dagger/versions.json)
-  (`dagger call versions` / `task versions`).
+  (`dagger call versions` / `task versions`). Each CLI is copied as a static
+  binary out of its pinned upstream image — no `curl`/`unzip`/arch handling.
 - **Single source of truth for the engine version:** `engineVersion` in
   [`dagger.json`](dagger.json) — workflows do not re-pin it.
 - **Network is configured _before_ Dagger:** the Dagger module is network
@@ -106,10 +107,15 @@ GitHub branch-protection gate. There is no separate shell scripting to drift.
 
 | Workflow | Trigger | NetBird | Dagger call |
 |---|---|---|---|
-| `ci.yaml` | push / PR to `main` | no | `check` (all offline gates) |
+| `ci.yaml` | push / PR to `main` | no | matrix: one check per gate (`yamllint`, `actionlint`, `sops-check`, `tofu-validate`, `tofu-security`, `kube-validate`) |
 | `tofu-plan.yaml` | push to `main` (`tofu/**`) / manual | yes | `tofu-plan` |
 | `tofu-apply.yaml` | manual (protected `production` env) | yes | `tofu-apply` → `flux-reconcile` |
 | `tofu-destroy.yaml` | manual + typed confirmation | yes | `tofu-destroy` |
+
+Each offline gate is an independent Dagger function, so CI runs them as a matrix
+of separate GitHub checks (granular branch protection + independent re-run).
+Locally, run them individually (`dagger call kube-validate`) or all at once
+(`dagger call check` / `task check`).
 
 ### Pipeline overview
 
@@ -119,7 +125,7 @@ flowchart TD
         T["task check / task tofu:plan ..."]
     end
     subgraph gha["GitHub Actions"]
-        CI["ci.yaml"]
+        CI["ci.yaml (matrix)"]
         PLAN["tofu-plan.yaml"]
         APPLY["tofu-apply.yaml"]
         DESTROY["tofu-destroy.yaml"]
@@ -129,9 +135,10 @@ flowchart TD
 
     subgraph dagger[".dagger module — dagger call"]
         direction TB
-        CHECK["check"]
+        CHECK["check (local aggregate)"]
         subgraph gates["offline gates (no secrets)"]
-            L["lint"]
+            YL["yamllint"]
+            AL["actionlint"]
             S["sops-check"]
             TV["tofu-validate"]
             TS["tofu-security"]
@@ -141,12 +148,12 @@ flowchart TD
         TA["tofu-apply"]
         TD["tofu-destroy"]
         FR["flux-reconcile"]
-        CHECK --> L & S & TV & TS & KV
+        CHECK --> YL & AL & S & TV & TS & KV
     end
 
     T --> CHECK
     T --> TP & TA & TD & FR
-    CI --> CHECK
+    CI --> YL & AL & S & TV & TS & KV
     PLAN --> NB --> TP
     APPLY --> NB
     NB --> TA --> FR

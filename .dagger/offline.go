@@ -2,22 +2,28 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"path"
 	"strings"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
-// gate is a single named validation function.
+// gate is a single named validation gate. Every gate is also exported as its
+// own Dagger function so CI can run them as a matrix of independent checks.
 type gate struct {
 	name string
 	fn   func(context.Context) (string, error)
 }
 
-// orderedGates is the stable order the gate results are rendered in, regardless
-// of the order they finish concurrently.
+// orderedGates is the canonical gate list and render order.
 func (m *Homelab) orderedGates() []gate {
 	return []gate{
-		{"lint", m.Lint},
+		{"yamllint", m.Yamllint},
+		{"actionlint", m.Actionlint},
 		{"sops-check", m.SopsCheck},
 		{"tofu-validate", m.TofuValidate},
 		{"tofu-security", m.TofuSecurity},
@@ -25,24 +31,10 @@ func (m *Homelab) orderedGates() []gate {
 	}
 }
 
-// Check runs every offline validation gate concurrently. This is the required
-// branch-protection entrypoint and needs no secrets or cluster access.
-//
-// When githubOutput is set (CI passes --github-output), each gate's output is
-// wrapped in a collapsible ::group:: section in the GitHub step log.
-//
-// Note on failures: Dagger only prints a function's return value on success, so
-// on a gate failure this report is suppressed and only the aggregated error is
-// shown. Per-gate detail for a failing run comes from the live-streamed step
-// log and, more richly, the Dagger Cloud trace linked in the job summary (each
-// gate is its own span). That observability works identically on success and
-// failure, which is why we do not hand-roll ::error:: annotations here.
-func (m *Homelab) Check(
-	ctx context.Context,
-	// Wrap each gate's output in a collapsible GitHub ::group:: section.
-	// +optional
-	githubOutput bool,
-) (string, error) {
+// Check runs every offline gate concurrently and aggregates the results. It is
+// a convenience entrypoint for a single local run (`dagger call check`); CI runs
+// each gate as its own matrix job so failures map to distinct GitHub checks.
+func (m *Homelab) Check(ctx context.Context) (string, error) {
 	type result struct {
 		name string
 		out  string
@@ -54,11 +46,11 @@ func (m *Homelab) Check(
 	var wg sync.WaitGroup
 	for i, g := range gates {
 		wg.Add(1)
-		go func(i int, g gate) {
+		go func() {
 			defer wg.Done()
 			out, err := g.fn(ctx)
 			results[i] = result{g.name, out, err}
-		}(i, g)
+		}()
 	}
 	wg.Wait()
 
@@ -70,12 +62,7 @@ func (m *Homelab) Check(
 			status = "FAIL"
 			failed = append(failed, r.name)
 		}
-		out := strings.TrimSpace(r.out)
-		if githubOutput {
-			fmt.Fprintf(&b, "::group::%s (%s)\n%s\n::endgroup::\n", r.name, status, out)
-		} else {
-			fmt.Fprintf(&b, "==== %s: %s ====\n%s\n", r.name, status, out)
-		}
+		fmt.Fprintf(&b, "==== %s: %s ====\n%s\n", r.name, status, strings.TrimSpace(r.out))
 		if r.err != nil {
 			fmt.Fprintf(&b, "error: %v\n", r.err)
 		}
@@ -86,117 +73,238 @@ func (m *Homelab) Check(
 	return b.String() + "\nAll offline gates passed.\n", nil
 }
 
-// Lint runs yamllint over the repo and actionlint over the workflows.
-func (m *Homelab) Lint(ctx context.Context) (string, error) {
-	return m.base().
-		WithExec([]string{"bash", "-euc", `
-			echo "==> yamllint"
-			yamllint -c .yamllint .
-			echo "==> actionlint"
-			# .git is excluded from the mounted source, so actionlint cannot
-			# auto-detect the project root; point it at the workflow files.
-			files="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \))"
-			actionlint $files
-		`}).
+// Yamllint lints every YAML file in the repository against .yamllint.
+func (m *Homelab) Yamllint(ctx context.Context) (string, error) {
+	return m.withYamllint(m.base()).
+		WithExec([]string{"yamllint", "-c", ".yamllint", "."}).
 		Stdout(ctx)
 }
 
-// SopsCheck asserts every *.sops.yaml file (except the .sops.yaml config) is
-// actually encrypted: it must contain a top-level sops: block and an ENC[ value.
-func (m *Homelab) SopsCheck(ctx context.Context) (string, error) {
-	return m.base().
-		WithExec([]string{"bash", "-euc", `
-			unencrypted=0
-			while IFS= read -r -d '' f; do
-			  if [ "$(basename "$f")" = ".sops.yaml" ]; then continue; fi
-			  if ! grep -q '^sops:' "$f" || ! grep -q 'ENC\[' "$f"; then
-			    echo "ERROR: unencrypted or malformed SOPS file: $f"
-			    unencrypted=$((unencrypted + 1))
-			  fi
-			done < <(find . -type f -name '*.sops.yaml' -print0)
-			if [ "$unencrypted" -gt 0 ]; then
-			  echo "Security validation failed: $unencrypted file(s) not properly encrypted."
-			  exit 1
-			fi
-			echo "All *.sops.yaml files are securely encrypted."
-		`}).
+// Actionlint statically checks the GitHub Actions workflows. The workflow file
+// list is resolved here (the mounted source excludes .git, so actionlint cannot
+// auto-detect the project root) and passed explicitly.
+func (m *Homelab) Actionlint(ctx context.Context) (string, error) {
+	files, err := m.workflowFiles(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
+		return "no workflow files found\n", nil
+	}
+	return m.withActionlint(m.base()).
+		WithExec(append([]string{"actionlint"}, files...)).
 		Stdout(ctx)
+}
+
+// workflowFiles returns the repo-relative paths of every GitHub Actions workflow.
+func (m *Homelab) workflowFiles(ctx context.Context) ([]string, error) {
+	var files []string
+	for _, pattern := range []string{".github/workflows/*.yml", ".github/workflows/*.yaml"} {
+		matches, err := m.Source.Glob(ctx, pattern)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, matches...)
+	}
+	return files, nil
+}
+
+// SopsCheck asserts every *.sops.yaml file (except the .sops.yaml config) is
+// actually encrypted: it must contain a top-level sops: block and an ENC[
+// value. This is a pure-Go inspection of the source tree — no container.
+func (m *Homelab) SopsCheck(ctx context.Context) (string, error) {
+	matches, err := m.Source.Glob(ctx, "**/*.sops.yaml")
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	var bad []string
+	for _, f := range matches {
+		if path.Base(f) == ".sops.yaml" {
+			continue // the SOPS config itself, not an encrypted payload
+		}
+		content, err := m.Source.File(f).Contents(ctx)
+		if err != nil {
+			return "", fmt.Errorf("reading %s: %w", f, err)
+		}
+		if !sopsEncrypted(content) {
+			fmt.Fprintf(&b, "ERROR: unencrypted or malformed SOPS file: %s\n", f)
+			bad = append(bad, f)
+			continue
+		}
+		fmt.Fprintf(&b, "OK: %s\n", f)
+	}
+	if len(bad) > 0 {
+		return b.String(), fmt.Errorf("%d file(s) not properly encrypted: %s", len(bad), strings.Join(bad, ", "))
+	}
+	fmt.Fprintf(&b, "All %d *.sops.yaml file(s) are securely encrypted.\n", len(matches))
+	return b.String(), nil
+}
+
+// sopsEncrypted reports whether a SOPS-managed YAML file is actually encrypted:
+// it carries a top-level `sops:` metadata block and at least one ENC[ value.
+func sopsEncrypted(content string) bool {
+	hasBlock := strings.HasPrefix(content, "sops:") || strings.Contains(content, "\nsops:")
+	return hasBlock && strings.Contains(content, "ENC[")
 }
 
 // TofuValidate runs offline OpenTofu checks: fmt, init (no backend) and validate.
 func (m *Homelab) TofuValidate(ctx context.Context) (string, error) {
-	return m.base().
+	return m.withTofu(m.base()).
 		WithWorkdir("/src/tofu").
-		// pbkdf2 key provider builds its key eagerly during init, so supply a
-		// throwaway passphrase. No real state is read or written.
+		// The pbkdf2 key provider builds its key eagerly during init, so supply
+		// a throwaway passphrase. No real state is read or written here.
 		WithEnvVariable("TF_ENCRYPTION", `key_provider "pbkdf2" "statekey" { passphrase = "ci-offline-validate-dummy-passphrase" }`).
-		WithExec([]string{"sh", "-euc", `
-			echo "==> tofu fmt -check"
-			tofu fmt -check -recursive
-			echo "==> tofu init (no backend)"
-			tofu init -backend=false -lockfile=readonly
-			echo "==> tofu validate"
-			tofu validate
-		`}).
+		WithExec([]string{"tofu", "fmt", "-check", "-recursive"}).
+		WithExec([]string{"tofu", "init", "-backend=false", "-lockfile=readonly"}).
+		WithExec([]string{"tofu", "validate"}).
 		Stdout(ctx)
 }
 
 // TofuSecurity runs a Trivy IaC config scan over the tofu directory and fails
-// on CRITICAL findings (ignoring unfixed issues), matching the CI policy.
+// on CRITICAL findings.
 func (m *Homelab) TofuSecurity(ctx context.Context) (string, error) {
-	return m.base().
+	return m.withTrivy(m.base()).
 		WithEnvVariable("TRIVY_CACHE_DIR", "/root/.cache/trivy").
 		WithMountedCache("/root/.cache/trivy", dag.CacheVolume("trivy-cache")).
-		WithExec([]string{
-			"trivy", "config", "tofu",
-			"--severity", "CRITICAL",
-			"--exit-code", "1",
-		}).
+		WithExec([]string{"trivy", "config", "tofu", "--severity", "CRITICAL", "--exit-code", "1"}).
 		Stdout(ctx)
 }
 
-// KubeValidate builds every Kustomize overlay, schema-validates the output with
-// kubeconform, and asserts the Flux Kustomization invariants.
+// overlayPaths are the Kustomize entrypoints that must build and schema-validate.
+var overlayPaths = []string{
+	"kubernetes/clusters/production",
+	"kubernetes/infrastructure/controllers",
+	"kubernetes/infrastructure/configs",
+	"kubernetes/apps/production",
+}
+
+// KubeValidate builds every Kustomize overlay, schema-validates the rendered
+// manifests with kubeconform, and asserts the Flux Kustomization invariants
+// (decryption, prune, dependency ordering) in native Go.
 func (m *Homelab) KubeValidate(ctx context.Context) (string, error) {
-	paths := []string{
-		"kubernetes/clusters/production",
-		"kubernetes/infrastructure/controllers",
-		"kubernetes/infrastructure/configs",
-		"kubernetes/apps/production",
-	}
-	script := `
-		validate() {
-		  echo "==== Building & validating $1 ===="
-		  kustomize build "$1" \
-		    | kubeconform -strict -ignore-missing-schemas -summary -verbose=false
+	var b strings.Builder
+
+	tools := m.withKubeconform(m.withKustomize(m.base()))
+	for _, p := range overlayPaths {
+		fmt.Fprintf(&b, "==== Building & validating %s ====\n", p)
+		out, err := tools.
+			WithExec([]string{"kustomize", "build", p, "-o", "/tmp/rendered.yaml"}).
+			WithExec([]string{"kubeconform", "-strict", "-ignore-missing-schemas", "-summary", "-verbose=false", "/tmp/rendered.yaml"}).
+			Stdout(ctx)
+		b.WriteString(strings.TrimSpace(out))
+		b.WriteString("\n")
+		if err != nil {
+			return b.String(), fmt.Errorf("kustomize/kubeconform failed for %s: %w", p, err)
 		}
-	`
-	for _, p := range paths {
-		script += fmt.Sprintf("validate %s\n", p)
 	}
-	script += `
-		infra=kubernetes/clusters/production/infrastructure.yaml
-		apps=kubernetes/clusters/production/apps.yaml
-		assert() {
-		  actual="$(yq "select(.metadata.name == \"$2\") | $3" "$1")"
-		  if [ "$actual" != "$4" ]; then
-		    echo "ERROR: $1 [$2] $5 (got '$actual', expected '$4')"
-		    exit 1
-		  fi
-		  echo "OK: $1 [$2] - $5"
+
+	if err := m.assertFluxInvariants(ctx, &b); err != nil {
+		return b.String(), err
+	}
+	return b.String(), nil
+}
+
+// fluxKustomization is the subset of a Flux Kustomization we assert on.
+type fluxKustomization struct {
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Prune      bool `yaml:"prune"`
+		Decryption struct {
+			Provider  string `yaml:"provider"`
+			SecretRef struct {
+				Name string `yaml:"name"`
+			} `yaml:"secretRef"`
+		} `yaml:"decryption"`
+		DependsOn []struct {
+			Name string `yaml:"name"`
+		} `yaml:"dependsOn"`
+	} `yaml:"spec"`
+}
+
+func (k fluxKustomization) dependsOn(name string) bool {
+	for _, d := range k.Spec.DependsOn {
+		if d.Name == name {
+			return true
 		}
-		for name in infra-controllers infra-configs; do
-		  assert "$infra" "$name" '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
-		  assert "$infra" "$name" '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
-		  assert "$infra" "$name" '.spec.prune' 'true' 'prune must be enabled'
-		done
-		assert "$apps" 'apps' '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
-		assert "$apps" 'apps' '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
-		assert "$apps" 'apps' '.spec.prune' 'true' 'prune must be enabled'
-		assert "$infra" 'infra-configs' '.spec.dependsOn[] | select(.name == "infra-controllers") | .name' 'infra-controllers' 'infra-configs must dependsOn infra-controllers'
-		assert "$apps" 'apps' '.spec.dependsOn[] | select(.name == "infra-configs") | .name' 'infra-configs' 'apps must dependsOn infra-configs'
-	`
-	return m.base().
-		WithExec([]string{"sh", "-euc", script}).
-		Stdout(ctx)
+	}
+	return false
+}
+
+// assertFluxInvariants enforces the cluster's GitOps guardrails directly on the
+// Flux Kustomization manifests: SOPS decryption must be wired up, pruning must
+// be on, and the controllers -> configs -> apps ordering must hold.
+func (m *Homelab) assertFluxInvariants(ctx context.Context, b *strings.Builder) error {
+	infra, err := m.loadKustomizations(ctx, "kubernetes/clusters/production/infrastructure.yaml")
+	if err != nil {
+		return err
+	}
+	apps, err := m.loadKustomizations(ctx, "kubernetes/clusters/production/apps.yaml")
+	if err != nil {
+		return err
+	}
+
+	var problems []string
+	check := func(cond bool, okMsg, failMsg string) {
+		if cond {
+			fmt.Fprintf(b, "OK: %s\n", okMsg)
+			return
+		}
+		fmt.Fprintf(b, "ERROR: %s\n", failMsg)
+		problems = append(problems, failMsg)
+	}
+
+	requireSopsAndPrune := func(set map[string]fluxKustomization, name string) {
+		k, ok := set[name]
+		if !ok {
+			check(false, "", fmt.Sprintf("%s Kustomization not found", name))
+			return
+		}
+		check(k.Spec.Decryption.Provider == "sops", name+" decryption.provider=sops", name+" decryption.provider must be sops")
+		check(k.Spec.Decryption.SecretRef.Name == "sops-age", name+" secretRef.name=sops-age", name+" decryption.secretRef.name must be sops-age")
+		check(k.Spec.Prune, name+" prune=true", name+" prune must be enabled")
+	}
+
+	requireSopsAndPrune(infra, "infra-controllers")
+	requireSopsAndPrune(infra, "infra-configs")
+	requireSopsAndPrune(apps, "apps")
+
+	check(infra["infra-configs"].dependsOn("infra-controllers"),
+		"infra-configs dependsOn infra-controllers",
+		"infra-configs must dependsOn infra-controllers")
+	check(apps["apps"].dependsOn("infra-configs"),
+		"apps dependsOn infra-configs",
+		"apps must dependsOn infra-configs")
+
+	if len(problems) > 0 {
+		return fmt.Errorf("flux invariant violations: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// loadKustomizations decodes a (possibly multi-document) Flux manifest into a
+// map keyed by metadata.name.
+func (m *Homelab) loadKustomizations(ctx context.Context, file string) (map[string]fluxKustomization, error) {
+	content, err := m.Source.File(file).Contents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", file, err)
+	}
+	out := map[string]fluxKustomization{}
+	dec := yaml.NewDecoder(strings.NewReader(content))
+	for {
+		var k fluxKustomization
+		if err := dec.Decode(&k); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("parsing %s: %w", file, err)
+		}
+		if k.Metadata.Name != "" {
+			out[k.Metadata.Name] = k
+		}
+	}
+	return out, nil
 }

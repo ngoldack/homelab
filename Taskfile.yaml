@@ -34,10 +34,15 @@ tasks:
     cmds:
       - dagger call versions
 
-  lint:
-    desc: yamllint + actionlint
+  yamllint:
+    desc: Lint all YAML against .yamllint
     cmds:
-      - dagger call lint
+      - dagger call yamllint
+
+  actionlint:
+    desc: Lint the GitHub Actions workflows
+    cmds:
+      - dagger call actionlint
 
   sops:check:
     desc: Assert every *.sops.yaml file is encrypted

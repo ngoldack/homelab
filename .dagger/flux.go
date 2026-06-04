@@ -14,10 +14,6 @@ import (
 // a NetBird connect step in the workflow, or a local mesh connection. The
 // Dagger engine NATs outbound traffic through the host, so a host-side mesh
 // connection is sufficient.
-//
-// This fixes the previous workflow bug which reconciled non-existent
-// Kustomizations named "infrastructure"/"apps"; the real names are
-// infra-controllers, infra-configs and apps.
 func (m *Homelab) FluxReconcile(
 	ctx context.Context,
 	// A kubeconfig granting access to the cluster (env://KUBECONFIG or file).
@@ -26,12 +22,9 @@ func (m *Homelab) FluxReconcile(
 	return m.liveBase().
 		WithMountedSecret("/root/.kube/config", kubeconfig).
 		WithEnvVariable("KUBECONFIG", "/root/.kube/config").
-		WithExec([]string{"bash", "-euc", `
-			echo "==> Reconciling Flux"
-			flux reconcile source git flux-system
-			flux reconcile kustomization infra-controllers
-			flux reconcile kustomization infra-configs
-			flux reconcile kustomization apps
-		`}).
+		WithExec([]string{"flux", "reconcile", "source", "git", "flux-system"}).
+		WithExec([]string{"flux", "reconcile", "kustomization", "infra-controllers"}).
+		WithExec([]string{"flux", "reconcile", "kustomization", "infra-configs"}).
+		WithExec([]string{"flux", "reconcile", "kustomization", "apps"}).
 		Stdout(ctx)
 }

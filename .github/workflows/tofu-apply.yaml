@@ -46,7 +46,7 @@ jobs:
           chmod 600 ~/.config/sops/age/keys.txt
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
+        uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: 1.7.2
 

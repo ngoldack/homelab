@@ -11,3 +11,4 @@ resources:
   - firecrawl
   - gpt-researcher
   - browser-use
+  - openviking

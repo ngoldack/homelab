@@ -1,0 +1,18 @@
+# Flux Git source for the OpenViking Helm chart. OpenViking publishes no Helm
+# repository or OCI chart, only an in-repo chart at deploy/helm/openviking, so we
+# reference the upstream Git repo at a pinned tag and point the HelmRelease at
+# that chart path. Pinned to a release tag (the project is alpha; avoid latest).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: openviking
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/volcengine/OpenViking
+  ref:
+    tag: v0.3.24
+  ignore: |
+    # Only the Helm chart is needed from this large repo.
+    /*
+    !/deploy/helm/openviking/

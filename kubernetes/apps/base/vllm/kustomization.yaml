@@ -4,7 +4,7 @@ resources:
   - namespace.yaml
   - servingruntime.yaml
   - servingruntime-whisper.yaml
-  - secrets.sops.yaml
+  - secret.sops.yaml
   - serviceaccount.yaml
   - voice-llm.yaml
   - whisper.yaml

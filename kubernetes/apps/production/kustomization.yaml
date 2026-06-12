@@ -10,5 +10,4 @@ resources:
   - playwright-mcp
   - firecrawl
   - gpt-researcher
-  - browser-use
   - openviking

@@ -10,7 +10,7 @@ spec:
       autoSelect: true
   containers:
     - name: kserve-container
-      image: vllm/vllm-openai-cpu:v0.22.0-x86_64
+      image: vllm/vllm-openai-cpu:v0.22.1-x86_64
       command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
       args:
         - "--model"

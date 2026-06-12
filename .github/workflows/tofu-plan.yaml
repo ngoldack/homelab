@@ -37,7 +37,7 @@ jobs:
     environment: production
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Cache Dagger engine image
         uses: ./.github/actions/dagger-engine-cache

@@ -78,7 +78,8 @@ spec:
             - "8080"
             - "--device=cpu"
             - "--dtype=bfloat16"
-            - "--max-model-len=32768"
+            # 64K context: required by the Hermes agent (rejects <64K models).
+            - "--max-model-len=65536"
             - "--max-num-batched-tokens=4096"
             - "--max-num-seqs=16"
             - "--enable-prefix-caching"
@@ -89,9 +90,9 @@ spec:
               value: "0-21"
             - name: VLLM_CPU_NUM_OF_RESERVED_CPU
               value: "1"
-            # Large CPU KV region for the long-context coding workload.
+            # Large CPU KV region for the long-context coding workload (64K).
             - name: VLLM_CPU_KVCACHE_SPACE
-              value: "16"
+              value: "24"
             # LMCache shared KV pool — inert on the CPU image (CUDA-only wheels);
             # ready for a future GPU node + CUDA vLLM image.
             - name: LMCACHE_CHUNK_SIZE

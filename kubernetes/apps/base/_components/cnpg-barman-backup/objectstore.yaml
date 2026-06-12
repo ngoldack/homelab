@@ -1,0 +1,39 @@
+# Barman Cloud object store for a CloudNativePG cluster. The identity fields
+# (name, namespace, destinationPath prefix, credentials Secret name) are
+# placeholders patched by each consuming app; everything else is shared.
+#
+# Referenced from the app's cnpg-cluster.yaml via
+# .spec.plugins[].parameters.barmanObjectName.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: APP_NAME-backup-store
+  namespace: APP_NAMESPACE
+spec:
+  # Keep 14 days of backups + WALs; barman prunes older base backups on schedule.
+  retentionPolicy: "14d"
+  configuration:
+    # Hetzner endpoint + bucket come from cluster-wide Flux vars (kept in sync
+    # with the OpenTofu Hetzner Object Storage outputs). The per-app key prefix
+    # is patched in by the consuming app.
+    destinationPath: s3://${DR_S3_BUCKET}/cnpg/APP_NAME
+    endpointURL: ${DR_S3_ENDPOINT}
+    s3Credentials:
+      accessKeyId:
+        name: APP_NAME-backup-s3
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: APP_NAME-backup-s3
+        key: AWS_SECRET_ACCESS_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi

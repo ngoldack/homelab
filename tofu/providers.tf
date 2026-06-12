@@ -19,7 +19,7 @@ terraform {
     # through the standard AWS S3 resources pointed at the Hetzner endpoint.
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 

@@ -8,3 +8,4 @@ resources:
   - qwen3-coder-80b.yaml
   - qwen3-8b.yaml
   - whisper.yaml
+  - embeddings.yaml

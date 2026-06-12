@@ -21,6 +21,11 @@ data:
   # NOTE: SearXNG must have the JSON output format enabled (see searxng config).
   RETRIEVER: "searx"
   SEARX_URL: "http://searxng.searxng.svc.cluster.local:8080"
-  # Default scraper (BeautifulSoup) needs no extra deps. Switch to 'firecrawl'
-  # (and bake firecrawl-py into the image) to use the in-cluster Firecrawl.
-  SCRAPER: "bs"
+  # Scraper: the in-cluster Firecrawl. FIRECRAWL_SERVER_URL points at the
+  # self-hosted api; FIRECRAWL_API_KEY (any non-empty value, in the Secret) is
+  # required by the client even though self-hosted Firecrawl bypasses auth.
+  # NOTE: the gpt-researcher image does not ship firecrawl-py and pip-installs it
+  # on first use; the pod has open egress so this works, but bake firecrawl-py
+  # into a derived image for an air-gapped/read-only setup.
+  SCRAPER: "firecrawl"
+  FIRECRAWL_SERVER_URL: "http://firecrawl-api.firecrawl.svc.cluster.local:3002"

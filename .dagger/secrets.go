@@ -6,18 +6,12 @@ import (
 	"dagger/homelab/internal/dagger"
 )
 
-// stateContainer runs in tofu/ with the SOPS age key available. It reads the
-// committed, encrypted state but needs no network access.
-func (m *Homelab) stateContainer(sopsAgeKey *dagger.Secret) *dagger.Container {
-	return m.liveBase().
-		WithWorkdir("/src/tofu").
-		WithSecretVariable("SOPS_AGE_KEY", sopsAgeKey)
-}
-
 // initState injects the state-encryption passphrase and runs a backend-less
-// `tofu init`, suitable for read-only state access.
+// `tofu init`, suitable for read-only state access. It reuses tofuContainer
+// (tofu/ workdir + SOPS age key); reading the committed encrypted state needs
+// no network access.
 func (m *Homelab) initState(ctx context.Context, sopsAgeKey *dagger.Secret) (*dagger.Container, error) {
-	c := m.stateContainer(sopsAgeKey)
+	c := m.tofuContainer(sopsAgeKey)
 	enc, err := m.stateEncryption(ctx, c)
 	if err != nil {
 		return nil, err
@@ -76,7 +70,7 @@ func (m *Homelab) SecretsDecrypt(
 	// Path to the *.sops.yaml file, relative to the repo root.
 	path string,
 ) (string, error) {
-	return m.withSops(m.base()).
+	return m.withTools(m.base(), "sops").
 		WithWorkdir("/src").
 		WithSecretVariable("SOPS_AGE_KEY", sopsAgeKey).
 		WithExec([]string{"sops", "-d", path}).

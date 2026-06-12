@@ -91,7 +91,7 @@ func (m *Homelab) Actionlint(ctx context.Context) (string, error) {
 	if len(files) == 0 {
 		return "no workflow files found\n", nil
 	}
-	return m.withActionlint(m.base()).
+	return m.withTools(m.base(), "actionlint").
 		WithExec(append([]string{"actionlint"}, files...)).
 		Stdout(ctx)
 }
@@ -151,7 +151,7 @@ func sopsEncrypted(content string) bool {
 
 // TofuValidate runs offline OpenTofu checks: fmt, init (no backend) and validate.
 func (m *Homelab) TofuValidate(ctx context.Context) (string, error) {
-	return m.withTofu(m.base()).
+	return m.withTools(m.base(), "tofu").
 		WithWorkdir("/src/tofu").
 		// The pbkdf2 key provider builds its key eagerly during init, so supply
 		// a throwaway passphrase. No real state is read or written here.
@@ -165,7 +165,7 @@ func (m *Homelab) TofuValidate(ctx context.Context) (string, error) {
 // TofuSecurity runs a Trivy IaC config scan over the tofu directory and fails
 // on CRITICAL findings.
 func (m *Homelab) TofuSecurity(ctx context.Context) (string, error) {
-	return m.withTrivy(m.base()).
+	return m.withTools(m.base(), "trivy").
 		WithEnvVariable("TRIVY_CACHE_DIR", "/root/.cache/trivy").
 		WithMountedCache("/root/.cache/trivy", dag.CacheVolume("trivy-cache")).
 		WithExec([]string{"trivy", "config", "tofu", "--severity", "CRITICAL", "--exit-code", "1"}).
@@ -186,7 +186,7 @@ var overlayPaths = []string{
 func (m *Homelab) KubeValidate(ctx context.Context) (string, error) {
 	var b strings.Builder
 
-	tools := m.withKubeconform(m.withKustomize(m.base()))
+	tools := m.withTools(m.base(), "kustomize", "kubeconform")
 	for _, p := range overlayPaths {
 		fmt.Fprintf(&b, "==== Building & validating %s ====\n", p)
 		out, err := tools.

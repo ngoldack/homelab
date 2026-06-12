@@ -76,56 +76,57 @@ func (m *Homelab) Versions() string {
 }
 
 // base returns the minimal toolchain container: a pinned Debian with CA
-// certificates and the repository mounted at /src. Individual gates layer on
-// only the binaries they need via the withX helpers below, keeping each
-// container small and the cache sharp.
+// certificates and the repository mounted at /src. Gates layer on only the
+// binaries they need via withTools, keeping each container small and the cache
+// sharp.
 func (m *Homelab) base() *dagger.Container {
 	return dag.Container().
 		From(images().Debian).
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "--no-install-recommends", "ca-certificates"}).
-		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists"}).
+		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists/*"}).
 		WithWorkdir("/src").
 		WithMountedDirectory("/src", m.Source)
 }
 
-// copyBin copies a single static binary out of an upstream image into the
-// toolchain at /usr/local/bin. The upstream images are all multi-arch, so this
-// works unchanged on amd64 (CI) and arm64 (local) with no arch juggling.
-func copyBin(image, srcPath, name string) dagger.WithContainerFunc {
-	return func(c *dagger.Container) *dagger.Container {
-		bin := dag.Container().From(image).File(srcPath)
-		return c.WithFile("/usr/local/bin/"+name, bin, dagger.ContainerWithFileOpts{Permissions: 0o755})
+// tool is a single static binary copied out of a pinned upstream image. The
+// upstream images are all multi-arch, so this works unchanged on amd64 (CI) and
+// arm64 (local) with no arch juggling.
+type tool struct {
+	image string // upstream image:tag holding the binary
+	src   string // path of the binary inside that image
+	name  string // command name installed into /usr/local/bin
+}
+
+// tools resolves every copyable CLI against the pinned images in versions.json.
+func tools() map[string]tool {
+	v := images()
+	return map[string]tool{
+		"tofu":        {v.Tofu, "/usr/local/bin/tofu", "tofu"},
+		"kustomize":   {v.Kustomize, "/app/kustomize", "kustomize"},
+		"kubeconform": {v.Kubeconform, "/kubeconform", "kubeconform"},
+		"trivy":       {v.Trivy, "/usr/local/bin/trivy", "trivy"},
+		"actionlint":  {v.Actionlint, "/usr/local/bin/actionlint", "actionlint"},
+		"sops":        {v.Sops, "/usr/local/bin/sops", "sops"},
+		"flux":        {v.Flux, "/usr/local/bin/flux", "flux"},
 	}
 }
 
-func (m *Homelab) withTofu(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Tofu, "/usr/local/bin/tofu", "tofu"))
-}
-
-func (m *Homelab) withKustomize(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Kustomize, "/app/kustomize", "kustomize"))
-}
-
-func (m *Homelab) withKubeconform(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Kubeconform, "/kubeconform", "kubeconform"))
-}
-
-func (m *Homelab) withTrivy(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Trivy, "/usr/local/bin/trivy", "trivy"))
-}
-
-func (m *Homelab) withActionlint(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Actionlint, "/usr/local/bin/actionlint", "actionlint"))
-}
-
-func (m *Homelab) withSops(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Sops, "/usr/local/bin/sops", "sops"))
-}
-
-func (m *Homelab) withFlux(c *dagger.Container) *dagger.Container {
-	return c.With(copyBin(images().Flux, "/usr/local/bin/flux", "flux"))
+// withTools copies the named static binaries into the container at
+// /usr/local/bin. Unknown names panic — they can only come from a programming
+// error in this module, not from user input.
+func (m *Homelab) withTools(c *dagger.Container, names ...string) *dagger.Container {
+	all := tools()
+	for _, n := range names {
+		t, ok := all[n]
+		if !ok {
+			panic(fmt.Sprintf("unknown tool %q", n))
+		}
+		bin := dag.Container().From(t.image).File(t.src)
+		c = c.WithFile("/usr/local/bin/"+t.name, bin, dagger.ContainerWithFileOpts{Permissions: 0o755})
+	}
+	return c
 }
 
 // withYamllint installs yamllint (a Python tool with no static binary to copy)
@@ -134,5 +135,5 @@ func (m *Homelab) withYamllint(c *dagger.Container) *dagger.Container {
 	return c.
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "--no-install-recommends", "yamllint"}).
-		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists"})
+		WithExec([]string{"rm", "-rf", "/var/lib/apt/lists/*"})
 }

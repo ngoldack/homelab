@@ -19,7 +19,7 @@ import (
 // engine NATs outbound traffic through the host, so a host-side mesh
 // connection is reachable from inside these containers.
 func (m *Homelab) liveBase() *dagger.Container {
-	return m.withFlux(m.withSops(m.withTofu(m.base())))
+	return m.withTools(m.base(), "tofu", "sops", "flux")
 }
 
 // tofuContainer prepares a live container in tofu/ with the SOPS age key.
@@ -78,7 +78,7 @@ func (m *Homelab) TofuPlan(
 		return "", err
 	}
 	return c.
-		WithExec([]string{"tofu", "plan", "-no-color", "-input=false", "-out=tofu.tfplan"}).
+		WithExec([]string{"tofu", "plan", "-no-color", "-input=false"}).
 		Stdout(ctx)
 }
 

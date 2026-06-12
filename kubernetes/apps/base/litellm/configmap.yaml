@@ -1,10 +1,11 @@
-# LiteLLM proxy configuration.
+# LiteLLM proxy configuration — the single OpenAI-compatible gateway in front of
+# the vLLM serving stack ("mlcache").
 #
-# LiteLLM presents a single OpenAI-compatible endpoint and routes each model_name
-# to the matching KServe vLLM backend. Because the vLLM gateway routes per-model by
-# HTTP Host header (and on-demand models scale from zero behind the KEDA http-add-on
-# interceptor), every backend points at the interceptor proxy and sets the Host
-# header that selects the target model. This preserves scale-from-zero behaviour.
+# Each model_name maps to a plain vLLM Deployment's in-cluster Service (vLLM is
+# no longer behind KServe / the KEDA interceptor, so we route straight to the
+# Service DNS). LiteLLM also fronts every model with a shared response cache
+# backed by the vllm-cache-valkey instance, so identical requests across any
+# client skip the (slow, CPU-bound) model entirely.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,36 +14,39 @@ metadata:
 data:
   config.yaml: |
     model_list:
+      # Always-warm low-latency chat / Home Assistant.
       - model_name: fast
         litellm_params:
-          model: openai/llama-8b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          model: openai/qwen3-8b
+          api_base: http://qwen3-8b.vllm.svc.cluster.local/v1
           api_key: dummy
-          extra_headers:
-            Host: llama.vllm.home.arpa
       - model_name: default
         litellm_params:
-          model: openai/qwen3-14b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          model: openai/qwen3-8b
+          api_base: http://qwen3-8b.vllm.svc.cluster.local/v1
           api_key: dummy
-          extra_headers:
-            Host: qwen3.vllm.home.arpa
-      - model_name: research
-        litellm_params:
-          model: openai/qwen3-14b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
-          api_key: dummy
-          extra_headers:
-            Host: qwen3.vllm.home.arpa
+      # Coding / agentic slot (n8n agents, code gen, multi-file edits).
       - model_name: coder
         litellm_params:
-          model: openai/qwen25-coder-7b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          model: openai/qwen3-coder-80b
+          api_base: http://qwen3-coder-80b.vllm.svc.cluster.local/v1
           api_key: dummy
-          extra_headers:
-            Host: qwen-coder.vllm.home.arpa
+      # Speech-to-text (Home Assistant voice, n8n voice triggers).
+      - model_name: whisper
+        litellm_params:
+          model: openai/whisper
+          api_base: http://whisper.vllm.svc.cluster.local/v1
+          api_key: dummy
     litellm_settings:
       drop_params: true
       # Emit OTLP traces (-> otel-gateway -> Tempo) and expose Prometheus metrics
       # at /metrics on the proxy port. OTEL endpoint is set via env in the Deployment.
       callbacks: ["otel", "prometheus"]
+      # Shared response cache backed by the vllm-cache-valkey (Valkey operator).
+      # Simple exact-match cache (no embedding model); identical requests hit
+      # the cache instead of re-running the model.
+      cache: true
+      cache_params:
+        type: redis
+        host: vllm-cache-valkey.vllm.svc.cluster.local
+        port: 6379

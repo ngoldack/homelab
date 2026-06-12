@@ -1,8 +1,8 @@
 # LiteLLM holds the only key gating the vLLM backends, so restrict who can reach
 # it. Ingress is limited to its consumers (Khoj, n8n), the NetBird routing peer
 # (for the SSO-protected proxy UI), and the node (kubelet probes). Egress is left
-# open so LiteLLM can reach the KEDA http-add-on interceptor that fronts the
-# on-demand vLLM models and the Authentik OIDC token/userinfo endpoints.
+# open so LiteLLM can reach the vLLM model Services and the vllm-cache-valkey in
+# the vllm namespace, plus the Authentik OIDC token/userinfo endpoints.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

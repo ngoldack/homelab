@@ -1,0 +1,18 @@
+# Redis-compatible Valkey for Firecrawl (rate limiting + BullMQ auxiliary
+# queues). Provisioned by the Valkey operator; volume on the fast NVMe-oF tier.
+apiVersion: valkey.io/v1alpha1
+kind: Valkey
+metadata:
+  name: firecrawl-valkey
+  namespace: firecrawl
+spec:
+  replicas: 1
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tns-fast-nvmeof
+        resources:
+          requests:
+            storage: 2Gi

@@ -1,0 +1,24 @@
+# Shared, non-secret Firecrawl environment, consumed by api + workers via
+# envFrom. Per-component role is set with the literal FLY_PROCESS_GROUP env on
+# each Deployment (not here). Secret values (DB URL, bull key) live in
+# firecrawl-secrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: firecrawl-config
+  namespace: firecrawl
+data:
+  HOST: "0.0.0.0"
+  PORT: "3002"
+  # Self-hosted: no Supabase, so API-key auth is bypassed.
+  USE_DB_AUTHENTICATION: "false"
+  IS_KUBERNETES: "true"
+  ENV: "production"
+  NUM_WORKERS_PER_QUEUE: "8"
+  # Redis (Valkey) for rate limiting + BullMQ auxiliary queues.
+  REDIS_URL: "redis://firecrawl-valkey.firecrawl.svc.cluster.local:6379"
+  REDIS_RATE_LIMIT_URL: "redis://firecrawl-valkey.firecrawl.svc.cluster.local:6379"
+  # Browser scraping microservice (note the required /scrape path suffix).
+  PLAYWRIGHT_MICROSERVICE_URL: "http://firecrawl-playwright.firecrawl.svc.cluster.local:3000/scrape"
+  # Optional: use the in-cluster SearXNG for the /search endpoint.
+  SEARXNG_ENDPOINT: "http://searxng.searxng.svc.cluster.local:8080"

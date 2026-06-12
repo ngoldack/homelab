@@ -40,6 +40,30 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n[^\\n]*?(?<currentValue>v?\\d+\\.\\d+\\.\\d+[^\\s\"'/]*)"
       ],
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    },
+    {
+      "description": "Dagger engine version pinned in dagger.json (drives the Go SDK)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)dagger\\.json$/"],
+      "matchStrings": ["\"engineVersion\":\\s*\"(?<currentValue>v[^\"]+)\""],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "dagger/dagger"
+    },
+    {
+      "description": "Debian base image pinned in the Dagger toolchain (.dagger/versions.json)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"debian\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "debian",
+      "versioningTemplate": "regex:^bookworm-(?<patch>\\d+)-slim$"
+    },
+    {
+      "description": "CLI tool images pinned in the Dagger toolchain (.dagger/versions.json). Every value is a fully-qualified image:tag, so one docker manager covers them all; debian (no registry slash) is handled separately above.",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)\\.dagger/versions\\.json$/"],
+      "matchStrings": ["\"(?<depName>[a-z0-9.-]+/[^\":]+):(?<currentValue>[^\"]+)\""],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [
@@ -71,6 +95,19 @@
       "description": "Group Talos OS and its system extensions into a single PR",
       "matchPackageNames": ["siderolabs/talos", "/^ghcr\\.io\\/siderolabs\\//"],
       "groupName": "talos"
+    },
+    {
+      "description": "Dagger engine (dagger.json) and its generated Go SDK (.dagger) move together; run `dagger develop` after merging to regenerate the client",
+      "matchFileNames": ["dagger.json", ".dagger/go.mod", ".dagger/go.sum"],
+      "groupName": "dagger",
+      "automerge": false,
+      "labels": ["dagger", "dependencies", "needs-review"]
+    },
+    {
+      "description": "Pinned CLI tools in the Dagger toolchain; minor/patch still automerge via the rule above",
+      "matchFileNames": [".dagger/versions.json"],
+      "groupName": "dagger toolchain",
+      "labels": ["dagger", "dependencies"]
     }
   ]
 }

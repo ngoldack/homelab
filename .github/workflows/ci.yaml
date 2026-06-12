@@ -1,9 +1,14 @@
 name: CI
 
 # Offline validation only. Runs on every PR and on pushes to main.
-# Requires NO secrets, kubeconfig, VPN, or Proxmox access — this is the
-# required branch-protection check. Anything needing private network access
+# Requires NO secrets, kubeconfig, VPN, or Proxmox access - these are the
+# required branch-protection checks. Anything needing private network access
 # (tofu plan/apply, flux reconcile) lives in the tofu-* workflows.
+#
+# Each gate is an independent Dagger function, run here as a matrix so every
+# gate is its own GitHub check (granular branch protection + independent
+# re-run). The exact same gates run locally, either individually
+# (`dagger call kube-validate`) or all at once (`dagger call check`).
 
 on:
   push:
@@ -21,237 +26,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Detect which areas changed so we only run the relevant validation jobs.
-  # ---------------------------------------------------------------------------
-  changes:
-    name: Detect Changed Paths
+  gate:
+    name: ${{ matrix.gate }}
     runs-on: ubuntu-latest
-    outputs:
-      tofu: ${{ steps.filter.outputs.tofu }}
-      kubernetes: ${{ steps.filter.outputs.kubernetes }}
-      sops: ${{ steps.filter.outputs.sops }}
-      workflows: ${{ steps.filter.outputs.workflows }}
-      yaml: ${{ steps.filter.outputs.yaml }}
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - yamllint
+          - actionlint
+          - sops-check
+          - tofu-validate
+          - tofu-security
+          - kube-validate
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Filter Paths
-        uses: dorny/paths-filter@v3
-        id: filter
+      - name: Cache Dagger engine image
+        uses: ./.github/actions/dagger-engine-cache
+
+      - name: ${{ matrix.gate }} (Dagger)
+        uses: dagger/dagger-for-github@v8.3.0
         with:
-          filters: |
-            tofu:
-              - 'tofu/**'
-              - '.github/workflows/ci.yaml'
-            kubernetes:
-              - 'kubernetes/**'
-              - '.yamllint'
-              - '.github/workflows/ci.yaml'
-            sops:
-              - '**/*.sops.yaml'
-              - '.sops.yaml'
-            workflows:
-              - '.github/workflows/**'
-            yaml:
-              - '**/*.yaml'
-              - '**/*.yml'
-              - '.yamllint'
-
-  # ---------------------------------------------------------------------------
-  # Generic linting: YAML + GitHub Actions workflow correctness.
-  # ---------------------------------------------------------------------------
-  lint:
-    name: Lint (yamllint + actionlint)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.yaml == 'true' || needs.changes.outputs.workflows == 'true'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Lint YAML Files
-        if: needs.changes.outputs.yaml == 'true'
-        uses: ibiqlik/action-yamllint@v3
-        with:
-          config_file: .yamllint
-
-      - name: Lint GitHub Actions Workflows
-        if: needs.changes.outputs.workflows == 'true'
-        uses: raven-actions/actionlint@v2
-
-  # ---------------------------------------------------------------------------
-  # Ensure every *.sops.yaml file is actually encrypted (has SOPS metadata).
-  # ---------------------------------------------------------------------------
-  secrets:
-    name: SOPS Encryption Policy
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.sops == 'true'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Verify All *.sops.yaml Files Are Encrypted
-        run: |
-          set -euo pipefail
-          echo "Scanning workspace for unencrypted SOPS files..."
-          unencrypted=0
-          while IFS= read -r -d '' f; do
-            # Skip the SOPS configuration file itself (creation rules), which
-            # is not an encrypted secret despite matching the *.sops.yaml glob.
-            if [ "$(basename "$f")" = ".sops.yaml" ]; then
-              continue
-            fi
-            # A properly encrypted SOPS file has a top-level "sops:" block
-            # AND at least one ENC[...] encrypted value.
-            if ! grep -q '^sops:' "$f" || ! grep -q 'ENC\[' "$f"; then
-              echo "::error file=$f::Unencrypted or malformed SOPS file detected"
-              unencrypted=$((unencrypted + 1))
-            fi
-          done < <(find . -type f -name '*.sops.yaml' -print0)
-          if [ "$unencrypted" -gt 0 ]; then
-            echo "Security validation failed: $unencrypted file(s) are not properly encrypted."
-            exit 1
-          fi
-          echo "All *.sops.yaml files are securely encrypted."
-
-  # ---------------------------------------------------------------------------
-  # OpenTofu offline validation. No credentials, no backend, no state access.
-  # ---------------------------------------------------------------------------
-  tofu-validate:
-    name: OpenTofu Validate
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.tofu == 'true'
-    defaults:
-      run:
-        working-directory: tofu
-    env:
-      # Offline syntax/validate only — no real state is read or written. The
-      # pbkdf2 key provider still builds its key eagerly during init, so supply
-      # a throwaway passphrase via TF_ENCRYPTION (merged over the code block).
-      TF_ENCRYPTION: >-
-        key_provider "pbkdf2" "statekey" {
-          passphrase = "ci-offline-validate-dummy-passphrase"
-        }
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
-        with:
-          tofu_version: 1.7.2
-
-      - name: OpenTofu Format Check
-        run: tofu fmt -check -recursive
-
-      - name: OpenTofu Init (syntax only, no backend, pinned providers)
-        run: tofu init -backend=false -lockfile=readonly
-
-      - name: OpenTofu Validate
-        run: tofu validate
-
-  tofu-security:
-    name: OpenTofu Security Scan (Trivy)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.tofu == 'true'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Run Trivy Config Scanner
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: config
-          scan-ref: tofu
-          ignore-unfixed: true
-          exit-code: '1'
-          severity: CRITICAL
-
-  # ---------------------------------------------------------------------------
-  # Kubernetes / Flux offline validation: kustomize build + schema validation
-  # + structural assertions on the Flux Kustomizations.
-  # ---------------------------------------------------------------------------
-  kubernetes-validate:
-    name: Kubernetes & Flux Validate
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.kubernetes == 'true'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install Kustomize
-        uses: imranismail/setup-kustomize@v2
-
-      - name: Install kubeconform
-        run: |
-          set -euo pipefail
-          KCV=v0.6.7
-          BASE=https://github.com/yannh/kubeconform/releases/download
-          curl -fsSL "${BASE}/${KCV}/kubeconform-linux-amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin kubeconform
-
-      - name: Kustomize Build + Schema Validation
-        run: |
-          set -euo pipefail
-          # CRDs (Flux, Cilium, cert-manager, CNPG, KServe, Gateway API, KEDA,
-          # Gatekeeper, etc.) are not part of the upstream schema set, so we skip
-          # missing schemas rather than failing on every custom resource.
-          validate() {
-            local path="$1"
-            echo "==== Building & validating $path ===="
-            kustomize build "$path" \
-              | kubeconform -strict -ignore-missing-schemas -summary -verbose=false
-          }
-          validate kubernetes/clusters/production
-          validate kubernetes/infrastructure/controllers
-          validate kubernetes/infrastructure/configs
-          validate kubernetes/apps/production
-
-      - name: Install yq
-        run: |
-          set -euo pipefail
-          sudo wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: Assert Flux Kustomization Invariants
-        run: |
-          set -euo pipefail
-          infra=kubernetes/clusters/production/infrastructure.yaml
-          apps=kubernetes/clusters/production/apps.yaml
-
-          # Assert a value on a specific document (selected by metadata.name)
-          # inside a possibly multi-document Flux Kustomization file.
-          assert() {
-            local file="$1" name="$2" expr="$3" expected="$4" desc="$5"
-            actual="$(yq "select(.metadata.name == \"$name\") | $expr" "$file")"
-            if [ "$actual" != "$expected" ]; then
-              echo "::error file=$file::[$name] $desc (got '$actual', expected '$expected')"
-              exit 1
-            fi
-            echo "OK: $file [$name] — $desc"
-          }
-
-          # Every Flux Kustomization must keep SOPS decryption + prune wired up.
-          for name in infra-controllers infra-configs; do
-            assert "$infra" "$name" '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
-            assert "$infra" "$name" '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
-            assert "$infra" "$name" '.spec.prune' 'true' 'prune must be enabled'
-          done
-          assert "$apps" 'apps' '.spec.decryption.provider' 'sops' 'decryption.provider must be sops'
-          assert "$apps" 'apps' '.spec.decryption.secretRef.name' 'sops-age' 'secretRef.name must be sops-age'
-          assert "$apps" 'apps' '.spec.prune' 'true' 'prune must be enabled'
-
-          # Ordering: configs depend on controllers, apps depend on configs.
-          assert "$infra" 'infra-configs' \
-            '.spec.dependsOn[] | select(.name == "infra-controllers") | .name' \
-            'infra-controllers' 'infra-configs must dependsOn infra-controllers'
-          assert "$apps" 'apps' \
-            '.spec.dependsOn[] | select(.name == "infra-configs") | .name' \
-            'infra-configs' 'apps must dependsOn infra-configs'
+          verb: call
+          args: ${{ matrix.gate }}
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}

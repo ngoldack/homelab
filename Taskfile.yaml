@@ -1,10 +1,18 @@
 version: '3'
 
-dotenv:
-  - .env # Optional: place SOPS_AGE_KEY_FILE and TOFU_ENCRYPTION_PASSPHRASE_statekey here locally
+# Thin convenience wrapper around the Dagger module in .dagger.
+# The same commands run in CI via .github/workflows (dagger/dagger-for-github),
+# so `task check` locally is identical to the required branch-protection gate.
+#
+# Secrets are sourced from the environment as Dagger secrets (env://NAME).
+# Put SOPS_AGE_KEY / KUBECONFIG_DATA in .env (gitignored).
+#
+# The live tasks (tofu:plan/apply/destroy, flux:reconcile) assume your host is
+# already connected to the private mesh (e.g. `netbird up`) before you run them
+# - the Dagger module is network agnostic and does not manage NetBird.
 
-vars:
-  TOFU_DIR: tofu
+dotenv:
+  - .env
 
 tasks:
   default:
@@ -13,126 +21,104 @@ tasks:
       - task --list
 
   # -------------------------
-  # Secrets
+  # Validation (offline, no secrets) - mirrors CI
   # -------------------------
 
-  secrets:encrypt:
-    desc: Encrypt tofu/secret.sops.yaml in place using age
-    dir: '{{.TOFU_DIR}}'
+  check:
+    desc: Run every offline validation gate (the required CI gate)
     cmds:
-      - sops --encrypt --in-place secret.sops.yaml
+      - dagger call check
 
-  secrets:decrypt:
-    desc: Decrypt tofu/secret.sops.yaml and print to stdout (never writes plaintext to disk)
-    dir: '{{.TOFU_DIR}}'
+  versions:
+    desc: Print the pinned tool versions (single source of truth)
     cmds:
-      - sops --decrypt secret.sops.yaml
+      - dagger call versions
 
-  secrets:edit:
-    desc: Open tofu/secret.sops.yaml in your default editor via SOPS (decrypts, edits, re-encrypts)
-    dir: '{{.TOFU_DIR}}'
+  yamllint:
+    desc: Lint all YAML against .yamllint
     cmds:
-      - sops secret.sops.yaml
+      - dagger call yamllint
 
-  # -------------------------
-  # OpenTofu
-  # -------------------------
-
-  tofu:init:
-    desc: Initialize OpenTofu working directory
-    dir: '{{.TOFU_DIR}}'
+  actionlint:
+    desc: Lint the GitHub Actions workflows
     cmds:
-      - tofu init
+      - dagger call actionlint
 
-  tofu:fmt:
-    desc: Format all OpenTofu files
-    dir: '{{.TOFU_DIR}}'
+  sops:check:
+    desc: Assert every *.sops.yaml file is encrypted
     cmds:
-      - tofu fmt -recursive
+      - dagger call sops-check
 
   tofu:validate:
-    desc: Validate OpenTofu configuration (no credentials needed)
-    dir: '{{.TOFU_DIR}}'
+    desc: OpenTofu fmt + init (no backend) + validate
     cmds:
-      - tofu init -backend=false -reconfigure
-      - tofu validate
+      - dagger call tofu-validate
 
-  tofu:plan:
-    desc: Run OpenTofu plan. Pass target with TARGET= to scope (e.g. task tofu:plan TARGET=module.foo)
-    dir: '{{.TOFU_DIR}}'
+  tofu:security:
+    desc: Trivy IaC config scan of tofu/
     cmds:
-      - tofu plan {{if .TARGET}}-target={{.TARGET}}{{end}} -out=tofu.tfplan
-
-  tofu:apply:
-    desc: Apply the last plan (or generate and apply a new one if no plan file exists)
-    dir: '{{.TOFU_DIR}}'
-    cmds:
-      - |
-        if [ -f tofu.tfplan ]; then
-          tofu apply -input=false tofu.tfplan
-        else
-          tofu apply {{if .TARGET}}-target={{.TARGET}}{{end}}
-        fi
-
-  tofu:destroy:
-    desc: Destroy all managed infrastructure. Pass TARGET= to scope destruction.
-    dir: '{{.TOFU_DIR}}'
-    prompt: This will DESTROY infrastructure. Are you sure?
-    cmds:
-      - tofu destroy -auto-approve {{if .TARGET}}-target={{.TARGET}}{{end}}
-
-  tofu:output:
-    desc: Print all OpenTofu outputs (sensitive values redacted by default)
-    dir: '{{.TOFU_DIR}}'
-    cmds:
-      - tofu output
-
-  tofu:kubeconfig:
-    desc: Extract kubeconfig from OpenTofu state and write to kubeconfig.yaml
-    dir: '{{.TOFU_DIR}}'
-    cmds:
-      - tofu output -raw kubeconfig > ../kubeconfig.yaml
-      - echo "kubeconfig written to kubeconfig.yaml"
-
-  tofu:talosconfig:
-    desc: Extract talosconfig from OpenTofu state and write to talosconfig.yaml
-    dir: '{{.TOFU_DIR}}'
-    cmds:
-      - tofu output -raw talosconfig > ../talosconfig.yaml
-      - echo "talosconfig written to talosconfig.yaml"
-
-  # -------------------------
-  # Kubernetes / Flux
-  # -------------------------
+      - dagger call tofu-security
 
   k8s:validate:
-    desc: Validate all Kustomize overlays
+    desc: kustomize build + kubeconform + Flux invariants
     cmds:
-      - kustomize build kubernetes/clusters/production > /dev/null && echo "OK clusters/production"
-      - kustomize build kubernetes/infrastructure/controllers > /dev/null && echo "OK infrastructure/controllers"
-      - kustomize build kubernetes/infrastructure/configs > /dev/null && echo "OK infrastructure/configs"
-      - kustomize build kubernetes/apps/production > /dev/null && echo "OK apps/production"
+      - dagger call kube-validate
 
-  flux:bootstrap:
-    desc: Bootstrap Flux onto the cluster. Attempts SSH-based Git bootstrap to bypass GitHub API restrictions.
-    cmds:
-      - |
-        echo "===> Bootstrapping via standard Git/SSH (bypasses GitHub API constraints)..."
-        flux bootstrap git \
-          --url=ssh://git@github.com/{{.GITHUB_USER}}/{{.GITHUB_REPO}}.git \
-          --branch=main \
-          --path=kubernetes/clusters/production
+  # -------------------------
+  # Live infrastructure (needs SOPS_AGE_KEY in env + host connected to mesh)
+  # -------------------------
 
-  flux:status:
-    desc: Show status of all Flux Kustomizations and HelmReleases
+  tofu:plan:
+    desc: Plan against live infrastructure (read-only)
     cmds:
-      - kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A
-      - kubectl get helmreleases.helm.toolkit.fluxcd.io -A
+      - dagger call tofu-plan --sops-age-key=env://SOPS_AGE_KEY
+
+  tofu:apply:
+    desc: Apply against live infrastructure
+    cmds:
+      - dagger call tofu-apply --sops-age-key=env://SOPS_AGE_KEY
+
+  tofu:destroy:
+    desc: Destroy all managed infrastructure (requires explicit confirmation)
+    cmds:
+      - >-
+        dagger call tofu-destroy --confirm=destroy-production
+        --sops-age-key=env://SOPS_AGE_KEY
+
+  tofu:output:
+    desc: Print all OpenTofu outputs
+    cmds:
+      - dagger call tofu-output --sops-age-key=env://SOPS_AGE_KEY
+
+  tofu:kubeconfig:
+    desc: Extract kubeconfig from state to kubeconfig.yaml
+    cmds:
+      - >-
+        dagger call kubeconfig --sops-age-key=env://SOPS_AGE_KEY
+        export --path=kubeconfig.yaml
+
+  tofu:talosconfig:
+    desc: Extract talosconfig from state to talosconfig.yaml
+    cmds:
+      - >-
+        dagger call talosconfig --sops-age-key=env://SOPS_AGE_KEY
+        export --path=talosconfig.yaml
 
   flux:reconcile:
-    desc: Force Flux to reconcile all sources immediately
+    desc: Force Flux to reconcile (git source + all Kustomizations)
     cmds:
-      - flux reconcile source git flux-system
-      - flux reconcile kustomization infra-controllers
-      - flux reconcile kustomization infra-configs
-      - flux reconcile kustomization apps
+      - dagger call flux-reconcile --kubeconfig=env://KUBECONFIG_DATA
+
+  # -------------------------
+  # Secrets (interactive editing stays on the host via SOPS directly)
+  # -------------------------
+
+  secrets:edit:
+    desc: Open a SOPS file in your editor (decrypts, edits, re-encrypts)
+    cmds:
+      - sops {{.CLI_ARGS}}
+
+  secrets:decrypt:
+    desc: 'Decrypt a SOPS file to stdout (e.g. task secrets:decrypt -- tofu/secret.sops.yaml)'
+    cmds:
+      - dagger call secrets-decrypt --sops-age-key=env://SOPS_AGE_KEY --path={{.CLI_ARGS}}

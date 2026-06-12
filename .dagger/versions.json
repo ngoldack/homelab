@@ -1,0 +1,10 @@
+{
+  "debian": "debian:bookworm-20250520-slim",
+  "tofu": "ghcr.io/opentofu/opentofu:1.7.2",
+  "kustomize": "registry.k8s.io/kustomize/kustomize:v5.4.3",
+  "kubeconform": "ghcr.io/yannh/kubeconform:v0.6.7",
+  "sops": "ghcr.io/getsops/sops:v3.9.1",
+  "actionlint": "docker.io/rhysd/actionlint:1.7.1",
+  "trivy": "ghcr.io/aquasecurity/trivy:0.71.0",
+  "flux": "ghcr.io/fluxcd/flux-cli:v2.3.0"
+}

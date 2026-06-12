@@ -1,0 +1,38 @@
+name: Cache Dagger engine image
+description: >-
+  Restore the Dagger engine OCI image from the Actions cache (or pull and save
+  it on a miss) so dagger-for-github skips the slow, occasionally flaky
+  registry.dagger.io pull on every run. The cache key is the pinned
+  engineVersion from dagger.json, so Renovate bumps invalidate it automatically.
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve engine version
+      id: engine
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(jq -r '.engineVersion' dagger.json)"
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "image=registry.dagger.io/engine:${version}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore engine image cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: /tmp/dagger-engine.tar
+        key: dagger-engine-${{ steps.engine.outputs.version }}
+
+    - name: Load cached engine image
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: docker load --input /tmp/dagger-engine.tar
+
+    - name: Pull and save engine image
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker pull "${{ steps.engine.outputs.image }}"
+        docker save "${{ steps.engine.outputs.image }}" --output /tmp/dagger-engine.tar

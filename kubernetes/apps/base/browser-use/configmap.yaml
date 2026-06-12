@@ -1,0 +1,16 @@
+# browser-use/web-ui configuration. LLM via the in-cluster LiteLLM proxy.
+# NOTE: web-ui reads OPENAI_ENDPOINT (not OPENAI_BASE_URL). The model is chosen
+# in the Gradio UI at runtime (default gpt-4o); type a LiteLLM model_name there
+# (e.g. "coder" or "default"). web-ui runs its own headless Chromium, so no
+# external browser is needed.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: browser-use-config
+  namespace: browser-use
+data:
+  OPENAI_ENDPOINT: "http://litellm.litellm.svc.cluster.local:4000/v1"
+  DEFAULT_LLM: "openai"
+  USE_OWN_BROWSER: "false"
+  KEEP_BROWSER_OPEN: "true"
+  ANONYMIZED_TELEMETRY: "false"

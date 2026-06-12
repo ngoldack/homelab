@@ -8,3 +8,6 @@ resources:
   - khoj
   - n8n
   - playwright-mcp
+  - firecrawl
+  - gpt-researcher
+  - browser-use

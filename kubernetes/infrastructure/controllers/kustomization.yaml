@@ -22,8 +22,7 @@ resources:
   - cnpg-operator
   - cnpg-barman-plugin
   - valkey-operator
-  # AI/ML serving & autoscaling
-  - kserve-operator
+  # AI/ML autoscaling (KEDA; vLLM is served as plain Deployments behind LiteLLM)
   - keda
   # Object storage
   - minio-operator

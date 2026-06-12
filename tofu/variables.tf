@@ -139,8 +139,8 @@ variable "node_pools" {
     }
     "worker-ai" = {
       cpu_cores  = 12
-      memory     = 65536 # 64 GB
-      disk_size  = 128
+      memory     = 86016 # 84 GB
+      disk_size  = 256
       count      = 1
       talos_role = "worker"
       extensions = [

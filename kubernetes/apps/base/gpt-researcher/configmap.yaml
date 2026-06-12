@@ -1,0 +1,26 @@
+# GPT Researcher configuration. It talks to the in-cluster LiteLLM proxy via the
+# OpenAI-compatible API (OPENAI_BASE_URL), uses the self-hosted SearXNG as its
+# retriever, and the default BeautifulSoup scraper (no extra image/deps).
+#
+# Model names (FAST/SMART/STRATEGIC, provider:model with the openai: prefix so
+# they route through OPENAI_BASE_URL) map to LiteLLM model_names:
+#   default -> qwen3-8b (fast/strategic), coder -> qwen3-coder-80b (smart).
+# EMBEDDING uses the LiteLLM 'text-embedding' model (TEI).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpt-researcher-config
+  namespace: gpt-researcher
+data:
+  OPENAI_BASE_URL: "http://litellm.litellm.svc.cluster.local:4000/v1"
+  FAST_LLM: "openai:default"
+  SMART_LLM: "openai:coder"
+  STRATEGIC_LLM: "openai:default"
+  EMBEDDING: "openai:text-embedding"
+  # Retriever: self-hosted SearXNG (the valid key is 'searx', not 'searxng').
+  # NOTE: SearXNG must have the JSON output format enabled (see searxng config).
+  RETRIEVER: "searx"
+  SEARX_URL: "http://searxng.searxng.svc.cluster.local:8080"
+  # Default scraper (BeautifulSoup) needs no extra deps. Switch to 'firecrawl'
+  # (and bake firecrawl-py into the image) to use the in-cluster Firecrawl.
+  SCRAPER: "bs"

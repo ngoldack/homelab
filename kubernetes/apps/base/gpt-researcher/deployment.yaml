@@ -1,0 +1,58 @@
+# GPT Researcher — autonomous web research agent. Reaches the LiteLLM proxy for
+# LLM + embeddings and SearXNG for search; serves its API/UI on 8000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpt-researcher
+  namespace: gpt-researcher
+  labels:
+    app.kubernetes.io/name: gpt-researcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gpt-researcher
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gpt-researcher
+    spec:
+      containers:
+        - name: gpt-researcher
+          image: ghcr.io/assafelovic/gpt-researcher:3.3.0
+          envFrom:
+            - configMapRef:
+                name: gpt-researcher-config
+            - secretRef:
+                name: gpt-researcher-secrets
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpt-researcher
+  namespace: gpt-researcher
+  labels:
+    app.kubernetes.io/name: gpt-researcher
+spec:
+  selector:
+    app.kubernetes.io/name: gpt-researcher
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000

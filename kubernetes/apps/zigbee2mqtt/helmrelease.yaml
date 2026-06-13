@@ -1,0 +1,50 @@
+# Zigbee2MQTT via the official upstream Helm chart (the documented Kubernetes
+# path, with first-class Flux support). Publishes to EMQX and exposes devices to
+# Home Assistant via MQTT discovery. Frontend is internal-only (no Gateway).
+#
+# Coordinator: prefer a network-attached (TCP/Ethernet) Zigbee coordinator over a
+# node-local USB stick. If you must use USB, label the host node `zigbee=true`
+# (the nodeSelector below) and attach the device.
+#
+# VERIFY-BEFORE-DEPLOY: the chart value paths (statefulset.*, zigbee2mqtt.*) and
+# the coordinator serial port (tcp://slzb06.home.arpa:6638) for your hardware.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: zigbee2mqtt
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: zigbee2mqtt
+  chart:
+    spec:
+      chart: zigbee2mqtt
+      version: "1.x"
+      sourceRef:
+        kind: HelmRepository
+        name: zigbee2mqtt
+      interval: 1h
+  install:
+    createNamespace: false
+  # Inject the MQTT password from the SOPS secret into the chart values.
+  valuesFrom:
+    - kind: Secret
+      name: zigbee2mqtt-secrets
+      valuesKey: Z2M_MQTT_PASSWORD
+      targetPath: zigbee2mqtt.mqtt.password
+  values:
+    statefulset:
+      nodeSelector:
+        zigbee: "true"
+      storage:
+        enabled: true
+        storageClassName: tns-fast-nvmeof
+        size: 5Gi
+    zigbee2mqtt:
+      homeassistant: true
+      permit_join: false
+      mqtt:
+        server: mqtt://emqx-listeners.mqtt.svc.cluster.local:1883
+        user: zigbee2mqtt
+      serial:
+        port: tcp://slzb06.home.arpa:6638

@@ -60,6 +60,23 @@ data:
           name: Phoenix
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
 
+      # ── Home Assistant proxy provider + application (forward-auth) ─────────
+      - model: authentik_providers_proxy.proxyprovider
+        identifiers:
+          name: homeassistant-proxy
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          external_host: https://homeassistant.netbird.${DOMAIN}
+          internal_host: http://home-assistant.homeassistant.svc.cluster.local:8080
+          internal_host_ssl_validation: false
+          mode: proxy
+      - model: authentik_core.application
+        identifiers:
+          slug: homeassistant
+        attrs:
+          name: Home Assistant
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, homeassistant-proxy]]
+
       # ── Grafana OAuth2 provider + application ──────────────────────────────
       # Grafana drives the OIDC flow itself (generic_oauth), so it is reached
       # directly over the NetBird mesh and redirects back to its own callback.
@@ -101,3 +118,4 @@ data:
             - !Find [authentik_providers_proxy.proxyprovider, [name, n8n-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, searxng-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, homeassistant-proxy]]

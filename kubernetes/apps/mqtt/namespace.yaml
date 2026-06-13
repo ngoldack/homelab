@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mqtt
+  labels:
+    # EMQX runs as a non-root user but baseline keeps the broker pods scheduling
+    # cleanly while Kyverno still audits against restricted.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

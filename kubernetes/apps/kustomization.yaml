@@ -11,3 +11,7 @@ resources:
   - mem0
   - phoenix
   - kagent
+  # Home automation
+  - mqtt
+  - zigbee2mqtt
+  - homeassistant

@@ -11,12 +11,14 @@ operator-first where the operator is mature.
 - [x] Expose the Phoenix trace UI (`phoenix.netbird.<DOMAIN>`, Authentik forward-auth).
 - [x] kagent agents split one-file-per-agent under `kubernetes/apps/kagent/`.
 - [x] `k8s-sre-agent` (replaces k8sgpt) wired to KubernetesTools + Mem0 + n8n-tools.
+- [x] Home-automation platform deployed: EMQX (operator), Home Assistant (Helm), Zigbee2MQTT (Helm).
 
 ## Home automation platform (new namespaces: `homeassistant`, `zigbee2mqtt`, `mqtt`)
-- [ ] **MQTT / EMQX Operator** — `HelmRepository` `https://repos.emqx.io/charts`; `emqx-operator` HelmRelease; `apps.emqx.io/v2beta1 EMQX` 3-node core cluster, MQTT `:1883` internal, dashboard internal-only, auth via SOPS secret. (Storage on `tns-fast-nvmeof`.)
-- [ ] **Home Assistant** — start with the dedicated operator (`przemekhys/homeassistant-operator`); fall back to a `StatefulSet` + PVC if the operator is too immature. PVC-backed `/config` (`tns-fast-nfs`), HTTPS behind Authentik/NetBird, MQTT integration, config backup/export.
-- [ ] **Zigbee2MQTT** — official Helm chart (`https://charts.zigbee2mqtt.io`); persistent storage; `homeassistant: true`, `permit_join: false`; MQTT → EMQX; **prefer a network-attached coordinator** (TCP, e.g. `tcp://slzb06...:6638`) over node-local USB. If USB: label a node (`zigbee=true`) + nodeSelector + device access.
-- [ ] Verify the end-to-end path: Z2M → EMQX → Home Assistant MQTT discovery → HA automations.
+- [x] **MQTT / EMQX Operator** — `emqx-operator` (controllers) + a 3-node `apps.emqx.io/v2beta1 EMQX` cluster (`apps/mqtt`), MQTT `:1883` via the `emqx-listeners` Service, dashboard internal-only (SOPS password), volume on `tns-fast-nvmeof`.
+  - [ ] Enable MQTT `built_in_database` password auth + per-client users (`zigbee2mqtt`, `homeassistant`); the first deploy allows anonymous within the (mesh-isolated, internal-only) cluster.
+- [x] **Home Assistant** — deployed via the battle-tested **pajikos** Helm chart (`apps/homeassistant`), StatefulSet + managed config, PVC on `tns-fast-nfs`, exposed over NetBird behind Authentik forward-auth (`homeassistant.netbird.<DOMAIN>`). (The `przemekhys/homeassistant-operator` was evaluated but ships only a raw `install.yaml` with an unverified CRD — not battle-tested enough.)
+- [x] **Zigbee2MQTT** — official Helm chart (`apps/zigbee2mqtt`), persistent storage, `homeassistant: true`, `permit_join: false`, MQTT → EMQX, MQTT password via Flux `valuesFrom`. **Network coordinator** `tcp://slzb06.home.arpa:6638`; if USB, label a node `zigbee=true` (the nodeSelector is set).
+- [ ] Verify the end-to-end path on first deploy: Z2M → EMQX → Home Assistant MQTT discovery → HA automations (and confirm chart value paths + the coordinator port for your hardware).
 
 ## MCP servers to build (referenced by the agent fleet)
 Deploy each as a kagent `McpServer` (or MCP-like tool endpoint), then wire into agents:

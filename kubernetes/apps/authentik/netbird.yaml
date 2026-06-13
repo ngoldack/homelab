@@ -78,3 +78,21 @@ spec:
   groups:
     - localRef:
         name: perplexity-stack
+---
+# Home Assistant is forward-auth proxied through the embedded outpost, so its
+# NetBird resource also targets authentik-server (Host-header routed to
+# homeassistant-proxy -> home-assistant.homeassistant.svc:8080).
+apiVersion: netbird.io/v1alpha1
+kind: NetworkResource
+metadata:
+  name: homeassistant
+  namespace: authentik
+spec:
+  networkRouterRef:
+    name: perplexity-stack-router
+    namespace: authentik
+  serviceRef:
+    name: authentik-server
+  groups:
+    - localRef:
+        name: perplexity-stack

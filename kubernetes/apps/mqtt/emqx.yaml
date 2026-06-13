@@ -1,0 +1,45 @@
+# EMQX MQTT broker (3-node core) managed by the EMQX Operator. The MQTT TCP
+# listener (:1883) is exposed in-cluster as the `emqx-listeners` Service; the
+# dashboard stays internal-only (no Gateway/Ingress). Volume on the fast NVMe-oF
+# block tier.
+#
+# MQTT client auth is at the EMQX default for the first deploy (anonymous within
+# the cluster, which is mesh-isolated and has no external listener). Enabling
+# built_in_database password auth + per-client users (zigbee2mqtt, homeassistant)
+# is tracked in docs/ai-home-automation-roadmap.md.
+apiVersion: apps.emqx.io/v2beta1
+kind: EMQX
+metadata:
+  name: emqx
+  namespace: mqtt
+spec:
+  image: emqx/emqx:5
+  coreTemplate:
+    spec:
+      replicas: 3
+      env:
+        - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: emqx-dashboard
+              key: password
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      volumeClaimTemplates:
+        storageClassName: tns-fast-nvmeof
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+  dashboardServiceTemplate:
+    spec:
+      type: ClusterIP
+  listenersServiceTemplate:
+    spec:
+      type: ClusterIP

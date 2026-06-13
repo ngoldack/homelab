@@ -178,3 +178,30 @@ metadata:
 spec:
   interval: 2h
   url: https://seaweedfs.github.io/seaweedfs-operator/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: emqx
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://repos.emqx.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: zigbee2mqtt
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://charts.zigbee2mqtt.io
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: home-assistant
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: http://pajikos.github.io/home-assistant-helm-chart/

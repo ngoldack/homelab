@@ -1,5 +1,5 @@
 # LiteLLM holds the only key gating the vLLM backends, so restrict who can reach
-# it. Ingress is limited to its consumers (Khoj, n8n), the NetBird routing peer
+# it. Ingress is limited to its consumers (n8n), the NetBird routing peer
 # (for the SSO-protected proxy UI), and the node (kubelet probes). Egress is left
 # open so LiteLLM can reach the vLLM model Services and the vllm-cache-valkey in
 # the vllm namespace, plus the Authentik OIDC token/userinfo endpoints.
@@ -17,8 +17,6 @@ spec:
         - host
         - remote-node
     - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: khoj
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: n8n
         # NetBird routing peer for perplexity-stack-router runs in the authentik

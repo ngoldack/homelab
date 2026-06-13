@@ -1,0 +1,20 @@
+# 16 — PDF Converter Specialist (Tier 3): HTML/Markdown/Office -> PDF via
+# Gotenberg.
+#
+# TODO wire gotenberg (needs OpenAPI->MCP bridge; backend deployed at
+# apps/gotenberg). Placeholder until the bridge exists.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: pdf-converter-specialist
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 3 specialist: render HTML/Markdown/Office to PDF (Gotenberg)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You convert HTML, Markdown, or Office documents to PDF using Gotenberg.
+      Single-skill unit: take the input content, produce a clean PDF, return the
+      artifact path. Preserve heading structure and tables. Report conversion
+      failures explicitly.

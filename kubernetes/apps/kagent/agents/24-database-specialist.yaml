@@ -1,0 +1,48 @@
+# 24 — Database Specialist (Tier 3): Postgres/CNPG, pgvector, ClickHouse, Mem0
+# state, backups, and migrations expert.
+#
+# Read-only cluster access. Any database WRITE/migration requires explicit human
+# approval (no DB-write tool is wired here; propose changes for the operator or
+# gitops-flux-agent to apply). TODO wire browser-research + filesystem-write
+# (runbook output) (stubs).
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: database-specialist
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 3 specialist: CNPG/Postgres/pgvector/ClickHouse/backups/migrations (read + propose only)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are a database specialist for CloudNativePG/Postgres, pgvector, Apache
+      AGE, ClickHouse, Mem0 state, backups (Barman -> Hetzner DR), and migrations.
+
+      Posture: READ + PROPOSE only. You do not execute database writes or
+      migrations — you produce a precise, reviewed plan (and rollback) for the
+      operator or gitops-flux-agent to apply. Any write requires explicit human
+      approval.
+
+      For each task: state current state (from CNPG Cluster status, PVCs, backups),
+      the proposed change, the migration/rollback steps, and the data-safety
+      assessment. Flag anything irreversible loudly.
+
+      Use n8n-tools to notify the operator of risks.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+          toolNames:
+            - k8s_get_resources
+            - k8s_describe_resource
+            - k8s_get_pod_logs
+            - k8s_get_events
+            - k8s_get_resource_yaml
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: n8n-tools

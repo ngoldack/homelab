@@ -1,11 +1,14 @@
 # AI + Home Automation Roadmap (TODO)
 
-Tracks the remaining work from the "Homelab AI + Home Automation Spec". The
-current PR wires **only the MCPs that already exist** (Mem0 `memory`, `n8n-tools`,
-and the built-in `KubernetesTools`) and adds the `k8s-sre-agent` (the explicit
-k8sgpt replacement). Everything below is **not yet implemented** — it is captured
-here as the backlog. Keep each item GitOps-managed, SOPS-encrypted, and
-operator-first where the operator is mature.
+Tracks the remaining work from the "Homelab AI + Home Automation Spec". The full
+**22-agent tree is now scaffolded** under `kubernetes/apps/kagent/` using the
+verified kagent schema (`Agent` / `SandboxAgent` / `RemoteMCPServer`, built-in
+tools via `kagent-tool-server`). Agents wire **only the MCPs that already exist**
+(Mem0 `memory`, `n8n-tools`, and the built-in tool server); every other MCP is a
+flagged, **unwired** scaffold. The remaining work below is the MCP backends/bridges
+plus their wiring. See `kubernetes/apps/kagent/README.md` for the architecture,
+security model, and validation checklist. Keep each item GitOps-managed,
+SOPS-encrypted, and operator-first where the operator is mature.
 
 ## Done in this PR
 - [x] Expose the Phoenix trace UI (`phoenix.netbird.<DOMAIN>`, Authentik forward-auth).
@@ -14,6 +17,9 @@ operator-first where the operator is mature.
 - [x] Home-automation platform deployed: EMQX (operator), Home Assistant (Helm), Zigbee2MQTT (Helm).
 - [x] EMQX MQTT auth (built_in_database, bootstrapped zigbee2mqtt + homeassistant users).
 - [x] Document-tooling backing services deployed: gotenberg, docling, carbone (+ MCP wrapper CRDs, unwired).
+- [x] Full agent tree scaffolded (22 agents): main + security orchestrators; research chief + 7 research/doc agents; platform chief + 6 platform agents; homelab chief + 2 home agents; finance + mail as guarded SandboxAgents.
+- [x] kagent schema corrected to verified upstream: `RemoteMCPServer` (was invalid `McpServer`), `kagent-tool-server` built-in tools (was invalid `KubernetesTools`), list-form `requireApproval`.
+- [x] Security model: HITL `requireApproval` on k8s write (no delete tool); finance/mail network-isolated SandboxAgents, unreachable from main; security-orchestrator as advisory/audit.
 
 ## Home automation platform (new namespaces: `homeassistant`, `zigbee2mqtt`, `mqtt`)
 - [x] **MQTT / EMQX Operator** — `emqx-operator` (controllers) + a 3-node `apps.emqx.io/v2beta1 EMQX` cluster (`apps/mqtt`), MQTT `:1883` via the `emqx-listeners` Service, dashboard internal-only (SOPS password), volume on `tns-fast-nvmeof`.
@@ -22,33 +28,27 @@ operator-first where the operator is mature.
 - [x] **Zigbee2MQTT** — official Helm chart (`apps/zigbee2mqtt`), persistent storage, `homeassistant: true`, `permit_join: false`, MQTT → EMQX, MQTT password via Flux `valuesFrom`. **Network coordinator** `tcp://slzb06.home.arpa:6638`; if USB, label a node `zigbee=true` (the nodeSelector is set).
 - [ ] Verify the end-to-end path on first deploy: Z2M → EMQX → Home Assistant MQTT discovery → HA automations (and confirm chart value paths + the coordinator port for your hardware).
 
-## MCP servers to build (referenced by the agent fleet)
-Deploy each as a kagent `McpServer` (or MCP-like tool endpoint), then wire into agents:
-- [ ] `browser-research` — web/docs/changelogs/CVEs/GitHub releases.
-- [ ] `flux-git` — read Flux/Kustomize/Helm state, diffs, release files.
-- [ ] `homeassistant-api` — read entities/states/automations/services; create/update automations.
-- [ ] `zigbee2mqtt-api` — bridge health, devices, pairing, network map.
-- [ ] `mqtt-admin` — topic browse, publish/test, ACL/auth validation.
-- [~] `docling` — backing service deployed (`apps/docling`); **needs an MCP endpoint** (run docling-mcp against docling-serve) before wiring into agents.
-- [~] `carbone` — backing service scaffolded (`apps/carbone`, **needs a license**); needs an MCP/OpenAPI bridge.
-- [~] `gotenberg` — backing service deployed (`apps/gotenberg`); needs an MCP/OpenAPI bridge.
-- [ ] `langfuse-otel` → **phoenix-otel** — trace context / debugging metadata (we use Arize Phoenix, not Langfuse).
-- [ ] `filesystem/artifacts` — artifact read/write for document + research agents.
+## MCP servers to build (scaffolded, unwired — backends do not exist yet)
+Each is a flagged `RemoteMCPServer` in `apps/kagent/mcp-servers/scaffolds.yaml`
+(or `document-tools.yaml`), referenced by **no** agent until its backend exists.
+Build the backend/bridge, confirm tool names, then wire into the listed agents:
+- [ ] `browser-research` — web/docs/changelogs/CVEs (back with in-cluster SearXNG). Used by research + platform agents.
+- [ ] `flux-git` — read Flux/Kustomize/Helm state + open Git PRs. Used by gitops-flux + cluster-update.
+- [ ] `homeassistant-api` — read states, write automations. Used by homeassistant-expert (+ read for zigbee-mqtt).
+- [ ] `zigbee2mqtt-api` — bridge health, devices, network map, pairing. Used by zigbee-mqtt-agent.
+- [ ] `mqtt-admin` — EMQX topics/clients/ACL. Used by zigbee-mqtt-agent.
+- [~] `docling` / `gotenberg` / `carbone` — backing services deployed; need REST→MCP bridge (docling-mcp; OpenAPI→MCP for gotenberg/carbone; carbone also needs a license).
+- [ ] `mail-mcp-read` / `mail-mcp-write` — better-email-mcp (IMAP read; separate SMTP write creds). Used by mail-agent only; write under requireApproval.
+- [ ] `scalable-portfolio-api` — Scalable Capital read-only (scraper/wealthAPI). finance-agent only; SOPS creds.
+- [ ] `policy-evaluator` / `audit-log` — small custom MCPs for security-orchestrator (advisory).
+- [ ] `phoenix-otel` — trace context for observability-agent (Arize Phoenix, not Langfuse).
+- [ ] `filesystem/artifacts` — `/output/artifacts` read/write for document + research agents.
 
-> The `docling`/`gotenberg`/`carbone` McpServer CRDs exist (`apps/kagent/mcp-servers/document-tools.yaml`) but are not yet wired into any agent — they go healthy once each service has an MCP endpoint in front (see the file header).
-
-## Remaining agents (one file per agent, very detailed prompts)
-- [ ] `11-gitops-flux-agent` (flux-git, kubernetes-tools, browser-research, n8n-tools)
-- [ ] `12-observability-agent` (phoenix-otel, browser-research, kubernetes-tools, n8n-tools)
-- [ ] `20-homeassistant-expert` (homeassistant-api, mqtt-admin, browser-research, n8n-tools, memory)
-- [ ] `21-zigbee-mqtt-agent` (zigbee2mqtt-api, mqtt-admin, homeassistant-api, browser-research, n8n-tools) — never assume active-active Z2M.
-- [ ] `30-researcher-agent` (browser-research, docling, filesystem/artifacts, memory)
-- [ ] `31-document-author-agent` (docling, carbone, gotenberg, filesystem/artifacts)
-- [ ] `32-spreadsheet-analyst-agent` (docling, carbone, filesystem/artifacts)
-- [ ] `40-cluster-update-specialist` (browser-research, flux-git, kubernetes-tools, docling, filesystem/artifacts, n8n-tools, memory) — emits a 1–10 risk score + rollback plan.
-- [ ] `41-database-specialist` (kubernetes-tools, browser-research, filesystem/artifacts, n8n-tools)
-- [ ] `42-identity-network-agent` (kubernetes-tools, browser-research, n8n-tools)
-- [ ] Wire each specialist into `00-main-orchestrator` once it exists.
+## Remaining agent work (tree is scaffolded — see apps/kagent/README.md)
+- [ ] Wire each agent's TODO tools once the MCP backend above exists (search the
+      manifests for `TODO wire`).
+- [ ] Set real `allowedDomains` on finance-agent + mail-agent SandboxAgents.
+- [ ] Confirm built-in `kagent-tool-server` tool names + add helm/cilium/prometheus toolsets where useful.
 
 ## n8n + ops
 - [ ] Example n8n workflow hooks: notifications + agent invocation (Signal, HA webhook, email, cron).

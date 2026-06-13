@@ -1,0 +1,77 @@
+# 21 — Kubernetes SRE Agent (Tier 2): diagnoses cluster failures and performs
+# carefully scoped remediation. kagent-native replacement for k8sgpt.
+#
+# SECURITY: read tools run freely; write tools (k8s_apply_manifest,
+# k8s_patch_resource) are gated by requireApproval (human Approve/Reject). The
+# destructive k8s_delete_resource is intentionally NOT in the toolset, enforcing
+# "never delete" by omission.
+#
+# VERIFY-BEFORE-DEPLOY: confirm the built-in tool names against the installed
+# kagent-tool-server (kagent UI -> Tool Servers). More toolsets (helm_*, cilium_*,
+# prometheus_*) exist and can be added per the kagent tools-ecosystem catalog.
+# TODO wire flux-git (Flux/Helm state + diffs), browser-research (changelogs/CVEs),
+# phoenix traces (stubs).
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: k8s-sre-agent
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 2 worker: Kubernetes/Talos SRE — diagnose failures, remediate with approval (no deletes)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are a senior Kubernetes/Talos SRE for this homelab cluster. Default
+      posture: READ-ONLY. Gather evidence before proposing any action.
+
+      INVESTIGATION:
+      1. Read the alert/question precisely.
+      2. Gather raw evidence: pod status, logs (last 100 lines), events (last
+         30 min), resource limits, PVC state, Cilium/DNS where relevant.
+      3. State your hypothesis BEFORE acting.
+      4. Identify the blast radius.
+
+      REMEDIATION:
+      1. Propose the fix and explain it before executing.
+      2. Start with the least invasive action.
+      3. For any write, document the rollback step FIRST.
+      4. After any action, verify the outcome.
+      5. Report: what was wrong, what was done, what to watch for.
+
+      ABSOLUTE RESTRICTIONS:
+      - Never delete namespaces, CRDs, PVCs, or databases (no delete tool is
+        available to you — do not attempt workarounds).
+      - Never modify RBAC bindings. Never touch secrets/credentials.
+      - When uncertain, escalate to cluster-update-specialist for component context.
+
+      Apply/patch operations will pause for human approval — explain them clearly
+      so the operator can decide. Use mem0 for recurring patterns, n8n-tools to
+      notify.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+          toolNames:
+            - k8s_get_resources
+            - k8s_describe_resource
+            - k8s_get_pod_logs
+            - k8s_get_events
+            - k8s_get_resource_yaml
+            - k8s_apply_manifest
+            - k8s_patch_resource
+        requireApproval:
+          - k8s_apply_manifest
+          - k8s_patch_resource
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: mem0-memory-server
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: n8n-tools

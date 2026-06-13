@@ -1,37 +1,51 @@
-# MCP wrappers for the document-tooling services (deployed in apps/gotenberg,
-# apps/docling, apps/carbone). These McpServer CRDs are the "wrap" layer the
-# document/research agents will consume.
+# MCP wrappers for the document-tooling services (apps/gotenberg, apps/docling,
+# apps/carbone). These are the "wrap" layer the research/document agents will
+# consume once a bridge exists.
 #
-# VERIFY-BEFORE-DEPLOY: gotenberg, docling-serve and carbone expose REST APIs,
-# not MCP, so each needs an MCP endpoint in front of it before these become
-# healthy:
+# Corrected to the verified kagent schema (RemoteMCPServer, kagent.dev/v1alpha2).
+#
+# VERIFY-BEFORE-DEPLOY: gotenberg, docling-serve and carbone expose REST APIs, NOT
+# MCP, so each needs an MCP endpoint in front of it before these become healthy:
 #   - docling  -> run the official docling MCP server (docling-mcp) against
 #                 docling-serve and point the URL at it.
 #   - gotenberg/carbone -> front with a generic OpenAPI->MCP bridge (or a small
 #                 MCP server) exposing /mcp.
-# They are intentionally NOT yet referenced by any Agent (so unhealthy discovery
-# cannot break an agent). Wire them into the document/research agents once the
-# MCP endpoints below resolve. Tracked in docs/ai-home-automation-roadmap.md.
-apiVersion: kagent.dev/v1alpha1
-kind: McpServer
+# They are intentionally NOT referenced by any Agent (so failed tool discovery
+# cannot break an agent). Wire them into document-ingest-agent / document-author-
+# agent / the pdf+spreadsheet specialists once these resolve. Tracked in
+# docs/ai-home-automation-roadmap.md.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
 metadata:
   name: docling
   namespace: kagent
 spec:
+  description: "Docling document parsing (PDF/DOCX/XLSX/PPTX/HTML). NEEDS docling-mcp bridge."
+  protocol: STREAMABLE_HTTP
   url: "http://docling.docling.svc.cluster.local:5001/mcp"
+  timeout: 1m0s
+  terminateOnClose: true
 ---
-apiVersion: kagent.dev/v1alpha1
-kind: McpServer
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
 metadata:
   name: gotenberg
   namespace: kagent
 spec:
+  description: "Gotenberg HTML/Markdown/Office -> PDF. NEEDS OpenAPI->MCP bridge."
+  protocol: STREAMABLE_HTTP
   url: "http://gotenberg.gotenberg.svc.cluster.local:3000/mcp"
+  timeout: 1m0s
+  terminateOnClose: true
 ---
-apiVersion: kagent.dev/v1alpha1
-kind: McpServer
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
 metadata:
   name: carbone
   namespace: kagent
 spec:
+  description: "Carbone DOCX/XLSX/PPTX from templates. NEEDS OpenAPI->MCP bridge + license."
+  protocol: STREAMABLE_HTTP
   url: "http://carbone.carbone.svc.cluster.local:4000/mcp"
+  timeout: 1m0s
+  terminateOnClose: true

@@ -1,0 +1,29 @@
+# 12 — Document Ingest Agent (Tier 2): ingests full document content from URLs or
+# files (PDF/DOCX/XLSX/PPTX/HTML) and returns clean, structured text.
+#
+# TODO wire docling (needs docling-mcp bridge in front of docling-serve) +
+# filesystem-read (stubs). Until then this agent is a placeholder; the deployed
+# docling-serve (apps/docling) is the intended backend.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: document-ingest-agent
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 2 worker: parse documents to clean structured text + metadata (extraction only)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are a document parsing specialist. You receive URLs or file paths and
+      return clean, structured text.
+
+      Output must always include:
+      - Document type (PDF, DOCX, XLSX, HTML, ...).
+      - Source URL or file path.
+      - Extracted text, cleanly structured (preserve headings, lists, tables).
+      - Key metadata if present (author, date, version).
+
+      Rules:
+      - Never add commentary or interpretation — extraction only.
+      - Flag corrupted, inaccessible, or empty documents explicitly.

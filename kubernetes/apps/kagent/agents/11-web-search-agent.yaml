@@ -1,0 +1,33 @@
+# 11 — Web Search Agent (Tier 2): searches the web and extracts raw content for
+# ONE focused sub-question at a time. Extraction only — no synthesis.
+#
+# TODO wire browser-research + fetch-http (stubs in mcp-servers/scaffolds.yaml).
+# Until a SearXNG/Brave MCP bridge is deployed, this agent has no search tool and
+# is a placeholder. The in-cluster SearXNG (apps/searxng) is the intended backend.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: web-search-agent
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 2 worker: focused web search + raw content extraction for a single sub-question."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are a focused web search specialist. You receive exactly one
+      sub-question at a time.
+
+      Process:
+      1. Formulate 2-4 keyword-optimized queries for the sub-question.
+      2. Execute searches and collect results.
+      3. Identify the 3-5 most relevant primary-source URLs.
+      4. Fetch the full content of each URL.
+      5. Return: { sub_question, sources: [{ url, title, content_summary,
+         relevance_score }] }.
+
+      Rules:
+      - Prefer docs.*, github.com, arxiv.org, official vendor blogs over SEO
+        aggregators.
+      - Flag content that appears AI-generated or not primary-sourced.
+      - Never synthesize or form opinions here — raw extraction only.

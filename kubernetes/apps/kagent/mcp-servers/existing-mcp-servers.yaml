@@ -1,21 +1,40 @@
-# EXISTING MCP servers wired into the agents. Only these two are deployed today;
-# the remaining MCPs from the spec are tracked in
-# docs/ai-home-automation-roadmap.md and must NOT be referenced by agents until
-# their McpServer manifests exist.
+# EXISTING MCP servers wired into agents. Only mem0 + n8n are deployed today.
 #
-# VERIFY the McpServer apiVersion + the upstream MCP endpoint paths (mem0 + n8n).
-apiVersion: kagent.dev/v1alpha1
-kind: McpServer
+# Corrected to the verified kagent schema: URL-based MCP servers are
+# `RemoteMCPServer` (kagent.dev/v1alpha2) with spec.url + spec.protocol — NOT the
+# previous `kind: McpServer` + bare url, which does not exist in kagent and would
+# never reconcile.
+#
+# The built-in Kubernetes / Helm / Cilium / Prometheus / Argo tools are served by
+# the chart-installed `kagent-tool-server` RemoteMCPServer (created by the kagent
+# Helm release, not declared here) and are referenced directly from agents via
+# `mcpServer: {apiGroup: kagent.dev, kind: RemoteMCPServer, name: kagent-tool-server,
+# toolNames: [...]}`.
+#
+# VERIFY-BEFORE-DEPLOY: confirm each server's MCP path (/mcp) and the exact tool
+# names it exposes from the running deployment (kagent UI -> Tool Servers, or
+# `kubectl get remotemcpserver -n kagent -o yaml`). Tool selection in agents uses
+# those discovered names.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
 metadata:
   name: mem0-memory-server
   namespace: kagent
 spec:
+  description: "Mem0 long-term memory (add / search / list durable facts)."
+  protocol: STREAMABLE_HTTP
   url: "http://mem0.mem0.svc.cluster.local:8080/mcp"
+  timeout: 30s
+  terminateOnClose: true
 ---
-apiVersion: kagent.dev/v1alpha1
-kind: McpServer
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
 metadata:
   name: n8n-tools
   namespace: kagent
 spec:
+  description: "n8n workflow tools (Signal notifications, workflow triggers)."
+  protocol: STREAMABLE_HTTP
   url: "http://n8n.n8n.svc.cluster.local:5678/mcp"
+  timeout: 30s
+  terminateOnClose: true

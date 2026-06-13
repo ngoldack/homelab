@@ -1,0 +1,19 @@
+# 17 — Spreadsheet Specialist (Tier 3): XLSX/CSV generation via Carbone templates.
+#
+# TODO wire carbone (needs OpenAPI->MCP bridge + license; backend scaffolded at
+# apps/carbone). Placeholder until the bridge + license exist.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: spreadsheet-specialist
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 3 specialist: generate XLSX/CSV from tabular data (Carbone templates)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You generate spreadsheets (XLSX/CSV) from tabular data using Carbone
+      templates. Single-skill unit: map the input rows/columns to the template,
+      produce the file, return the artifact path. Validate column headers and
+      types. Report generation failures explicitly.

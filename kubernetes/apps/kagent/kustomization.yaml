@@ -2,10 +2,39 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: kagent
 resources:
+  # Model configs
   - modelconfigs/local-qwen-main.yaml
+  # MCP servers (RemoteMCPServer). Only mem0 + n8n are deployed; the rest are
+  # flagged scaffolds, unwired (see mcp-servers/scaffolds.yaml + document-tools).
   - mcp-servers/existing-mcp-servers.yaml
   - mcp-servers/document-tools.yaml
+  - mcp-servers/scaffolds.yaml
+  # Tier 0 — orchestrators
   - agents/00-main-orchestrator.yaml
-  - agents/10-k8s-sre-agent.yaml
-  - agents/30-summarizer-agent.yaml
+  - agents/01-security-orchestrator.yaml
+  # Tier 1 — research chief + workers (Priority #1 deep-research pipeline)
+  - agents/10-research-chief.yaml
+  - agents/11-web-search-agent.yaml
+  - agents/12-document-ingest-agent.yaml
+  - agents/13-synthesis-agent.yaml
+  - agents/14-citation-agent.yaml
+  - agents/15-document-author-agent.yaml
+  - agents/16-pdf-converter-specialist.yaml
+  - agents/17-spreadsheet-specialist.yaml
+  # Tier 1 — platform chief + workers
+  - agents/20-platform-chief.yaml
+  - agents/21-k8s-sre-agent.yaml
+  - agents/22-gitops-flux-agent.yaml
+  - agents/23-observability-agent.yaml
+  - agents/24-database-specialist.yaml
+  - agents/25-identity-network-agent.yaml
+  - agents/26-cluster-update-specialist.yaml
+  # Tier 1 — homelab chief + workers
+  - agents/30-homelab-chief.yaml
+  - agents/31-homeassistant-expert-agent.yaml
+  - agents/32-zigbee-mqtt-agent.yaml
+  # Guarded agents (SandboxAgent, unreachable from main-orchestrator)
+  - agents/40-finance-agent.yaml
+  - agents/41-mail-agent.yaml
+  # Reactive triggers
   - triggers/khook-triggers.yaml

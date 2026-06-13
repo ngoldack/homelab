@@ -21,6 +21,12 @@ spec:
   endpointSelector:
     matchLabels:
       homelab.io/kagent-agent: "true"
+  # Default-deny ingress except from within the kagent namespace (the controller
+  # delivers A2A/delegation calls; sibling-agent delegation is brokered there).
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kagent
   egress:
     # Cluster DNS (kube-dns) — required for any Service resolution.
     - toEndpoints:

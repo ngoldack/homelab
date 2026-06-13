@@ -74,6 +74,8 @@ Layered enforcement *outside* the LLM, rolled out in phases:
 | Runtime | Tetragon TracingPolicies (shell/SA-token/egress) → stdout→OTel→Loki (`configs/tetragon-policies`) | **done** |
 | Workload identity | SPIRE `k8s_psat` per-agent SVIDs (`controllers/spire`) | **done** (SVIDs issued; mTLS not yet consumable) |
 | Sandbox | Agent Substrate (gVisor) for the guarded SandboxAgents (`controllers/agent-substrate`) | **done** (experimental) |
+| Pod Security | `restricted` PSA enforced on the `kagent` namespace (`controllers/kagent/namespace.yaml`) | **done** |
+| Container runtime | `gvisor` RuntimeClass; docling sandboxed under runsc (`configs/runtime-classes`) | **done** |
 
 **Known limits (verified):**
 - Tool-server RBAC is allow-only: "no secrets / no delete" = simply not granted. Pod delete (restart) is allowed; namespaces/CRDs/PVCs/secrets are not.
@@ -81,6 +83,16 @@ Layered enforcement *outside* the LLM, rolled out in phases:
 - **agentgateway has no SPIFFE support**, so agent→MCP mTLS via SVID is not consumable yet; SPIRE establishes per-agent identity for future use.
 - `SandboxAgent` requires **Agent Substrate** (upstream-experimental; adds privileged DaemonSets) — confirm chart value paths + smoke-test gVisor on the Talos kernel before relying on it. Cilium egress + `requireApproval` are the always-on controls underneath.
 - Chose **Tetragon over Falco** (same Cilium vendor as the CNI; one eBPF stack).
+
+### Spec checklist — accepted gaps (audited against the 10-layer hardening spec)
+Everything in the spec's Complete Hardening Checklist is implemented **except** these,
+each a deliberate, documented decision rather than an oversight:
+- **`mcp-security-audit` / `mcp-scan` in CI** — N/A for this repo: MCP servers are external `RemoteMCPServer` URL refs, not in-repo server code, and the CI is lint-only (no running cluster). Re-evaluate when an in-repo MCP bridge (docling-mcp, …) is built.
+- **Forbidden tool-call-chain policies** — agentgateway CEL is per-call/stateless; sequence rules ("secret-read → external-post") need a BYO ext-authz service behind the gateway. Not built.
+- **JIT projected SA tokens (`expirationSeconds: 3600`) + `automountServiceAccountToken: false` per agent** — the kagent `Agent` CRD exposes neither field, and the controller manages agent SAs. Mitigated instead: agent SAs have **no** RoleBindings (deny-all), and the real cluster privilege (the tool-server SA) is scoped off cluster-admin.
+- **kagent bundled Postgres → CNPG** — the bundled PG is restricted-PSA-compliant (UID 999) so it doesn't block PSA, but it is dev-grade (single replica, `sslmode=disable`). Migration deferred: the chart only takes a single DSN via `urlFile`, and the mount mechanism needs confirming before cutover. Recommended next step.
+- **Prempti (Falco-at-tool-call interception)** — experimental; Tetragon has no direct equivalent. Not adopted.
+- **gotenberg / carbone under gVisor** — headless Chromium / LibreOffice are commonly runsc-incompatible; left on the default runtime pending a per-app smoke test.
 
 ## MCP server status
 

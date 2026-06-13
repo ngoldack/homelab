@@ -43,6 +43,22 @@ spec:
   install:
     createNamespace: true
   values:
+    # Defensive: pin restricted-PSA-compliant security contexts on the chart's
+    # own pods (controller/UI) so the `kagent` namespace can enforce
+    # pod-security.kubernetes.io/enforce: restricted regardless of chart-default
+    # drift. (Chart v0.9.x defaults already comply; the tool server, bundled
+    # postgres, and kmcp set their own compliant contexts.)
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
     # LLM comes directly from the in-cluster vLLM model Services (LiteLLM was
     # removed). A dedicated ModelConfig CRD (apps/kagent) sets the baseUrl; the
     # provider block here just satisfies the chart default (vLLM needs no auth).
@@ -77,7 +93,11 @@ spec:
     ui:
       replicas: 1
     # Trim the bundled fleet of built-in agents/tools that need external APIs or
-    # aren't used here.
+    # aren't used here. (Also required for restricted PSA: bundled demo agents
+    # ship no securityContext and the controller only copies SC from the Agent CR,
+    # so they cannot pass `restricted` — we run our own SC-hardened agents.)
+    k8s-agent:
+      enabled: false
     querydoc:
       enabled: false
     grafana-mcp:

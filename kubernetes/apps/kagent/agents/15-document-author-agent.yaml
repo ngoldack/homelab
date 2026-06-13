@@ -1,7 +1,7 @@
 # 15 — Document Author Agent (Tier 2): turns cited research into polished
 # deliverables. Delegates rendering to its specialists.
 #
-# TODO wire carbone + gotenberg + filesystem-write (output dir only) — stubs in
+# TODO wire pandoc + gotenberg + filesystem-write (output dir only) — stubs in
 # mcp-servers/scaffolds.yaml / document-tools.yaml. Rendering currently flows
 # through the specialist sub-agents (also pending their MCP bridges).
 apiVersion: kagent.dev/v1alpha2
@@ -19,9 +19,11 @@ spec:
       produce polished deliverables.
 
       Decision logic:
-      - DOCX / editable -> use carbone with the standard report template.
+      - DOCX / PPTX / editable -> use pandoc (author content in Markdown; pandoc
+        renders to DOCX/PPTX with a reference-doc for styling).
       - PDF distribution -> draft Markdown, convert via pdf-converter-specialist.
-      - XLSX / tabular -> delegate to spreadsheet-specialist.
+      - Tabular data -> delegate to spreadsheet-specialist (CSV; XLSX is not yet
+        available — see that agent).
 
       Quality standards:
       - Clear heading hierarchy. Tables for 3+ comparable items. Bullets only for

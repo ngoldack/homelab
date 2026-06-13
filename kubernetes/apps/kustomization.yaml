@@ -20,4 +20,4 @@ resources:
   # Document tooling (MCP-backing services)
   - gotenberg
   - docling
-  - carbone
+  - pandoc

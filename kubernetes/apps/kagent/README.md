@@ -92,7 +92,7 @@ each a deliberate, documented decision rather than an oversight:
 - **JIT projected SA tokens (`expirationSeconds: 3600`) + `automountServiceAccountToken: false` per agent** — the kagent `Agent` CRD exposes neither field, and the controller manages agent SAs. Mitigated instead: agent SAs have **no** RoleBindings (deny-all), and the real cluster privilege (the tool-server SA) is scoped off cluster-admin.
 - **kagent bundled Postgres → CNPG** — the bundled PG is restricted-PSA-compliant (UID 999) so it doesn't block PSA, but it is dev-grade (single replica, `sslmode=disable`). Migration deferred: the chart only takes a single DSN via `urlFile`, and the mount mechanism needs confirming before cutover. Recommended next step.
 - **Prempti (Falco-at-tool-call interception)** — experimental; Tetragon has no direct equivalent. Not adopted.
-- **gotenberg / carbone under gVisor** — headless Chromium / LibreOffice are commonly runsc-incompatible; left on the default runtime pending a per-app smoke test.
+- **gotenberg under gVisor** — headless Chromium is commonly runsc-incompatible; left on the default runtime pending a smoke test. (pandoc runs under gVisor; carbone was removed — CCL/not OSS, replaced by fully-OSS Pandoc.)
 
 ## MCP server status
 
@@ -105,7 +105,7 @@ tools) that is **not** referenced by any agent until its backend exists.
 | `mem0-memory-server` | **deployed** | Mem0 (`apps/mem0`) |
 | `n8n-tools` | **deployed** | n8n (`apps/n8n`) |
 | `kagent-tool-server` | **built-in** | kagent Helm chart (k8s/helm/cilium/... tools) |
-| `docling` / `gotenberg` / `carbone` | scaffold | services deployed, need REST→MCP bridge |
+| `docling` / `gotenberg` / `pandoc` | scaffold | services deployed, need REST→MCP bridge |
 | `browser-research` | scaffold | build a SearXNG/Brave MCP bridge |
 | `flux-git` | scaffold | build a Flux+Git MCP |
 | `homeassistant-api` / `zigbee2mqtt-api` / `mqtt-admin` | scaffold | build API→MCP bridges |

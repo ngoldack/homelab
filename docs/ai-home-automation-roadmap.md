@@ -16,7 +16,7 @@ SOPS-encrypted, and operator-first where the operator is mature.
 - [x] `k8s-sre-agent` (replaces k8sgpt) wired to KubernetesTools + Mem0 + n8n-tools.
 - [x] Home-automation platform deployed: EMQX (operator), Home Assistant (Helm), Zigbee2MQTT (Helm).
 - [x] EMQX MQTT auth (built_in_database, bootstrapped zigbee2mqtt + homeassistant users).
-- [x] Document-tooling backing services deployed: gotenberg, docling, carbone (+ MCP wrapper CRDs, unwired).
+- [x] Document-tooling backing services deployed: gotenberg, docling, pandoc (+ MCP wrapper CRDs, unwired). (Carbone removed — CCL/not OSS — replaced by fully-OSS Pandoc.)
 - [x] Full agent tree scaffolded (22 agents): main + security orchestrators; research chief + 7 research/doc agents; platform chief + 6 platform agents; homelab chief + 2 home agents; finance + mail as guarded SandboxAgents.
 - [x] kagent schema corrected to verified upstream: `RemoteMCPServer` (was invalid `McpServer`), `kagent-tool-server` built-in tools (was invalid `KubernetesTools`), list-form `requireApproval`.
 - [x] Security model: HITL `requireApproval` on k8s write (no delete tool); finance/mail network-isolated SandboxAgents, unreachable from main; security-orchestrator as advisory/audit.
@@ -37,7 +37,7 @@ Build the backend/bridge, confirm tool names, then wire into the listed agents:
 - [ ] `homeassistant-api` — read states, write automations. Used by homeassistant-expert (+ read for zigbee-mqtt).
 - [ ] `zigbee2mqtt-api` — bridge health, devices, network map, pairing. Used by zigbee-mqtt-agent.
 - [ ] `mqtt-admin` — EMQX topics/clients/ACL. Used by zigbee-mqtt-agent.
-- [~] `docling` / `gotenberg` / `carbone` — backing services deployed; need REST→MCP bridge (docling-mcp; OpenAPI→MCP for gotenberg/carbone; carbone also needs a license).
+- [~] `docling` / `gotenberg` / `pandoc` — backing services deployed; need REST→MCP bridge (docling-mcp; OpenAPI→MCP for gotenberg/pandoc). Pandoc (GPL) replaced Carbone; XLSX templating dropped (no fully-OSS no-enterprise option — add an openpyxl service if needed).
 - [ ] `mail-mcp-read` / `mail-mcp-write` — better-email-mcp (IMAP read; separate SMTP write creds). Used by mail-agent only; write under requireApproval.
 - [ ] `scalable-portfolio-api` — Scalable Capital read-only (scraper/wealthAPI). finance-agent only; SOPS creds.
 - [ ] `policy-evaluator` / `audit-log` — small custom MCPs for security-orchestrator (advisory).

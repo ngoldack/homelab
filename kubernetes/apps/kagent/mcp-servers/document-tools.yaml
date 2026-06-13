@@ -1,14 +1,14 @@
 # MCP wrappers for the document-tooling services (apps/gotenberg, apps/docling,
-# apps/carbone). These are the "wrap" layer the research/document agents will
+# apps/pandoc). These are the "wrap" layer the research/document agents will
 # consume once a bridge exists.
 #
 # Corrected to the verified kagent schema (RemoteMCPServer, kagent.dev/v1alpha2).
 #
-# VERIFY-BEFORE-DEPLOY: gotenberg, docling-serve and carbone expose REST APIs, NOT
+# VERIFY-BEFORE-DEPLOY: gotenberg, docling-serve and pandoc expose REST APIs, NOT
 # MCP, so each needs an MCP endpoint in front of it before these become healthy:
 #   - docling  -> run the official docling MCP server (docling-mcp) against
 #                 docling-serve and point the URL at it.
-#   - gotenberg/carbone -> front with a generic OpenAPI->MCP bridge (or a small
+#   - gotenberg/pandoc -> front with a generic OpenAPI->MCP bridge (or a small
 #                 MCP server) exposing /mcp.
 # They are intentionally NOT referenced by any Agent (so failed tool discovery
 # cannot break an agent). Wire them into document-ingest-agent / document-author-
@@ -41,11 +41,11 @@ spec:
 apiVersion: kagent.dev/v1alpha2
 kind: RemoteMCPServer
 metadata:
-  name: carbone
+  name: pandoc
   namespace: kagent
 spec:
-  description: "Carbone DOCX/XLSX/PPTX from templates. NEEDS OpenAPI->MCP bridge + license."
+  description: "Pandoc Markdown -> DOCX/PPTX/ODT/HTML (fully OSS, GPL). NEEDS OpenAPI->MCP bridge."
   protocol: STREAMABLE_HTTP
-  url: "http://carbone.carbone.svc.cluster.local:4000/mcp"
+  url: "http://pandoc.pandoc.svc.cluster.local:3030/mcp"
   timeout: 1m0s
   terminateOnClose: true

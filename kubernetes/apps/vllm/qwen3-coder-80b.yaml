@@ -4,7 +4,7 @@
 # WARNING: an 80B model on a CPU-only backend is functional but slow; it is the
 # heaviest workload on the 84GB AI node. Tune threads/KV space to the box.
 #
-# Weights are staged in the MinIO `vllm-models` bucket and copied into an
+# Weights are staged in the SeaweedFS `vllm-models` bucket and copied into an
 # emptyDir by an initContainer; vLLM serves them from the local path. Reachable
 # only via LiteLLM.
 apiVersion: apps/v1

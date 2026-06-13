@@ -1,0 +1,43 @@
+# SeaweedFS S3 wiring for Langfuse blob storage (event/media/batch-export
+# uploads): an IAM identity + generated credentials Secret (langfuse-s3-
+# credentials, AWS_*-named keys) and the langfuse bucket owned by that identity.
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Identity
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  seaweedRef:
+    name: seaweedfs
+    namespace: seaweedfs
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Credentials
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  seaweedRef:
+    name: seaweedfs
+    namespace: seaweedfs
+  identityRef:
+    name: langfuse
+  secretRef:
+    name: langfuse-s3-credentials
+    accessKeyField: AWS_ACCESS_KEY_ID
+    secretKeyField: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: Bucket
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  clusterRef:
+    name: seaweedfs
+    namespace: seaweedfs
+  reclaimPolicy: Retain
+  owner: langfuse
+  access:
+    - user: langfuse
+      actions: [Read, Write, List, Tagging, Admin]

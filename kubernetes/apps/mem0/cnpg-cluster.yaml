@@ -1,0 +1,27 @@
+# mem0's own CloudNativePG cluster (pgvector vector store for semantic memory).
+# Its own instance + credentials, backed up to Hetzner DR via the Barman plugin
+# (shared cnpg-barman-backup component). pgvector ships in the CNPG default
+# image; the extension is created at init.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: mem0-postgres
+  namespace: mem0
+spec:
+  instances: 1
+  storage:
+    size: 10Gi
+    storageClass: tns-fast-nvmeof
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: mem0-backup-store
+  bootstrap:
+    initdb:
+      database: mem0
+      owner: mem0
+      secret:
+        name: mem0-postgres-credentials
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;

@@ -1,0 +1,53 @@
+# khook event triggers: fire the main-orchestrator agent reactively on cluster
+# events (CrashLoopBackOff, OOMKilled, Flux HelmRelease install failures).
+# VERIFY the Khook apiVersion/spec against the installed khook CRD.
+apiVersion: kagent.dev/v1alpha1
+kind: Khook
+metadata:
+  name: crashloop-investigator
+  namespace: kagent
+spec:
+  events:
+    - type: Warning
+      reason: BackOff
+  namespaces: ["*"]
+  agent:
+    name: main-orchestrator
+  template: |
+    AUTOMATIC ALERT: Pod {{ .InvolvedObject.Name }} in namespace
+    {{ .InvolvedObject.Namespace }} is in CrashLoopBackOff. Investigate the root
+    cause, check recent logs, and notify me with a concise summary.
+---
+apiVersion: kagent.dev/v1alpha1
+kind: Khook
+metadata:
+  name: oomkill-investigator
+  namespace: kagent
+spec:
+  events:
+    - type: Warning
+      reason: OOMKilling
+  namespaces: ["*"]
+  agent:
+    name: main-orchestrator
+  template: |
+    AUTOMATIC ALERT: An OOMKill occurred for {{ .InvolvedObject.Name }} in
+    namespace {{ .InvolvedObject.Namespace }}. Investigate memory usage/limits
+    and notify me with a concise summary and recommendation.
+---
+apiVersion: kagent.dev/v1alpha1
+kind: Khook
+metadata:
+  name: flux-helmrelease-failure
+  namespace: kagent
+spec:
+  events:
+    - type: Warning
+      reason: InstallFailed
+  namespaces: ["*"]
+  agent:
+    name: main-orchestrator
+  template: |
+    AUTOMATIC ALERT: A Flux HelmRelease {{ .InvolvedObject.Name }} in namespace
+    {{ .InvolvedObject.Namespace }} failed to install/upgrade. Investigate the
+    Helm release events and notify me with a concise summary.

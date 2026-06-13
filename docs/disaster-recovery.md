@@ -15,7 +15,7 @@ the procedures to recover from data loss or total cluster loss.
 All S3 backup targets live **offsite** in a single **Hetzner Object Storage** bucket
 (provisioned by OpenTofu — `tofu/object-storage.tf`, default name `ngoldack-homelab-dr`,
 location `fsn1`), separated by object prefixes (`etcd-backups/`, `k8s-backups/`,
-`cnpg/<app>/`). This is independent of the in-cluster MinIO tenant and the TrueNAS that
+`cnpg/<app>/`). This is independent of the in-cluster SeaweedFS S3 and the TrueNAS that
 serves primary storage, satisfying the offsite (3-2-1) requirement. Velero explicitly
 **skips** filesystem backup of `tns-fast-nvmeof` volumes (CNPG + Valkey) via
 `velero-resource-policy.yaml`, because Postgres is backed up consistently by Barman.
@@ -163,7 +163,7 @@ Use this for accidentally deleted manifests/PVCs that are **not** CNPG/Valkey vo
 ## Known gaps / follow-ups
 
 - **Offsite copy (3-2-1): satisfied.** All backups are replicated to Hetzner Object Storage,
-  independent of the in-cluster MinIO tenant and the TrueNAS serving primary storage. Ensure
+  independent of the in-cluster SeaweedFS S3 and the TrueNAS serving primary storage. Ensure
   the Hetzner credentials and the age key / tfstate are themselves recoverable off-cluster.
 - **No automated backup-failure alerting.** The cluster runs `victoria-metrics-single`
   (no VM Operator / `VMRule` CRDs), so backup metrics are not yet alerted on. Follow-up:

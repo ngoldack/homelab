@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: langfuse
+resources:
+  - namespace.yaml
+  - secret.sops.yaml
+  - cnpg-cluster.yaml
+  - barman-s3.sops.yaml
+  - valkey.yaml
+  - s3.yaml
+  - helmrelease.yaml
+# Shared CNPG -> Hetzner DR backup wiring (ObjectStore + ScheduledBackup).
+components:
+  - ../_components/cnpg-barman-backup
+patches:
+  - target:
+      kind: ObjectStore
+      name: APP_NAME-backup-store
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: langfuse-backup-store
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: s3://${DR_S3_BUCKET}/cnpg/langfuse
+      - op: replace
+        path: /spec/configuration/s3Credentials/accessKeyId/name
+        value: langfuse-backup-s3
+      - op: replace
+        path: /spec/configuration/s3Credentials/secretAccessKey/name
+        value: langfuse-backup-s3
+  - target:
+      kind: ScheduledBackup
+      name: APP_NAME-postgres-daily
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: langfuse-postgres-daily
+      - op: replace
+        path: /spec/cluster/name
+        value: langfuse-postgres

@@ -9,3 +9,6 @@ resources:
   - litellm
   - searxng
   - n8n
+  - mem0
+  - langfuse
+  - kagent

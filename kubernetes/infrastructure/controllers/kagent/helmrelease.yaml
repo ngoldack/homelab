@@ -1,0 +1,102 @@
+# kagent CRDs, installed ahead of the controller (separate chart, as upstream
+# ships them). HelmRelease ordering: the controller HelmRelease dependsOn this.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: kagent
+  chart:
+    spec:
+      chart: kagent-crds
+      version: "0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: kagent
+      interval: 1h
+  install:
+    crds: CreateReplace
+    createNamespace: true
+  upgrade:
+    crds: CreateReplace
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: kagent
+  dependsOn:
+    - name: kagent-crds
+  chart:
+    spec:
+      chart: kagent
+      version: "0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: kagent
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    # LLM comes from the in-cluster LiteLLM proxy; a dedicated ModelConfig CRD
+    # (apps/kagent) points at it. The dummy provider secret here satisfies the
+    # chart's default; real routing is via the ModelConfig.
+    providers:
+      default: openAI
+      openAI:
+        provider: OpenAI
+        model: "coder"
+        apiKeySecretRef: kagent-litellm
+        apiKeySecretKey: OPENAI_API_KEY
+    # kagent keeps its own (bundled, dev-grade) Postgres for controller/agent
+    # state - its own instance, not shared. Long-term/semantic memory is
+    # delegated to Mem0 (MCP), so pgvector is not required here.
+    database:
+      postgres:
+        vectorEnabled: false
+        bundled:
+          enabled: true
+          storage: 2Gi
+    # Trim the bundled fleet of built-in agents/tools that need external APIs or
+    # aren't used here. Keep the k8s agent (cluster ops) and grafana-mcp off.
+    ui:
+      replicas: 1
+    querydoc:
+      enabled: false
+    grafana-mcp:
+      enabled: false
+    istio-agent:
+      enabled: false
+    kgateway-agent:
+      enabled: false
+    argo-rollouts-agent:
+      enabled: false
+    promql-agent:
+      enabled: false
+    observability-agent:
+      enabled: false
+    helm-agent:
+      enabled: false
+    cilium-policy-agent:
+      enabled: false
+    cilium-manager-agent:
+      enabled: false
+    cilium-debug-agent:
+      enabled: false
+    # Emit OpenTelemetry traces to Langfuse (LLM trace observability).
+    # VERIFY: Langfuse OTLP ingest endpoint/auth (Langfuse exposes OTLP at
+    # /api/public/otel; it requires a basic-auth header built from a project
+    # public/secret key pair).
+    otel:
+      tracing:
+        enabled: true
+        exporter:
+          otlp:
+            endpoint: "langfuse-web.langfuse.svc.cluster.local:4318"
+            protocol: "http"
+            insecure: true

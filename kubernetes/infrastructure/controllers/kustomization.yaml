@@ -26,6 +26,9 @@ resources:
   - keda
   # Object storage (SeaweedFS: S3-compatible, embedded IAM, CRD-driven buckets/users)
   - seaweedfs-operator
+  # AI agent control plane (kagent + khook event triggers)
+  - kagent
+  - khook
   # Platform services
   - backup
   - k8sgpt

@@ -1,0 +1,18 @@
+# Connects kagent to the in-cluster LiteLLM proxy via the OpenAI-compatible
+# provider (so no code changes / no real OpenAI). The API key is the LiteLLM
+# master key (kagent-litellm secret, created in infra-controllers).
+#
+# VERIFY-BEFORE-DEPLOY: confirm the ModelConfig apiVersion/fields against the
+# installed kagent CRDs (group kagent.dev; the spec here targets v1alpha2).
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: local-litellm
+  namespace: kagent
+spec:
+  model: "coder"
+  provider: OpenAI
+  openAI:
+    baseUrl: "http://litellm.litellm.svc.cluster.local:4000/v1"
+  apiKeySecret: kagent-litellm
+  apiKeySecretKey: OPENAI_API_KEY

@@ -1,0 +1,18 @@
+# Langfuse's own Valkey (Redis-compatible) instance for its event/ingestion
+# queue. Its own instance (not shared), on the fast NVMe-oF tier.
+apiVersion: valkey.io/v1alpha1
+kind: Valkey
+metadata:
+  name: langfuse-valkey
+  namespace: langfuse
+spec:
+  replicas: 1
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tns-fast-nvmeof
+        resources:
+          requests:
+            storage: 2Gi

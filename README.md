@@ -11,9 +11,13 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
 | CNI | Cilium (eBPF, kube-proxy replacement) |
 | Storage | TrueNAS CSI (`tns-csi`, NFS + NVMe-oF) + local-path |
+| Object Storage | SeaweedFS (in-cluster S3, embedded IAM, CRD-driven buckets/users) |
+| Databases | CloudNativePG (per-app Postgres) + Valkey operator |
 | VPN Overlay | NetBird (Operator + Node Extension) |
 | TLS | cert-manager + Let's Encrypt |
-| Observability | VictoriaMetrics + Loki + OTel Collector + Grafana |
+| Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
+| LLM Serving | vLLM (CPU) behind a LiteLLM gateway |
+| AI Agents | kagent + khook, Mem0 memory, Langfuse traces |
 | Security / Policy | Kyverno (Best Practices Pod Security Standards) |
 | GitOps | Flux CD |
 | Secrets | SOPS + age |

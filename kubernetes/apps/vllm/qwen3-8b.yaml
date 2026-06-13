@@ -1,7 +1,7 @@
 # Qwen3-8B served by vLLM (CPU backend) as a plain Deployment.
 # Always-warm (1 replica) low-latency chat / Home Assistant slot.
 #
-# Weights are staged in the MinIO `vllm-models` bucket and copied into an
+# Weights are staged in the SeaweedFS `vllm-models` bucket and copied into an
 # emptyDir by an initContainer (the cluster has no KServe storage-initializer);
 # vLLM then serves them from the local path. Exposed in-cluster as a Service and
 # routed to only via LiteLLM (the model gateway).
@@ -36,7 +36,7 @@ spec:
           value: "true"
           effect: "NoSchedule"
       initContainers:
-        # Pull the model weights from MinIO into the shared emptyDir.
+        # Pull the model weights from SeaweedFS S3 into the shared emptyDir.
         - name: fetch-model
           image: amazon/aws-cli:2.31.21
           command:

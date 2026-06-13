@@ -51,7 +51,8 @@ When installing or modifying any application in this cluster context, AI agents 
   - `tns-fast-nvmeof` — fast pool over NVMe-oF (block). Use for databases / high-performance, latency-sensitive workloads (CloudNativePG Postgres, Valkey).
   - `tns-tank-nfs` — tank (HDD) pool over NFS. Use only for huge files / media libraries (e.g. Emby).
   - `local-storage` — node-local, disposable. Small scratch only.
-- **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`.
+- **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`. Each app that needs a database gets its **own** instance + credentials (never shared).
+- **Object storage (S3)**: the in-cluster S3 is **SeaweedFS** (operator-managed, volume data on `tns-fast-nvmeof`), reachable at `seaweedfs-s3.seaweedfs.svc.cluster.local:8333`. Provision per-app buckets/users/credentials by colocating namespaced CRDs in the app (`S3Identity` + `S3Credentials` → a generated `AWS_*` Secret + `Bucket` with `owner`), referencing the `seaweedfs` cluster (permitted by the `ResourceReferenceGrant` in the `seaweedfs` namespace). Do **not** reintroduce MinIO or Crossplane.
 
 ### 2. Security & Policy (Cilium)
 - **Cilium Ingress Engine Linkages**: Ensure that custom application routing maps to Cilium's eBPF components. When possible, deploy Cilium-specific annotations to integrate and capture traffic drops.

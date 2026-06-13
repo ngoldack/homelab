@@ -1,0 +1,16 @@
+# kagent (CNCF Sandbox) — Kubernetes-native AI agent control plane. The chart is
+# published as an OCI artifact, so it is sourced via an OCI HelmRepository rather
+# than from the central sources.yaml.
+#
+# VERIFY-BEFORE-DEPLOY: confirm the current OCI chart path + version and the
+# CRD apiVersions against https://kagent.dev/docs (the project is young and the
+# CRD groups/fields move between releases).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kagent
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 2h
+  url: oci://ghcr.io/kagent-dev/kagent/helm

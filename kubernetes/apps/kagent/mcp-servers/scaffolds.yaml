@@ -16,20 +16,11 @@
 # VERIFY-BEFORE-DEPLOY: everything in this file is a stub.
 # ----------------------------------------------------------------------------
 
-# Web research — back with the in-cluster SearXNG (apps/searxng) via a search MCP
-# bridge, or a Brave Search MCP. Read-only.
-apiVersion: kagent.dev/v1alpha2
-kind: RemoteMCPServer
-metadata:
-  name: browser-research
-  namespace: kagent
-spec:
-  description: "STUB: web search + HTTP fetch (read-only). Build a SearXNG/Brave MCP bridge."
-  protocol: STREAMABLE_HTTP
-  url: "http://browser-research-mcp.kagent.svc.cluster.local:8080/mcp"
-  timeout: 1m0s
-  terminateOnClose: true
----
+# Web research (browser-research) is DONE — superseded by `searxng-mcp`
+# (apps/research, registered in existing-mcp-servers.yaml). It provides
+# searxng_web_search + web_url_read against the in-cluster SearXNG and is wired
+# into research-chief, web-search, document-ingest, cluster-update and k8s-sre.
+# Other agents (gitops-flux, observability, etc.) can reference searxng-mcp too.
 # Flux + Git — read Flux/Kustomize/Helm object state and open PRs against the
 # homelab repo. Read + PR only; never imperative cluster writes.
 apiVersion: kagent.dev/v1alpha2

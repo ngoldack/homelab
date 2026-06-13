@@ -105,8 +105,8 @@ tools) that is **not** referenced by any agent until its backend exists.
 | `mem0-memory-server` | **deployed** | Mem0 (`apps/mem0`) |
 | `n8n-tools` | **deployed** | n8n (`apps/n8n`) |
 | `kagent-tool-server` | **built-in** | kagent Helm chart (k8s/helm/cilium/... tools) |
+| `searxng-mcp` (web search + fetch) | **deployed** | mcp-searxng (`apps/research`) → SearXNG; wired into the research pipeline |
 | `docling` / `gotenberg` / `pandoc` | scaffold | services deployed, need REST→MCP bridge |
-| `browser-research` | scaffold | build a SearXNG/Brave MCP bridge |
 | `flux-git` | scaffold | build a Flux+Git MCP |
 | `homeassistant-api` / `zigbee2mqtt-api` / `mqtt-admin` | scaffold | build API→MCP bridges |
 | `mail-mcp-read` / `mail-mcp-write` | scaffold | deploy better-email-mcp (+ SOPS creds) |

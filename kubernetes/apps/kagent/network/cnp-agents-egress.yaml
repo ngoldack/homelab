@@ -67,3 +67,7 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway-system
+    # mcp-searxng (web search + page fetch) for the deep-research pipeline.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: research

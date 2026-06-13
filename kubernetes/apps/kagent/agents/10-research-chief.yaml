@@ -75,3 +75,11 @@ spec:
           apiGroup: kagent.dev
           kind: RemoteMCPServer
           name: n8n-tools
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: searxng-mcp
+          toolNames:
+            - searxng_web_search
+            - web_url_read

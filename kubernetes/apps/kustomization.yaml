@@ -11,6 +11,8 @@ resources:
   - mem0
   - phoenix
   - kagent
+  # Deep-research backend (mcp-searxng search+fetch MCP; gpt-researcher engine)
+  - research
   # MCP enforcement proxy (per-agent JWT + CEL tool authz in front of kagent MCP)
   - agentgateway
   # Home automation

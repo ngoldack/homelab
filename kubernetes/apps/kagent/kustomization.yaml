@@ -38,6 +38,8 @@ resources:
   - agents/41-mail-agent.yaml
   # Reactive triggers
   - triggers/khook-triggers.yaml
+  # Phase 2 network hardening (default-deny egress for agent pods)
+  - network/cnp-agents-egress.yaml
 # Cross-cutting container hardening for every declarative Agent's Deployment
 # (securityContext + restricted compliance + the homelab.io/kagent-agent label).
 patches:

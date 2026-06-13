@@ -1,0 +1,63 @@
+# Phase 2 network hardening: default-deny EGRESS for kagent declarative-agent pods
+# (selected by the homelab.io/kagent-agent label from Phase 1). Selecting the
+# endpoints for egress flips them to deny-by-default for that direction; only the
+# destinations below are reachable. Ingress is left untouched, so the kagent
+# controller can still deliver A2A/delegation calls to the agents.
+#
+# Guarded SandboxAgents (finance/mail) are NOT covered here — they do not carry
+# this label and their egress is constrained by Agent Substrate (allowedDomains)
+# in the Substrate phase.
+#
+# VERIFY-BEFORE-DEPLOY: confirm the destination namespace names match this
+# cluster (vllm, mem0, n8n, phoenix, agentgateway-system) and that agent
+# delegation + OTel export still resolve once enforced. Add agentgateway-system
+# only matters after RemoteMCPServers are rerouted through the gateway.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kagent-agents-egress
+  namespace: kagent
+spec:
+  endpointSelector:
+    matchLabels:
+      homelab.io/kagent-agent: "true"
+  egress:
+    # Cluster DNS (kube-dns) — required for any Service resolution.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Intra-namespace: kagent controller (A2A delegation), the built-in
+    # kagent-tool-server, and sibling agents.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kagent
+    # In-cluster vLLM model Service (the LLM backend).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: vllm
+    # Mem0 memory MCP.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: mem0
+    # n8n tools MCP.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: n8n
+    # Arize Phoenix (OTLP trace export).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: phoenix
+    # agentgateway MCP proxy (effective once RemoteMCPServers are rerouted).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway-system

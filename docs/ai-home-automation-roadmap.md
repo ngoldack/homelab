@@ -12,10 +12,12 @@ operator-first where the operator is mature.
 - [x] kagent agents split one-file-per-agent under `kubernetes/apps/kagent/`.
 - [x] `k8s-sre-agent` (replaces k8sgpt) wired to KubernetesTools + Mem0 + n8n-tools.
 - [x] Home-automation platform deployed: EMQX (operator), Home Assistant (Helm), Zigbee2MQTT (Helm).
+- [x] EMQX MQTT auth (built_in_database, bootstrapped zigbee2mqtt + homeassistant users).
+- [x] Document-tooling backing services deployed: gotenberg, docling, carbone (+ MCP wrapper CRDs, unwired).
 
 ## Home automation platform (new namespaces: `homeassistant`, `zigbee2mqtt`, `mqtt`)
 - [x] **MQTT / EMQX Operator** — `emqx-operator` (controllers) + a 3-node `apps.emqx.io/v2beta1 EMQX` cluster (`apps/mqtt`), MQTT `:1883` via the `emqx-listeners` Service, dashboard internal-only (SOPS password), volume on `tns-fast-nvmeof`.
-  - [ ] Enable MQTT `built_in_database` password auth + per-client users (`zigbee2mqtt`, `homeassistant`); the first deploy allows anonymous within the (mesh-isolated, internal-only) cluster.
+  - [x] MQTT `built_in_database` password auth + bootstrapped `zigbee2mqtt` + `homeassistant` users (`apps/mqtt/emqx-auth.sops.yaml`). The HA MQTT password is entered in the HA UI.
 - [x] **Home Assistant** — deployed via the battle-tested **pajikos** Helm chart (`apps/homeassistant`), StatefulSet + managed config, PVC on `tns-fast-nfs`, exposed over NetBird behind Authentik forward-auth (`homeassistant.netbird.<DOMAIN>`). (The `przemekhys/homeassistant-operator` was evaluated but ships only a raw `install.yaml` with an unverified CRD — not battle-tested enough.)
 - [x] **Zigbee2MQTT** — official Helm chart (`apps/zigbee2mqtt`), persistent storage, `homeassistant: true`, `permit_join: false`, MQTT → EMQX, MQTT password via Flux `valuesFrom`. **Network coordinator** `tcp://slzb06.home.arpa:6638`; if USB, label a node `zigbee=true` (the nodeSelector is set).
 - [ ] Verify the end-to-end path on first deploy: Z2M → EMQX → Home Assistant MQTT discovery → HA automations (and confirm chart value paths + the coordinator port for your hardware).
@@ -27,11 +29,13 @@ Deploy each as a kagent `McpServer` (or MCP-like tool endpoint), then wire into 
 - [ ] `homeassistant-api` — read entities/states/automations/services; create/update automations.
 - [ ] `zigbee2mqtt-api` — bridge health, devices, pairing, network map.
 - [ ] `mqtt-admin` — topic browse, publish/test, ACL/auth validation.
-- [ ] `docling` — parse PDF/DOCX/XLSX/PPTX.
-- [ ] `carbone` — generate DOCX/XLSX/PPTX from templates.
-- [ ] `gotenberg` — convert HTML/MD/Office → PDF.
+- [~] `docling` — backing service deployed (`apps/docling`); **needs an MCP endpoint** (run docling-mcp against docling-serve) before wiring into agents.
+- [~] `carbone` — backing service scaffolded (`apps/carbone`, **needs a license**); needs an MCP/OpenAPI bridge.
+- [~] `gotenberg` — backing service deployed (`apps/gotenberg`); needs an MCP/OpenAPI bridge.
 - [ ] `langfuse-otel` → **phoenix-otel** — trace context / debugging metadata (we use Arize Phoenix, not Langfuse).
 - [ ] `filesystem/artifacts` — artifact read/write for document + research agents.
+
+> The `docling`/`gotenberg`/`carbone` McpServer CRDs exist (`apps/kagent/mcp-servers/document-tools.yaml`) but are not yet wired into any agent — they go healthy once each service has an MCP endpoint in front (see the file header).
 
 ## Remaining agents (one file per agent, very detailed prompts)
 - [ ] `11-gitops-flux-agent` (flux-git, kubernetes-tools, browser-research, n8n-tools)

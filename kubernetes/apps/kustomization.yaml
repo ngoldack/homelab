@@ -15,3 +15,7 @@ resources:
   - mqtt
   - zigbee2mqtt
   - homeassistant
+  # Document tooling (MCP-backing services)
+  - gotenberg
+  - docling
+  - carbone

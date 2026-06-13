@@ -1,0 +1,37 @@
+# MCP wrappers for the document-tooling services (deployed in apps/gotenberg,
+# apps/docling, apps/carbone). These McpServer CRDs are the "wrap" layer the
+# document/research agents will consume.
+#
+# VERIFY-BEFORE-DEPLOY: gotenberg, docling-serve and carbone expose REST APIs,
+# not MCP, so each needs an MCP endpoint in front of it before these become
+# healthy:
+#   - docling  -> run the official docling MCP server (docling-mcp) against
+#                 docling-serve and point the URL at it.
+#   - gotenberg/carbone -> front with a generic OpenAPI->MCP bridge (or a small
+#                 MCP server) exposing /mcp.
+# They are intentionally NOT yet referenced by any Agent (so unhealthy discovery
+# cannot break an agent). Wire them into the document/research agents once the
+# MCP endpoints below resolve. Tracked in docs/ai-home-automation-roadmap.md.
+apiVersion: kagent.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: docling
+  namespace: kagent
+spec:
+  url: "http://docling.docling.svc.cluster.local:5001/mcp"
+---
+apiVersion: kagent.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: gotenberg
+  namespace: kagent
+spec:
+  url: "http://gotenberg.gotenberg.svc.cluster.local:3000/mcp"
+---
+apiVersion: kagent.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: carbone
+  namespace: kagent
+spec:
+  url: "http://carbone.carbone.svc.cluster.local:4000/mcp"

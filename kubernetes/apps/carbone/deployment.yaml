@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: carbone
+---
+# Carbone — DOCX/XLSX/PPTX generation from templates (used by the document-author
+# and spreadsheet-analyst agents via its MCP wrapper).
+#
+# VERIFY-BEFORE-DEPLOY: the self-hosted Carbone server (carbone-ee) REQUIRES a
+# license (carbone-secrets/CARBONE_EE_LICENSE is a CHANGEME placeholder). Confirm
+# the exact image, port (4000), and env contract for your Carbone subscription,
+# or swap for an OSS document-generation alternative. This will not start until a
+# real license is provided.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carbone
+  namespace: carbone
+  labels:
+    app.kubernetes.io/name: carbone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: carbone
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: carbone
+    spec:
+      containers:
+        - name: carbone
+          # VERIFY: pin the carbone-ee image you are licensed for.
+          image: carboneio/carbone-ee:latest
+          envFrom:
+            - secretRef:
+                name: carbone-secrets
+          ports:
+            - name: http
+              containerPort: 4000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carbone
+  namespace: carbone
+  labels:
+    app.kubernetes.io/name: carbone
+spec:
+  selector:
+    app.kubernetes.io/name: carbone
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000

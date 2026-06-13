@@ -4,6 +4,7 @@ namespace: kagent
 resources:
   - modelconfigs/local-qwen-main.yaml
   - mcp-servers/existing-mcp-servers.yaml
+  - mcp-servers/document-tools.yaml
   - agents/00-main-orchestrator.yaml
   - agents/10-k8s-sre-agent.yaml
   - agents/30-summarizer-agent.yaml

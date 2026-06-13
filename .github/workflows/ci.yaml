@@ -91,7 +91,7 @@ jobs:
             kubernetes/clusters/production \
             kubernetes/infrastructure/controllers \
             kubernetes/infrastructure/configs \
-            kubernetes/apps/production; do
+            kubernetes/apps; do
             echo "==== $overlay ===="
             kustomize build "$overlay" \
               | kubeconform -strict -ignore-missing-schemas -summary

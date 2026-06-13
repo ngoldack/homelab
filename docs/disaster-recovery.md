@@ -52,16 +52,18 @@ These are one-time setup steps. Until done, the jobs exist but fail/no-op.
    cd tofu && tofu apply
    ```
    If you change the bucket name/location, update the Kubernetes manifests in step 3 to match.
-3. **Set the bucket name, region and endpoint** (these are pre-filled for the defaults —
-   `ngoldack-homelab-dr`, `fsn1`, `https://fsn1.your-objectstorage.com`) in:
-   - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
-   - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
-   - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-objectstore.yaml`
-4. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME` with the same Hetzner
-   keys from step 1), then re-encrypt in place with `sops --encrypt --in-place <file>`:
-   - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
-   - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
-   - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-s3.sops.yaml`
+ 3. **Set the bucket name, region and endpoint** (these are pre-filled for the defaults —
+    `ngoldack-homelab-dr`, `fsn1`, `https://fsn1.your-objectstorage.com`) in:
+    - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
+    - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
+    - the CNPG backup endpoint/bucket are centralized as `DR_S3_ENDPOINT` / `DR_S3_BUCKET`
+      in `kubernetes/clusters/production/cluster-vars/cluster-secrets.sops.yaml` and consumed
+      by the shared `kubernetes/apps/_components/cnpg-barman-backup` component
+ 4. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME` with the same Hetzner
+    keys from step 1), then re-encrypt in place with `sops --encrypt --in-place <file>`:
+    - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
+    - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
+    - `kubernetes/apps/{authentik,n8n}/barman-s3.sops.yaml`
 5. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
    API access (`tofu/talos.tf` -> `machine.features.kubernetesTalosAPIAccess`):
    ```bash

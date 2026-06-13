@@ -9,7 +9,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
   - `kubernetes/clusters/production/` — Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`).
   - `kubernetes/infrastructure/controllers/` — operators, agents, CNI/CSI, and the central Helm `sources.yaml` (e.g. `cilium`, `cert-manager`).
   - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers (`cluster-issuers`, `kyverno-policies`).
-  - `kubernetes/apps/base/<app>/` — shared application manifests; `kubernetes/apps/production/<app>/` — per-cluster overlays (e.g. `langfuse`, `authentik`).
+  - `kubernetes/apps/<app>/` — one directory per application (its own `kustomization.yaml`). A single flat layout (no base/overlay split) since this is a single cluster. `kubernetes/apps/kustomization.yaml` is the toggle list: add/remove an `<app>` entry to enable/disable it. Shared building blocks live in `kubernetes/apps/_components/`.
 
 ## Conventions
 
@@ -22,7 +22,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 ### Kubernetes (`kubernetes/`)
 - All HelmRelease resources reference a `HelmRepository` defined in `kubernetes/infrastructure/controllers/sources.yaml`. Do not inline `chart.spec.url`.
 - Encrypted secrets must use the `.sops.yaml` filename suffix and be encrypted with the age key declared in `.sops.yaml`.
-- New applications belong in `kubernetes/apps/base/<app>/` with their own `kustomization.yaml`, exposed per cluster via a thin overlay in `kubernetes/apps/production/<app>/`. Add a `resources:` entry to `kubernetes/apps/production/kustomization.yaml`.
+- New applications belong in `kubernetes/apps/<app>/` with their own `kustomization.yaml`. Add an `<app>` entry to `kubernetes/apps/kustomization.yaml` to enable it.
 - All three Flux `Kustomization` objects (`infra-controllers`, `infra-configs`, `apps`) include a `decryption.provider: sops` block. Preserve this on edits.
 
 ### Secrets & Encryption
@@ -60,7 +60,7 @@ When installing or modifying any application in this cluster context, AI agents 
 - **Environment API Integration**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `secrets.sops.yaml`.
 
 ### 4. Code compliance & Validation
-- **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps/production` and `kustomize build kubernetes/infrastructure/controllers` (and `.../configs`).
+- **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps` and `kustomize build kubernetes/infrastructure/controllers` (and `.../configs`).
 - **Linter Compliance**: Newly created templates must pass `yamllint -c .yamllint` checks cleanly before committing.
 - **Secrets Encryption**: When declaring secrets, make sure you write them to `.sops.yaml` files, configure encryption path rules under `.sops.yaml`, and then encrypt them instantly in place using active workstation tooling (`sops --encrypt --in-place ...`).
 
@@ -74,7 +74,7 @@ cd tofu && tofu init -backend=false && tofu validate
 kustomize build kubernetes/clusters/production
 kustomize build kubernetes/infrastructure/controllers
 kustomize build kubernetes/infrastructure/configs
-kustomize build kubernetes/apps/production
+kustomize build kubernetes/apps
 
 # Lint YAML
 yamllint -c .yamllint kubernetes/

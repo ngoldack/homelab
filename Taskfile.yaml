@@ -21,7 +21,7 @@ vars:
     kubernetes/clusters/production
     kubernetes/infrastructure/controllers
     kubernetes/infrastructure/configs
-    kubernetes/apps/production
+    kubernetes/apps
   # Decrypt the state-encryption passphrase and emit the TF_ENCRYPTION expression
   # OpenTofu expects. Used by every live tofu task.
   TF_ENCRYPTION_EXPR: >-

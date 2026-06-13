@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m0s
-  path: ./kubernetes/apps/production
+  path: ./kubernetes/apps
   prune: true
   wait: true
   timeout: 15m

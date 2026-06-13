@@ -59,6 +59,26 @@ policy agent. So the "always-in-the-loop security-orchestrator" is implemented a
 silently gate calls. Treat "consult security first" as a convention, not a
 runtime guarantee.
 
+## Hardening (defence in depth)
+
+Layered enforcement *outside* the LLM, rolled out in phases:
+
+| Layer | Control | Status |
+|---|---|---|
+| Container | restricted `securityContext` + `/tmp` emptyDir on every Agent (`patches/agent-deployment-hardening.yaml`) | **done (Phase 1)** |
+| Admission | scoped Kyverno **Enforce** on the `homelab.io/kagent-agent` label (`configs/kyverno-policies/agent-hardening.yaml`) | **done (Phase 1)** |
+| Prompt | Spotlighting (untrusted-content delimiters) on mail/web/ingest/research/HA agents | **done (Phase 1)** |
+| MCP proxy | agentgateway: per-agent JWT (Authentik) + CEL tool allowlists | planned |
+| Network | Cilium default-deny + per-agent egress; finance/mail `toFQDNs` | planned (Phase 2) |
+| Workload identity | SPIRE `k8s_psat` SVIDs for agent→MCP mTLS | planned |
+| Runtime | Falco (modern eBPF) + Falcosidekick → n8n | planned |
+| Sandbox | Agent Substrate (gVisor) for the guarded SandboxAgents | planned (experimental) |
+
+**Known limits (verified against kagent/agentgateway):**
+- The real kubectl privilege is the **shared `kagent-tool-server` SA**, not per-agent pod SAs — scope the tool-server ClusterRole, don't rely on agent SAs for cluster authz.
+- agentgateway enforces tool allowlists via **CEL** (`AgentgatewayPolicy`), not Kyverno; stateful "forbidden tool-call chains" need a BYO ext-authz service.
+- `SandboxAgent` requires **Agent Substrate** (privileged DaemonSets) — until then finance/mail are isolated by Cilium `toFQDNs`, not gVisor.
+
 ## MCP server status
 
 Agents reference **only deployed** MCP servers. Everything else is a flagged

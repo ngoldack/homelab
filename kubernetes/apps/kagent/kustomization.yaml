@@ -38,3 +38,9 @@ resources:
   - agents/41-mail-agent.yaml
   # Reactive triggers
   - triggers/khook-triggers.yaml
+# Cross-cutting container hardening for every declarative Agent's Deployment
+# (securityContext + restricted compliance + the homelab.io/kagent-agent label).
+patches:
+  - path: patches/agent-deployment-hardening.yaml
+    target:
+      kind: Agent

@@ -4,4 +4,5 @@ resources:
   - cluster-issuers
   - kyverno-policies
   - tetragon-policies
+  - runtime-classes
   - object-storage

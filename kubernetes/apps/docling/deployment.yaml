@@ -26,6 +26,12 @@ spec:
       labels:
         app.kubernetes.io/name: docling
     spec:
+      # Sandbox the parser under gVisor — it ingests untrusted documents, the
+      # textbook runsc use case. Requires the gvisor RuntimeClass (Talos gVisor
+      # extension on the workers). VERIFY-BEFORE-DEPLOY: smoke-test docling-serve
+      # under gVisor (CPU ML libs occasionally hit unsupported syscalls); if it
+      # fails to start, remove this line — the app is unchanged otherwise.
+      runtimeClassName: gvisor
       containers:
         - name: docling-serve
           # renovate: datasource=docker depName=ghcr.io/docling-project/docling-serve

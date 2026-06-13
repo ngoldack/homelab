@@ -50,33 +50,38 @@ spec:
       spire:
         # Trust domain anchors every SPIFFE ID issued in this cluster.
         trustDomain: homelab.local
-        # VERIFY-BEFORE-DEPLOY: set a real cluster name before production.
-        # clusterName: homelab
+        clusterName: homelab
     # Server: k8s_psat node attestor (projected SA token, no host access; works
     # under Talos). Controller manager provisions the CRD-driven registrar.
     spire-server:
-      # TODO / VERIFY-BEFORE-DEPLOY: move the datastore off the default bundled
-      # SQLite onto a dedicated CloudNativePG instance (its own credentials)
-      # backed by tns-fast-nvmeof. Leaving SQLite default for now.
-      #   dataStore:
-      #     sql:
-      #       databaseType: postgres
-      #       host: spire-db-rw.spire-system.svc.cluster.local
-      #       port: 5432
-      #       databaseName: spire
-      #       username: spire
-      #       externalSecret:
-      #         enabled: true
-      #         name: spire-db-app
-      #         key: password
+      controllerManager:
+        enabled: true
+        # Pin the class so standalone ClusterSPIFFEID (spec.className: spire) bind.
+        className: spire
+      # Datastore on a dedicated CloudNativePG instance (cnpg-cluster.yaml),
+      # replacing the chart's bundled SQLite. Eventual-consistency on first boot:
+      # spire-server retries until spire-db + its secret exist.
+      dataStore:
+        sql:
+          databaseType: postgres
+          databaseName: spire
+          host: spire-db-rw.spire-system.svc.cluster.local
+          port: 5432
+          username: spire
+          externalSecret:
+            enabled: true
+            name: spire-db-credentials
+            key: password
       nodeAttestor:
         k8sPSAT:
           enabled: true
-      controllerManager:
-        enabled: true
     # Agent DaemonSet: same k8s_psat attestor. Agent + spiffe-csi-driver are
     # privileged/hostPath, which is why spire-system is PSA-labeled privileged.
     spire-agent:
       nodeAttestor:
         k8sPSAT:
           enabled: true
+    # CSI driver: lets workloads mount the Workload API socket as an inline CSI
+    # volume (no hostPath, no privilege) to fetch their SVID.
+    spiffe-csi-driver:
+      enabled: true

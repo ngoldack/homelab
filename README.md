@@ -2,34 +2,49 @@
 
 GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cluster on [Proxmox](https://www.proxmox.com/), provisioned with [OpenTofu](https://opentofu.org/) and managed by [Flux CD](https://fluxcd.io/).
 
+> **Full architecture with mermaid diagrams: [docs/architecture.md](docs/architecture.md)** — every
+> moving part (GitOps flow, operators, storage tiers, observability, the defense-in-depth security
+> stack, the AI agent fleet, the MCP topology, and the deep-research pipeline).
+
 ## Stack
 
 | Layer | Tool |
 |---|---|
 | Hypervisor | Proxmox VE |
-| OS | Talos Linux |
+| OS | Talos Linux (gVisor system extension on workers) |
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
-| CNI | Cilium (eBPF, kube-proxy replacement) |
+| CNI | Cilium (eBPF, kube-proxy replacement, Gateway API, Hubble) |
 | Storage | TrueNAS CSI (`tns-csi`, NFS + NVMe-oF) + local-path |
 | Object Storage | SeaweedFS (in-cluster S3, embedded IAM, CRD-driven buckets/users) |
-| Databases | CloudNativePG (per-app Postgres) + Valkey operator |
-| VPN Overlay | NetBird (Operator + Node Extension) |
+| Databases | CloudNativePG (per-app Postgres, Barman DR) + Valkey operator |
+| VPN Overlay | NetBird (mesh) |
+| Identity / SSO | Authentik (forward-auth + OIDC issuer) |
 | TLS | cert-manager + Let's Encrypt |
 | Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
-| LLM Serving | vLLM (CPU), reached directly by the AI apps (no gateway) |
-| AI Agents | kagent + khook, Mem0 memory, Arize Phoenix traces |
-| Security / Policy | Kyverno (Best Practices Pod Security Standards) |
+| LLM Serving | vLLM (CPU), reached directly by the AI apps |
+| AI Agents | kagent + khook (22-agent fleet), Mem0 memory, Arize Phoenix traces |
+| MCP Enforcement | agentgateway (per-agent JWT + CEL tool authz) |
+| Agent Sandbox | gVisor RuntimeClass + Agent Substrate (guarded agents) |
+| Deep Research | SearXNG + mcp-searxng + gpt-researcher |
+| Home Automation | EMQX (MQTT) + Home Assistant + Zigbee2MQTT |
+| Document Tooling | Gotenberg (PDF) + Docling (parse) + Pandoc (generate) |
+| Workload Identity | SPIRE / SPIFFE (per-agent SVIDs) |
+| Runtime Security | Tetragon (eBPF) |
+| Policy / Supply chain | Kyverno + Trivy |
+| Autoscaling | KEDA |
 | GitOps | Flux CD |
 | Secrets | SOPS + age |
 | State Encryption | OpenTofu native AES-GCM |
 
 ## Cluster Layout
 
-| Node | Role | vCPU | RAM | Disk |
+Node pools are a `map(object)` in `tofu/variables.tf` (counts configurable):
+
+| Pool | Role | vCPU | RAM | Notes |
 |---|---|---|---|---|
-| master-0/1/2 | controlplane | 2 | 4 GB | 32 GB |
-| worker-default-0/1 | worker | 6 | 8 GB | 64 GB |
-| worker-large-0 | worker | 12 | 48 GB | 128 GB |
+| `master` | controlplane | 4 | 4 GB | |
+| `worker-default` | worker | 8 | 24 GB | gVisor |
+| `worker-ai` | worker | 12 | 84 GB | gVisor, `ai=true:NoSchedule` taint |
 
 ## Repository Structure
 
@@ -38,10 +53,17 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 ├── tofu/                   # OpenTofu — VM provisioning & Talos bootstrap
 └── kubernetes/
     ├── clusters/
-    │   └── production/     # Flux entrypoint for your Proxmox/Talos cluster
-    ├── infrastructure/      # Cilium, cert-manager
-    └── apps/                # Homelab applications (managed by Flux)
+    │   └── production/     # Flux entrypoints (infra-controllers → infra-configs → apps)
+    ├── infrastructure/
+    │   ├── controllers/    # operators (Cilium, CNPG, kagent, agentgateway, SPIRE, …)
+    │   │                   # + central sources.yaml (HelmRepositories)
+    │   └── configs/        # cluster-wide config (Kyverno + Tetragon policies,
+    │   │                   # cluster-issuers, object-storage, runtime-classes)
+    └── apps/               # one dir per app; kustomization.yaml is the toggle list
+        └── _components/    # shared kustomize components (cnpg-barman-backup)
 ```
+
+See **[docs/architecture.md](docs/architecture.md)** for the full diagrammed breakdown.
 
 ## Getting Started
 

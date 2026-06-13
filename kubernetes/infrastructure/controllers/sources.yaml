@@ -224,3 +224,13 @@ metadata:
 spec:
   interval: 2h
   url: https://spiffe.github.io/helm-charts-hardened/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agent-substrate
+  namespace: flux-system
+spec:
+  interval: 2h
+  type: oci
+  url: oci://ghcr.io/kagent-dev/substrate/helm

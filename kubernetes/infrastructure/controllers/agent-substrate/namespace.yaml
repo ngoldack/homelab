@@ -1,0 +1,14 @@
+# kagent Agent Substrate (ate-system) — the gVisor/runsc runtime that backs
+# kagent SandboxAgents. EXPERIMENTAL (Apache-2.0, kagent-dev/substrate).
+#
+# atelet runs as a privileged hostPath/hostPort DaemonSet and the ateom-gvisor
+# workers run as privileged pods, so this namespace must opt into the privileged
+# PSA profile (Talos enforces the baseline profile cluster-wide).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ate-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

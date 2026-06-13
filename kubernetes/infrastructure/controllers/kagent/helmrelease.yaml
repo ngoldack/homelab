@@ -98,3 +98,14 @@ spec:
             endpoint: "phoenix.phoenix.svc.cluster.local:4317"
             protocol: "grpc"
             insecure: true
+    # Agent Substrate (gVisor) wiring so SandboxAgents (finance/mail) can run.
+    # EXPERIMENTAL. VERIFY-BEFORE-DEPLOY: all key paths below are unconfirmed —
+    # diff against `helm show values` for the installed kagent chart; Helm ignores
+    # unknown values, so a wrong path silently no-ops (substrate stays off).
+    controller:
+      substrate:
+        enabled: true
+        ateApiEndpoint: "http://ate-api.ate-system.svc.cluster.local:8080"
+    substrateWorkerPool:
+      create: true
+      ateomImage: "ghcr.io/kagent-dev/substrate/ateom-gvisor:0.x"

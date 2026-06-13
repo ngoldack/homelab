@@ -28,6 +28,8 @@ spec:
         # VERIFY: restrict to the real Scalable Capital / wealthAPI host only.
         - "api.scalable.capital"
   declarative:
+    # Agent Substrate runs the Go ADK only (Python is unsupported on substrate).
+    runtime: go
     modelConfig: local-qwen-main
     systemMessage: |
       You are a finance read agent with a single function: retrieve and summarize

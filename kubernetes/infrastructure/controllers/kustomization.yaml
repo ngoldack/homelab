@@ -38,6 +38,8 @@ resources:
   - khook
   # AI MCP gateway (agentgateway: per-agent JWT auth + CEL tool authz on MCP)
   - agentgateway
+  # SandboxAgent runtime (gVisor/runsc via Agent Substrate) — EXPERIMENTAL
+  - agent-substrate
   # Platform services
   - backup
   - headlamp

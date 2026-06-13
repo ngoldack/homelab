@@ -30,6 +30,8 @@ spec:
         # VERIFY: restrict to the real IMAP/SMTP host only.
         - "mail.example.com"
   declarative:
+    # Agent Substrate runs the Go ADK only (Python is unsupported on substrate).
+    runtime: go
     modelConfig: local-qwen-main
     systemMessage: |
       You are a mail assistant with read access to the inbox.

@@ -10,7 +10,7 @@ spec:
   type: Declarative
   description: "Specialised agent for Talos/Kubernetes operations."
   declarative:
-    modelConfig: local-litellm
+    modelConfig: local-vllm
     systemMessage: |
       You are a Kubernetes SRE agent with read/operate access to the cluster.
       You can inspect pods, nodes, deployments, HelmReleases and events, restart
@@ -28,7 +28,7 @@ spec:
   type: Declarative
   description: "Specialised agent for text summarization and writing."
   declarative:
-    modelConfig: local-litellm
+    modelConfig: local-vllm
     systemMessage: |
       You summarise and rewrite text concisely and accurately. Preserve key
       facts, drop filler, and match the requested length/format.
@@ -42,7 +42,7 @@ spec:
   type: Declarative
   description: "Primary orchestrator: receives external events and delegates."
   declarative:
-    modelConfig: local-litellm
+    modelConfig: local-vllm
     systemMessage: |
       You are the primary AI assistant for this homelab and personal workflows.
       You receive requests from n8n (Signal, Home Assistant, email, cron) and

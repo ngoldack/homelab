@@ -83,15 +83,6 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: k8sgpt
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://charts.k8sgpt.ai/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
   name: authentik
   namespace: flux-system
 spec:
@@ -187,12 +178,3 @@ metadata:
 spec:
   interval: 2h
   url: https://seaweedfs.github.io/seaweedfs-operator/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: langfuse
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://langfuse.github.io/langfuse-k8s

@@ -43,15 +43,15 @@ spec:
   install:
     createNamespace: true
   values:
-    # LLM comes from the in-cluster LiteLLM proxy; a dedicated ModelConfig CRD
-    # (apps/kagent) points at it. The dummy provider secret here satisfies the
-    # chart's default; real routing is via the ModelConfig.
+    # LLM comes directly from the in-cluster vLLM model Services (LiteLLM was
+    # removed). A dedicated ModelConfig CRD (apps/kagent) sets the baseUrl; the
+    # provider block here just satisfies the chart default (vLLM needs no auth).
     providers:
       default: openAI
       openAI:
         provider: OpenAI
-        model: "coder"
-        apiKeySecretRef: kagent-litellm
+        model: "qwen3-coder-80b"
+        apiKeySecretRef: kagent-vllm
         apiKeySecretKey: OPENAI_API_KEY
     # kagent keeps its own (bundled, dev-grade) Postgres for controller/agent
     # state - its own instance, not shared. Long-term/semantic memory is
@@ -88,15 +88,13 @@ spec:
       enabled: false
     cilium-debug-agent:
       enabled: false
-    # Emit OpenTelemetry traces to Langfuse (LLM trace observability).
-    # VERIFY: Langfuse OTLP ingest endpoint/auth (Langfuse exposes OTLP at
-    # /api/public/otel; it requires a basic-auth header built from a project
-    # public/secret key pair).
+    # Emit OpenTelemetry traces to Arize Phoenix (OSS LLM trace observability).
+    # Phoenix's OTLP collector listens on gRPC :4317.
     otel:
       tracing:
         enabled: true
         exporter:
           otlp:
-            endpoint: "langfuse-web.langfuse.svc.cluster.local:4318"
-            protocol: "http"
+            endpoint: "phoenix.phoenix.svc.cluster.local:4317"
+            protocol: "grpc"
             insecure: true

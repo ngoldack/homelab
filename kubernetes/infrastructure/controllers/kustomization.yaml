@@ -22,7 +22,7 @@ resources:
   - cnpg-operator
   - cnpg-barman-plugin
   - valkey-operator
-  # AI/ML autoscaling (KEDA; vLLM is served as plain Deployments behind LiteLLM)
+  # AI/ML autoscaling (KEDA; vLLM is served as plain Deployments, reached directly)
   - keda
   # Object storage (SeaweedFS: S3-compatible, embedded IAM, CRD-driven buckets/users)
   - seaweedfs-operator
@@ -31,5 +31,4 @@ resources:
   - khook
   # Platform services
   - backup
-  - k8sgpt
   - headlamp

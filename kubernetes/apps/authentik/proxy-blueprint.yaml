@@ -71,32 +71,6 @@ data:
           name: Grafana
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, grafana-oauth]]
 
-      # ── LiteLLM OAuth2 provider + application ──────────────────────────────
-      # LiteLLM's proxy UI handles OIDC itself (generic SSO), reached directly
-      # over the NetBird mesh; callback is <PROXY_BASE_URL>/sso/callback.
-      - model: authentik_providers_oauth2.oauth2provider
-        identifiers:
-          name: litellm-oauth
-        attrs:
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
-          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-          client_type: confidential
-          client_id: litellm
-          client_secret: !Env AUTHENTIK_LITELLM_CLIENT_SECRET
-          redirect_uris:
-            - matching_mode: strict
-              url: https://litellm.netbird.${DOMAIN}/sso/callback
-          property_mappings:
-            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
-            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
-            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
-      - model: authentik_core.application
-        identifiers:
-          slug: litellm
-        attrs:
-          name: LiteLLM
-          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, litellm-oauth]]
-
       # ── Attach the proxy providers to the embedded outpost ─────────────────
       # Only forward-auth (proxy) providers belong on the outpost; OAuth2
       # providers are consumed directly by the apps and are intentionally

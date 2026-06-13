@@ -1,6 +1,6 @@
 # Text Embeddings Inference (TEI, CPU build) serving a small sentence-embedding
-# model. Registered in LiteLLM as an OpenAI-compatible embeddings model so
-# clients that need embeddings (e.g. GPT Researcher) have a self-hosted endpoint.
+# model: an OpenAI-compatible embeddings endpoint reached directly by clients
+# that need embeddings (e.g. mem0) over its in-cluster Service.
 #
 # bge-small-en-v1.5 is fast on CPU and small (~130MB); the model is pulled from
 # Hugging Face on startup (HF_TOKEN from the shared vllm hf-secret).

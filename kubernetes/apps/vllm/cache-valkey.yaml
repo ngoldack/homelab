@@ -1,8 +1,6 @@
-# Shared Valkey for the AI serving stack:
-#   - LMCache remote KV backend (LMCACHE_REMOTE_URL) for the vLLM models, and
-#   - LiteLLM's response cache (see apps/litellm).
-# Provisioned by the Valkey operator; volume on the fast NVMe-oF tier per the
-# storage conventions.
+# Valkey for the vLLM serving stack: the LMCache remote KV backend
+# (LMCACHE_REMOTE_URL) for the vLLM models. Provisioned by the Valkey operator;
+# volume on the fast NVMe-oF tier per the storage conventions.
 apiVersion: valkey.io/v1alpha1
 kind: Valkey
 metadata:

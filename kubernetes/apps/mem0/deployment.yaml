@@ -1,11 +1,12 @@
-# mem0 memory server (semantic memory over pgvector), driven by the in-cluster
-# LiteLLM proxy for both the LLM (memory extraction) and the embedder. Exposes an
-# HTTP API; kagent reaches it as an MCP server (see apps/kagent).
+# mem0 memory server (semantic memory over pgvector), wired directly to the
+# in-cluster vLLM model Services for both its LLM (memory extraction, the
+# qwen3-coder-80b Deployment) and embedder (the TEI embeddings Deployment).
+# LiteLLM was removed. Exposes an HTTP API; kagent reaches it as an MCP server.
 #
 # VERIFY-BEFORE-DEPLOY: mem0 publishes no single canonical server image. Pin the
 # image you intend to run (the mem0 REST/OpenMemory server) and confirm its
 # config/env contract + the MCP endpoint path/port. The config below targets the
-# pgvector store + LiteLLM; field names follow mem0's documented config schema.
+# pgvector store + the vLLM endpoints; field names follow mem0's config schema.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -25,14 +26,14 @@ data:
     llm:
       provider: openai
       config:
-        model: coder
-        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
+        model: qwen3-coder-80b
+        openai_base_url: http://qwen3-coder-80b.vllm.svc.cluster.local/v1
     embedder:
       provider: openai
       config:
-        model: text-embedding
+        model: BAAI/bge-small-en-v1.5
         embedding_dims: 384
-        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
+        openai_base_url: http://embeddings.vllm.svc.cluster.local/v1
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -59,8 +60,6 @@ spec:
             - secretRef:
                 name: mem0-secrets
           env:
-            - name: OPENAI_BASE_URL
-              value: http://litellm.litellm.svc.cluster.local:4000/v1
             - name: MEM0_CONFIG_PATH
               value: /etc/mem0/config.yaml
           ports:

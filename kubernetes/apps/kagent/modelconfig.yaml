@@ -1,18 +1,19 @@
-# Connects kagent to the in-cluster LiteLLM proxy via the OpenAI-compatible
-# provider (so no code changes / no real OpenAI). The API key is the LiteLLM
-# master key (kagent-litellm secret, created in infra-controllers).
+# Connects kagent directly to the in-cluster vLLM model Service (LiteLLM was
+# removed) via the OpenAI-compatible provider. The "coder" slot maps to the
+# qwen3-coder-80b vLLM Deployment. vLLM needs no auth; the kagent-vllm secret
+# carries a dummy key the OpenAI client requires.
 #
 # VERIFY-BEFORE-DEPLOY: confirm the ModelConfig apiVersion/fields against the
 # installed kagent CRDs (group kagent.dev; the spec here targets v1alpha2).
 apiVersion: kagent.dev/v1alpha2
 kind: ModelConfig
 metadata:
-  name: local-litellm
+  name: local-vllm
   namespace: kagent
 spec:
-  model: "coder"
+  model: "qwen3-coder-80b"
   provider: OpenAI
   openAI:
-    baseUrl: "http://litellm.litellm.svc.cluster.local:4000/v1"
-  apiKeySecret: kagent-litellm
+    baseUrl: "http://qwen3-coder-80b.vllm.svc.cluster.local/v1"
+  apiKeySecret: kagent-vllm
   apiKeySecretKey: OPENAI_API_KEY

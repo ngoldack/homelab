@@ -6,7 +6,7 @@
 #
 # Weights are staged in the SeaweedFS `vllm-models` bucket and copied into an
 # emptyDir by an initContainer; vLLM serves them from the local path. Reachable
-# only via LiteLLM.
+# directly by the AI applications (e.g. kagent) over its Service.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

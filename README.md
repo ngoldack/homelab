@@ -16,8 +16,8 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 | VPN Overlay | NetBird (Operator + Node Extension) |
 | TLS | cert-manager + Let's Encrypt |
 | Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
-| LLM Serving | vLLM (CPU) behind a LiteLLM gateway |
-| AI Agents | kagent + khook, Mem0 memory, Langfuse traces |
+| LLM Serving | vLLM (CPU), reached directly by the AI apps (no gateway) |
+| AI Agents | kagent + khook, Mem0 memory, Arize Phoenix traces |
 | Security / Policy | Kyverno (Best Practices Pod Security Standards) |
 | GitOps | Flux CD |
 | Secrets | SOPS + age |

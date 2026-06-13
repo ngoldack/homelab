@@ -6,9 +6,8 @@ kind: Kustomization
 resources:
   - authentik
   - vllm
-  - litellm
   - searxng
   - n8n
   - mem0
-  - langfuse
+  - phoenix
   - kagent

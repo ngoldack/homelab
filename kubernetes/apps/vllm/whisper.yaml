@@ -1,6 +1,6 @@
 # faster-whisper large-v3-turbo served by vLLM (CPU backend) as a plain
 # Deployment, exposing /v1/audio/transcriptions for STT (Home Assistant voice,
-# n8n voice triggers). Always-warm, small footprint. Reachable only via LiteLLM.
+# n8n voice triggers). Always-warm, small footprint, reached directly over its Service.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

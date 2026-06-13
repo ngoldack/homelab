@@ -4,7 +4,7 @@
 # Weights are staged in the SeaweedFS `vllm-models` bucket and copied into an
 # emptyDir by an initContainer (the cluster has no KServe storage-initializer);
 # vLLM then serves them from the local path. Exposed in-cluster as a Service and
-# routed to only via LiteLLM (the model gateway).
+# reached directly by the AI applications (e.g. kagent, mem0) over its Service.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

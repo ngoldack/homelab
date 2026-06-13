@@ -65,19 +65,22 @@ Layered enforcement *outside* the LLM, rolled out in phases:
 
 | Layer | Control | Status |
 |---|---|---|
-| Container | restricted `securityContext` + `/tmp` emptyDir on every Agent (`patches/agent-deployment-hardening.yaml`) | **done (Phase 1)** |
-| Admission | scoped Kyverno **Enforce** on the `homelab.io/kagent-agent` label (`configs/kyverno-policies/agent-hardening.yaml`) | **done (Phase 1)** |
-| Prompt | Spotlighting (untrusted-content delimiters) on mail/web/ingest/research/HA agents | **done (Phase 1)** |
-| MCP proxy | agentgateway: per-agent JWT (Authentik) + CEL tool allowlists | planned |
-| Network | Cilium default-deny + per-agent egress; finance/mail `toFQDNs` | planned (Phase 2) |
-| Workload identity | SPIRE `k8s_psat` SVIDs for agent→MCP mTLS | planned |
-| Runtime | Falco (modern eBPF) + Falcosidekick → n8n | planned |
-| Sandbox | Agent Substrate (gVisor) for the guarded SandboxAgents | planned (experimental) |
+| Container | restricted `securityContext` + `/tmp` emptyDir on every Agent (`patches/agent-deployment-hardening.yaml`) | **done** |
+| Admission | scoped Kyverno **Enforce** on the `homelab.io/kagent-agent` label (`configs/kyverno-policies/agent-hardening.yaml`) | **done** |
+| Prompt | Spotlighting (untrusted-content delimiters) on mail/web/ingest/research/HA agents | **done** |
+| Tool-server RBAC | scoped ClusterRole (read-minus-secrets, patch/scale, delete pods only) replacing chart cluster-admin (`controllers/kagent/tool-server-rbac.yaml`) | **done** |
+| MCP proxy | agentgateway JWT (Authentik) + CEL tool authz, MCP routed through it (`apps/agentgateway`) | **done** |
+| Network | Cilium default-deny egress for agents (`apps/kagent/network`) | **done** |
+| Runtime | Tetragon TracingPolicies (shell/SA-token/egress) → stdout→OTel→Loki (`configs/tetragon-policies`) | **done** |
+| Workload identity | SPIRE `k8s_psat` per-agent SVIDs (`controllers/spire`) | **done** (SVIDs issued; mTLS not yet consumable) |
+| Sandbox | Agent Substrate (gVisor) for the guarded SandboxAgents (`controllers/agent-substrate`) | **done** (experimental) |
 
-**Known limits (verified against kagent/agentgateway):**
-- The real kubectl privilege is the **shared `kagent-tool-server` SA**, not per-agent pod SAs — scope the tool-server ClusterRole, don't rely on agent SAs for cluster authz.
-- agentgateway enforces tool allowlists via **CEL** (`AgentgatewayPolicy`), not Kyverno; stateful "forbidden tool-call chains" need a BYO ext-authz service.
-- `SandboxAgent` requires **Agent Substrate** (privileged DaemonSets) — until then finance/mail are isolated by Cilium `toFQDNs`, not gVisor.
+**Known limits (verified):**
+- Tool-server RBAC is allow-only: "no secrets / no delete" = simply not granted. Pod delete (restart) is allowed; namespaces/CRDs/PVCs/secrets are not.
+- agentgateway enforces tool allowlists via **CEL** (`AgentgatewayPolicy`), not Kyverno; stateful "forbidden tool-call chains" need a BYO ext-authz service. The MCP bearer is a **static** token (no native refresh) — mint via Authentik client-credentials and rotate manually.
+- **agentgateway has no SPIFFE support**, so agent→MCP mTLS via SVID is not consumable yet; SPIRE establishes per-agent identity for future use.
+- `SandboxAgent` requires **Agent Substrate** (upstream-experimental; adds privileged DaemonSets) — confirm chart value paths + smoke-test gVisor on the Talos kernel before relying on it. Cilium egress + `requireApproval` are the always-on controls underneath.
+- Chose **Tetragon over Falco** (same Cilium vendor as the CNI; one eBPF stack).
 
 ## MCP server status
 

@@ -1,0 +1,95 @@
+# Scoped RBAC for the kagent tool server (SA kagent-tools). This is the REAL
+# cluster-privilege boundary: agents call the tool server over MCP and it runs
+# kubectl under THIS ServiceAccount. The chart's default grants it literal
+# cluster-admin (*/*/* + all nonResourceURLs) — we disable that
+# (kagent-tools.rbac.create=false in the HelmRelease) and bind this scoped role.
+#
+# Design: read everything EXCEPT secrets (RBAC is allow-only, so "deny secrets"
+# == never granting them); allow the writes the k8s_apply_manifest/k8s_patch
+# tools need for safe remediation (create/update/patch on workloads+config);
+# allow delete ONLY on pods (restart). NO secrets anywhere, NO delete of
+# namespaces/CRDs/PVCs/nodes/databases. Writes still pause at the agent's
+# requireApproval gate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kagent-tools-scoped
+  labels:
+    app.kubernetes.io/managed-by: homelab
+rules:
+  # ---- READ (get/list/watch). 'secrets' deliberately omitted everywhere. ----
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - serviceaccounts
+      - persistentvolumeclaims
+      - persistentvolumes
+      - replicationcontrollers
+      - namespaces
+      - nodes
+      - events
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  # Read Flux GitOps + Cilium state (diagnosis), no mutation.
+  - apiGroups:
+      - helm.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - source.toolkit.fluxcd.io
+      - cilium.io
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # ---- WRITE (create/update/patch; NO delete) for approved remediation. ----
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["create", "update", "patch"]
+  # Delete ONLY pods (rollout/restart). Everything else is non-deletable.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kagent-tools-scoped
+  labels:
+    app.kubernetes.io/managed-by: homelab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kagent-tools-scoped
+subjects:
+  - kind: ServiceAccount
+    name: kagent-tools
+    namespace: kagent

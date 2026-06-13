@@ -62,10 +62,22 @@ spec:
         bundled:
           enabled: true
           storage: 2Gi
-    # Trim the bundled fleet of built-in agents/tools that need external APIs or
-    # aren't used here. Keep the k8s agent (cluster ops) and grafana-mcp off.
+    # Tool server (subchart kagent-tools): the component that runs kubectl/helm.
+    # By DEFAULT the chart grants it cluster-admin (*/*/*). Disable the chart RBAC
+    # and bind our own scoped ClusterRole instead (tool-server-rbac.yaml). The SA
+    # is still created by the chart. tokenPassthrough stays false so this SA is
+    # the privilege boundary; trim the loaded tool families to what we use.
+    kagent-tools:
+      rbac:
+        create: false
+      tools:
+        enabledTools: ["k8s", "helm", "utils"]
+        k8s:
+          tokenPassthrough: false
     ui:
       replicas: 1
+    # Trim the bundled fleet of built-in agents/tools that need external APIs or
+    # aren't used here.
     querydoc:
       enabled: false
     grafana-mcp:

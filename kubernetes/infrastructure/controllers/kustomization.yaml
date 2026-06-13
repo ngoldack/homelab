@@ -15,11 +15,12 @@ resources:
   - observability
   # Security & runtime enforcement
   - security
+  # Runtime security: Tetragon (eBPF; same Cilium vendor as the CNI). Detection
+  # policies live in infrastructure/configs/tetragon-policies. (Falco was
+  # evaluated and dropped to avoid a second, redundant eBPF stack.)
   - tetragon
-  # Workload identity (SPIRE/SPIFFE: per-agent SVIDs for mTLS)
+  # Workload identity (SPIRE/SPIFFE: per-agent SVIDs)
   - spire
-  # Runtime detection (Falco modern-eBPF; NOTE overlaps with tetragon above)
-  - falco
   # Networking overlay
   - netbird
   # Data operators

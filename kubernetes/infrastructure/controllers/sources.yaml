@@ -182,17 +182,17 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: minio-operator
+  name: seaweedfs-operator
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://operator.min.io
+  url: https://seaweedfs.github.io/seaweedfs-operator/
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: crossplane-stable
+  name: langfuse
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://charts.crossplane.io/stable
+  url: https://langfuse.github.io/langfuse-k8s

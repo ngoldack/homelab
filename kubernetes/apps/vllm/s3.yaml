@@ -1,0 +1,47 @@
+# SeaweedFS S3 wiring for vLLM: an IAM identity + generated credentials Secret
+# (vllm-s3-credentials, with AWS_*-named keys the model init containers read)
+# and the vllm-models bucket owned by that identity. Replaces the previous
+# Crossplane-provisioned MinIO user/bucket. The cross-namespace cluster
+# reference is permitted by the ResourceReferenceGrant in the seaweedfs ns.
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Identity
+metadata:
+  name: vllm
+  namespace: vllm
+spec:
+  seaweedRef:
+    name: seaweedfs
+    namespace: seaweedfs
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Credentials
+metadata:
+  name: vllm
+  namespace: vllm
+spec:
+  seaweedRef:
+    name: seaweedfs
+    namespace: seaweedfs
+  identityRef:
+    name: vllm
+  # The operator generates the keypair and writes it here; field names match
+  # what the aws-cli init containers expect.
+  secretRef:
+    name: vllm-s3-credentials
+    accessKeyField: AWS_ACCESS_KEY_ID
+    secretKeyField: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: Bucket
+metadata:
+  name: vllm-models
+  namespace: vllm
+spec:
+  clusterRef:
+    name: seaweedfs
+    namespace: seaweedfs
+  reclaimPolicy: Retain
+  owner: vllm
+  access:
+    - user: vllm
+      actions: [Read, Write, List, Tagging, Admin]

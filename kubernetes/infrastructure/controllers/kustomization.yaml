@@ -24,10 +24,8 @@ resources:
   - valkey-operator
   # AI/ML autoscaling (KEDA; vLLM is served as plain Deployments behind LiteLLM)
   - keda
-  # Object storage
-  - minio-operator
-  # Infrastructure-as-data control plane (provisions MinIO buckets/users/policies)
-  - crossplane
+  # Object storage (SeaweedFS: S3-compatible, embedded IAM, CRD-driven buckets/users)
+  - seaweedfs-operator
   # Platform services
   - backup
   - k8sgpt

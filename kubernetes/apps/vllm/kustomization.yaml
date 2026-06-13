@@ -4,6 +4,7 @@ namespace: vllm
 resources:
   - namespace.yaml
   - secret.sops.yaml
+  - s3.yaml
   - cache-valkey.yaml
   - qwen3-coder-80b.yaml
   - qwen3-8b.yaml

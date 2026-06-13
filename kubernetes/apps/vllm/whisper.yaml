@@ -42,7 +42,7 @@ spec:
               s3 sync "s3://vllm-models/whisper-large-v3-turbo" /models/whisper
           env:
             - name: AWS_ENDPOINT_URL
-              value: http://minio.minio.svc.cluster.local
+              value: http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:

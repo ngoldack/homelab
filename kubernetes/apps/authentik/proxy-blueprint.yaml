@@ -43,6 +43,23 @@ data:
           name: SearXNG
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, searxng-proxy]]
 
+      # ── Phoenix proxy provider + application (forward-auth) ────────────────
+      - model: authentik_providers_proxy.proxyprovider
+        identifiers:
+          name: phoenix-proxy
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          external_host: https://phoenix.netbird.${DOMAIN}
+          internal_host: http://phoenix.phoenix.svc.cluster.local:6006
+          internal_host_ssl_validation: false
+          mode: proxy
+      - model: authentik_core.application
+        identifiers:
+          slug: phoenix
+        attrs:
+          name: Phoenix
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
+
       # ── Grafana OAuth2 provider + application ──────────────────────────────
       # Grafana drives the OIDC flow itself (generic_oauth), so it is reached
       # directly over the NetBird mesh and redirects back to its own callback.
@@ -83,3 +100,4 @@ data:
           providers:
             - !Find [authentik_providers_proxy.proxyprovider, [name, n8n-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, searxng-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]

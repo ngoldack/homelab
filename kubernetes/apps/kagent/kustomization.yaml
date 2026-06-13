@@ -2,7 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: kagent
 resources:
-  - modelconfig.yaml
-  - mcpservers.yaml
-  - agents.yaml
-  - triggers.yaml
+  - modelconfigs/local-qwen-main.yaml
+  - mcp-servers/existing-mcp-servers.yaml
+  - agents/00-main-orchestrator.yaml
+  - agents/10-k8s-sre-agent.yaml
+  - agents/30-summarizer-agent.yaml
+  - triggers/khook-triggers.yaml

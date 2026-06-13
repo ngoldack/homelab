@@ -60,3 +60,21 @@ spec:
   groups:
     - localRef:
         name: perplexity-stack
+---
+# Phoenix (LLM trace UI) is forward-auth proxied through the embedded outpost,
+# so its NetBird resource also targets authentik-server (Host-header routed to
+# phoenix-proxy -> phoenix.phoenix.svc:6006).
+apiVersion: netbird.io/v1alpha1
+kind: NetworkResource
+metadata:
+  name: phoenix
+  namespace: authentik
+spec:
+  networkRouterRef:
+    name: perplexity-stack-router
+    namespace: authentik
+  serviceRef:
+    name: authentik-server
+  groups:
+    - localRef:
+        name: perplexity-stack

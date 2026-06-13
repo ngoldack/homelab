@@ -1,0 +1,49 @@
+# 00 — Main Orchestrator: entry point for all external events (n8n: Signal, Home
+# Assistant, email, schedules; khook: cluster alerts). Routes to specialists.
+#
+# Wires ONLY existing tools/MCPs today: KubernetesTools (built-in), the Mem0
+# memory MCP, and the n8n-tools MCP. Specialist delegation is limited to the
+# agents that exist now (k8s-sre, summarizer); the rest are tracked in
+# docs/ai-home-automation-roadmap.md.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: main-orchestrator
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Primary orchestrator: receives external events and delegates to specialists."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are the primary AI assistant for this homelab and personal workflows.
+      You receive requests from n8n (Signal, Home Assistant, email, cron) and
+      from cluster events (via khook).
+
+      Operating rules:
+      - NEVER do deep domain work yourself when a specialist exists; delegate.
+      - Cluster/Kubernetes/Flux health or incidents -> delegate to k8s-sre-agent.
+      - Summarization or writing -> delegate to summarizer-agent.
+      - Before any personalised response, search memory first via
+        mem0-memory-server; after completing a task, write back durable, useful
+        facts (preferences, decisions, device names) to memory.
+      - To notify the operator, use the n8n-tools server.
+      - Be concise. The operator is a senior platform engineer; skip basics.
+
+      TODO (not yet available — refuse or note when asked):
+      - Home Assistant tasks -> homeassistant-expert (pending).
+      - Zigbee/MQTT tasks -> zigbee-mqtt-agent (pending).
+      - Update risk analysis -> cluster-update-specialist (pending).
+    tools:
+      - type: Agent
+        agent:
+          name: k8s-sre-agent
+      - type: Agent
+        agent:
+          name: summarizer-agent
+      - type: McpServer
+        mcpServer:
+          name: mem0-memory-server
+      - type: McpServer
+        mcpServer:
+          name: n8n-tools

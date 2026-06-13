@@ -1,0 +1,21 @@
+# EXISTING MCP servers wired into the agents. Only these two are deployed today;
+# the remaining MCPs from the spec are tracked in
+# docs/ai-home-automation-roadmap.md and must NOT be referenced by agents until
+# their McpServer manifests exist.
+#
+# VERIFY the McpServer apiVersion + the upstream MCP endpoint paths (mem0 + n8n).
+apiVersion: kagent.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: mem0-memory-server
+  namespace: kagent
+spec:
+  url: "http://mem0.mem0.svc.cluster.local:8080/mcp"
+---
+apiVersion: kagent.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: n8n-tools
+  namespace: kagent
+spec:
+  url: "http://n8n.n8n.svc.cluster.local:5678/mcp"

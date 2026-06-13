@@ -1,0 +1,110 @@
+# Falco runtime security (CNCF). On Talos there is no kernel-module / driver
+# build path (immutable, no kernel headers), so Falco runs with the modern eBPF
+# probe (CO-RE, embedded in the userspace binary) and the driver-loader init
+# container is disabled. The bundled Falcosidekick fans alerts out to an n8n
+# webhook for automation/notification.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: falco
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: falco
+  chart:
+    spec:
+      chart: falco
+      # VERIFY-BEFORE-DEPLOY: current upstream is falco-9.1.0 (appVersion 0.44.1).
+      # NOTE: this cluster already runs Tetragon (eBPF runtime security) — Falco
+      # overlaps; consider consolidating onto one engine. Bump/pin after a
+      # modern_ebpf smoke test on the current Talos kernel.
+      version: "9.x"
+      sourceRef:
+        kind: HelmRepository
+        name: falcosecurity
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    driver:
+      # modern_ebpf = CO-RE probe embedded in Falco; the only driver that works
+      # on Talos (no kmod build, no kernel headers required).
+      kind: modern_ebpf
+      loader:
+        # Nothing to download/compile for modern_ebpf, so skip the loader init
+        # container entirely.
+        enabled: false
+    # Falcosidekick forwards Falco events to downstream sinks (here: n8n).
+    falcosidekick:
+      enabled: true
+      config:
+        webhook:
+          # Placeholder n8n webhook endpoint (workflow trigger).
+          # VERIFY-BEFORE-DEPLOY: confirm the n8n Service name / path.
+          address: http://n8n.n8n.svc.cluster.local:5678/webhook/falco
+          method: POST
+          # TODO(sops): webhook auth must NOT be inlined. Source the header from
+          # an encrypted secret.sops.yaml (e.g. set falcosidekick.config
+          # .existingSecret -> WEBHOOK_CUSTOMHEADERS="Authorization:Bearer ...").
+          # VERIFY-BEFORE-DEPLOY
+          #
+          # Optional: Falcosidekick can also export OTLP traces to the
+          # OTel/Tempo stack for span correlation. Add a sibling key
+          # falcosidekick.config.otlp.traces.endpoint (e.g.
+          # tempo.observability.svc.cluster.local:4317, protocol grpc).
+          # Left off until needed. VERIFY-BEFORE-DEPLOY
+    customRules:
+      # Cluster-specific detections for the kagent AI-agent platform. Appended
+      # after the upstream falco_rules.yaml, so the default macros/lists
+      # (container, spawned_process, shell_binaries, open_read, outbound) are
+      # already defined and resolve here. Custom lists are declared before the
+      # rules that consume them (Falco loads top-to-bottom).
+      kagent_rules.yaml: |-
+        - list: kagent_allowed_token_readers
+          # VERIFY-BEFORE-DEPLOY: tune to the real agent process names.
+          items: [kagent, controller, agent]
+        - list: finance_agent_allowed_endpoints
+          # VERIFY-BEFORE-DEPLOY: replace with the real egress allow-list
+          # (defaults to RFC1918, so only egress to public IPs alerts).
+          items: ['"10.0.0.0/8"', '"172.16.0.0/12"', '"192.168.0.0/16"']
+        - rule: Shell Spawned in kagent Pod
+          desc: >
+            A shell was executed inside a kagent-namespace pod. Agent workloads
+            should never spawn an interactive shell at runtime.
+          condition: >
+            spawned_process and container and k8s.ns.name = "kagent"
+            and proc.name in (shell_binaries)
+          output: >
+            Shell spawned in kagent pod (pod=%k8s.pod.name ns=%k8s.ns.name
+            container=%container.name proc=%proc.cmdline parent=%proc.pname
+            user=%user.name)
+          priority: WARNING
+          tags: [kagent, shell, mitre_execution, T1059]
+        - rule: ServiceAccount Token Read in kagent Namespace
+          desc: >
+            A process not on the allow-list read a mounted Kubernetes
+            service-account token in the kagent namespace (possible credential
+            theft / token exfiltration).
+          condition: >
+            open_read and container and k8s.ns.name = "kagent"
+            and fd.name contains "kubernetes.io/serviceaccount"
+            and not proc.name in (kagent_allowed_token_readers)
+          output: >
+            ServiceAccount token read in kagent (pod=%k8s.pod.name
+            ns=%k8s.ns.name file=%fd.name proc=%proc.cmdline user=%user.name)
+          priority: WARNING
+          tags: [kagent, secrets, mitre_credential_access, T1528]
+        - rule: Unexpected Outbound Connection from finance-agent
+          desc: >
+            The finance-agent pod opened an outbound connection to an endpoint
+            outside the approved egress allow-list (possible data exfiltration).
+          condition: >
+            outbound and container
+            and k8s.pod.name startswith "finance-agent"
+            and not fd.sip in (finance_agent_allowed_endpoints)
+          output: >
+            Unexpected outbound connection from finance-agent (pod=%k8s.pod.name
+            ns=%k8s.ns.name connection=%fd.name proc=%proc.cmdline
+            user=%user.name)
+          priority: NOTICE
+          tags: [kagent, network, mitre_exfiltration, T1041]

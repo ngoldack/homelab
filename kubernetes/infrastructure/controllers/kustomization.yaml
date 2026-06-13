@@ -16,6 +16,10 @@ resources:
   # Security & runtime enforcement
   - security
   - tetragon
+  # Workload identity (SPIRE/SPIFFE: per-agent SVIDs for mTLS)
+  - spire
+  # Runtime detection (Falco modern-eBPF; NOTE overlaps with tetragon above)
+  - falco
   # Networking overlay
   - netbird
   # Data operators
@@ -31,6 +35,8 @@ resources:
   # AI agent control plane (kagent + khook event triggers)
   - kagent
   - khook
+  # AI MCP gateway (agentgateway: per-agent JWT auth + CEL tool authz on MCP)
+  - agentgateway
   # Platform services
   - backup
   - headlamp

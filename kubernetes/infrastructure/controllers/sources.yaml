@@ -205,3 +205,31 @@ metadata:
 spec:
   interval: 12h
   url: http://pajikos.github.io/home-assistant-helm-chart/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agentgateway
+  namespace: flux-system
+spec:
+  interval: 2h
+  type: oci
+  url: oci://cr.agentgateway.dev/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: falcosecurity
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://falcosecurity.github.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: spiffe
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://spiffe.github.io/helm-charts-hardened/

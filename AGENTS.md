@@ -28,7 +28,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 ### Secrets & Encryption
 - Encryption uses **age** via **SOPS**. The public key anchor is `homelab_age_key` in `.sops.yaml`. Do not add a second key provider without updating both path rules.
 - The state file passphrase is stored as `state_encryption_passphrase` inside `tofu/secret.sops.yaml`.
-- Continuous Integration (`.github/workflows/validate.yaml`) enforces secure encryption on all metadata: files matching raw `.sops.yaml` without proper `sops:` block structural indicators fail build runs.
+- Continuous Integration (`.github/workflows/ci.yaml`) lints only: it enforces secure encryption on all metadata (files matching raw `.sops.yaml` without proper `sops:` block structural indicators fail the run), plus YAML/workflow lint, OpenTofu validate, and kustomize/kubeconform. It never deploys or mutates infrastructure.
 
 ### Commit Messages
 - Follow the **Conventional Commits** specification: `<type>(<scope>): <description>`
@@ -82,5 +82,5 @@ yamllint -c .yamllint kubernetes/
 
 ## CI/CD
 
-- `.github/workflows/validate.yaml` — runs on every push/PR; validates kustomize, secrets encryption status, and YAML.
-- Local custom cluster and VM operations are automated completely on the native workstation using a unified `Taskfile.yaml` runner configuration (no active cloud deployment runner workflow needed).
+- `.github/workflows/ci.yaml` — runs on every push/PR to `main`; **lints only** (YAML, workflows, SOPS encryption status, OpenTofu validate, kustomize + kubeconform). It never deploys or mutates infrastructure.
+- All cluster and VM operations (`tofu plan/apply/destroy`, `flux reconcile`, secret editing) are run manually from the workstation via the unified `Taskfile.yaml` runner, with the host connected to the private mesh. No cloud deployment runner is used.

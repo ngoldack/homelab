@@ -1,14 +1,9 @@
 name: CI
 
-# Offline validation only. Runs on every PR and on pushes to main.
-# Requires NO secrets, kubeconfig, VPN, or Proxmox access - these are the
-# required branch-protection checks. Anything needing private network access
-# (tofu plan/apply, flux reconcile) lives in the tofu-* workflows.
-#
-# Each gate is an independent Dagger function, run here as a matrix so every
-# gate is its own GitHub check (granular branch protection + independent
-# re-run). The exact same gates run locally, either individually
-# (`dagger call kube-validate`) or all at once (`dagger call check`).
+# Lint only. Runs on every push and PR to main. Requires NO secrets, kubeconfig,
+# VPN, or Proxmox access, and never deploys or mutates anything. All live
+# operations (tofu apply, flux reconcile) are run manually from a workstation
+# (see the Taskfile). This is purely static validation of the repo.
 
 on:
   push:
@@ -26,29 +21,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: ${{ matrix.gate }}
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        gate:
-          - yamllint
-          - actionlint
-          - sops-check
-          - tofu-validate
-          - tofu-security
-          - kube-validate
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Cache Dagger engine image
-        uses: ./.github/actions/dagger-engine-cache
-
-      - name: ${{ matrix.gate }} (Dagger)
-        uses: dagger/dagger-for-github@v8.4.1
+      - name: Lint YAML
+        uses: ibiqlik/action-yamllint@v3
         with:
-          verb: call
-          args: ${{ matrix.gate }}
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          config_file: .yamllint
+          file_or_dir: kubernetes/ tofu/
+
+      - name: Lint GitHub Actions workflows
+        uses: raven-actions/actionlint@v2
+
+      - name: Assert SOPS files are encrypted
+        run: |
+          set -euo pipefail
+          # Every *.sops.yaml payload (not the .sops.yaml config) must carry a
+          # top-level sops: block and at least one ENC[ value. Inspects ciphertext
+          # only - no decryption key required.
+          bad=0
+          while IFS= read -r -d '' f; do
+            if [ "$(basename "$f")" = ".sops.yaml" ]; then
+              continue
+            fi
+            if grep -qE '^sops:' "$f" && grep -q 'ENC\[' "$f"; then
+              echo "OK: $f"
+            else
+              echo "ERROR: unencrypted or malformed SOPS file: $f"
+              bad=1
+            fi
+          done < <(find . -name '*.sops.yaml' -type f -print0)
+          exit "$bad"
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_wrapper: false
+
+      - name: Validate OpenTofu
+        working-directory: tofu
+        env:
+          # Throwaway passphrase: init builds the pbkdf2 key eagerly, but no real
+          # state is read or written during fmt/validate.
+          TF_ENCRYPTION: >-
+            key_provider "pbkdf2" "statekey" {
+            passphrase = "ci-offline-validate-dummy-passphrase" }
+        run: |
+          set -euo pipefail
+          tofu fmt -check -recursive
+          tofu init -backend=false -lockfile=readonly
+          tofu validate
+
+      - name: Setup kustomize + kubeconform
+        run: |
+          set -euo pipefail
+          kustomize_install="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
+          curl -fsSL "$kustomize_install" | bash -s -- 5.4.3 /usr/local/bin
+          kubeconform_url="https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL "$kubeconform_url" | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Validate Kubernetes manifests
+        run: |
+          set -euo pipefail
+          for overlay in \
+            kubernetes/clusters/production \
+            kubernetes/infrastructure/controllers \
+            kubernetes/infrastructure/configs \
+            kubernetes/apps/production; do
+            echo "==== $overlay ===="
+            kustomize build "$overlay" \
+              | kubeconform -strict -ignore-missing-schemas -summary
+          done

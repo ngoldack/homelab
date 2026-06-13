@@ -12,6 +12,7 @@ resources:
   - helmrelease.yaml
   - gateway.yaml
   - netbird.yaml
+  - referencegrant.yaml
 # Shared CNPG -> Hetzner DR backup wiring (ObjectStore + ScheduledBackup).
 # Static config lives in the component; only this app's identity is patched in.
 components:

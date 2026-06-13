@@ -40,6 +40,8 @@ resources:
   - triggers/khook-triggers.yaml
   # Phase 2 network hardening (default-deny egress for agent pods)
   - network/cnp-agents-egress.yaml
+  # agentgateway bearer token presented by the RemoteMCPServers (JWT to the gateway)
+  - gateway-token.sops.yaml
 # Cross-cutting container hardening for every declarative Agent's Deployment
 # (securityContext + restricted compliance + the homelab.io/kagent-agent label).
 patches:

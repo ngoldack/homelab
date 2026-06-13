@@ -1,0 +1,37 @@
+# MCP backends fronted by agentgateway. One target each (non-federated). The
+# kagent agents reach these via the gateway HTTPRoutes, not directly.
+#
+# VERIFY-BEFORE-DEPLOY: confirm the upstream MCP paths/ports (mem0 :8080/mcp,
+# n8n :5678/mcp) against the running services; confirm appProtocol/target schema
+# against the installed agentgateway CRDs (agentgateway.dev/v1alpha1, chart 1.2.x).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-mem0
+  namespace: agentgateway-system
+spec:
+  mcp:
+    failureMode: FailOpen
+    targets:
+      - name: mem0
+        static:
+          host: mem0.mem0.svc.cluster.local
+          port: 8080
+          path: /mcp
+          protocol: StreamableHTTP
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-n8n
+  namespace: agentgateway-system
+spec:
+  mcp:
+    failureMode: FailOpen
+    targets:
+      - name: n8n
+        static:
+          host: n8n.n8n.svc.cluster.local
+          port: 5678
+          path: /mcp
+          protocol: StreamableHTTP

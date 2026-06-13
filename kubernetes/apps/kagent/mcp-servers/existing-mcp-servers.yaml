@@ -23,9 +23,16 @@ metadata:
 spec:
   description: "Mem0 long-term memory (add / search / list durable facts)."
   protocol: STREAMABLE_HTTP
-  url: "http://mem0.mem0.svc.cluster.local:8080/mcp"
+  # Routed through agentgateway (JWT + CEL enforcement) instead of direct.
+  url: "http://agentgateway-proxy.agentgateway-system.svc.cluster.local/mcp/mem0"
   timeout: 30s
   terminateOnClose: true
+  headersFrom:
+    - name: Authorization
+      valueFrom:
+        type: Secret
+        name: mcp-gateway-token
+        key: authorization
 ---
 apiVersion: kagent.dev/v1alpha2
 kind: RemoteMCPServer
@@ -35,6 +42,13 @@ metadata:
 spec:
   description: "n8n workflow tools (Signal notifications, workflow triggers)."
   protocol: STREAMABLE_HTTP
-  url: "http://n8n.n8n.svc.cluster.local:5678/mcp"
+  # Routed through agentgateway (JWT + CEL enforcement) instead of direct.
+  url: "http://agentgateway-proxy.agentgateway-system.svc.cluster.local/mcp/n8n"
   timeout: 30s
   terminateOnClose: true
+  headersFrom:
+    - name: Authorization
+      valueFrom:
+        type: Secret
+        name: mcp-gateway-token
+        key: authorization

@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - policies.yaml
   - agent-hardening.yaml
+  - trivy-vulnerability-audit.yaml

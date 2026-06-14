@@ -20,6 +20,14 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
+    # Expose the operator's findings metrics (trivy_image_vulnerabilities, enabled
+    # by default via operator.metricsFindingsEnabled) to the cluster-wide OTel
+    # prometheus scrape (helmrelease-otel-gateway) -> VictoriaMetrics -> vmalert.
+    # The operator serves /metrics on container port 8080.
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
     trivy:
       # Use lightweight standalone mode, rather than client-server
       mode: Standalone
@@ -33,7 +41,7 @@ spec:
 
     operator:
       # Exclude noisy system namespaces to keep CPU/memory cycles down
-      targetNamespaces: "" # scan all namespaces except excluded
+      targetNamespaces: ""  # scan all namespaces except excluded
       excludeNamespaces: "kube-system,flux-system,monitoring"
       resources:
         requests:

@@ -37,6 +37,18 @@ data:
               severity: critical
             annotations:
               summary: "VictoriaMetrics has no self-scrape data"
+      - name: homelab-security
+        rules:
+          - alert: TrivyCriticalVulnerabilities
+            # trivy-operator exports trivy_image_vulnerabilities once its pod is
+            # scraped (podAnnotations on the trivy-operator HelmRelease). Surfaces
+            # any workload image carrying CRITICAL CVEs into the alert bus.
+            expr: sum by (namespace) (trivy_image_vulnerabilities{severity="Critical"}) > 0
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: "Trivy: namespace {{ $labels.namespace }} has {{ $value }} CRITICAL image CVEs"
 ---
 apiVersion: apps/v1
 kind: Deployment

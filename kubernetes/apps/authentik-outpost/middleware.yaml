@@ -1,0 +1,23 @@
+# Traefik ForwardAuth Middleware living in the `traefik` namespace so edge HTTPRoutes
+# can attach it via an ExtensionRef. It calls the Authentik outpost (in the
+# authentik-outpost namespace) over the cluster network and copies the resolved
+# identity headers back onto the upstream request.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authentik
+  namespace: traefik
+spec:
+  forwardAuth:
+    address: http://authentik-outpost.authentik-outpost.svc.cluster.local:9000/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-groups
+      - X-authentik-email
+      - X-authentik-name
+      - X-authentik-uid
+      - X-authentik-jwt
+      - X-authentik-meta-provider
+      - X-authentik-meta-app
+      - X-authentik-meta-version

@@ -11,9 +11,15 @@ resources:
   - cert-manager-webhook-hetzner
   # Edge ingress (Traefik on the Hetzner edge node; routes/Gateway in configs)
   - traefik
+  # Edge WAF/IDS (CrowdSec: parses Traefik logs, community blocklist)
+  - crowdsec
+  # DNS automation: ExternalDNS public (Hetzner) + internal (rfc2136 -> Technitium)
+  - external-dns
   # Storage
   - storage/local-path
   - storage/tns-csi
+  # Edge-node-local storage (CrowdSec/Technitium PVCs; no TrueNAS over WAN)
+  - storage/local-path-edge
   # Observability
   - observability
   # Security & runtime enforcement

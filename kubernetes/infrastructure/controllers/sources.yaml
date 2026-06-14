@@ -252,3 +252,21 @@ metadata:
 spec:
   interval: 2h
   url: https://vadimkim.github.io/cert-manager-webhook-hetzner
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: crowdsecurity
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://crowdsecurity.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://kubernetes-sigs.github.io/external-dns/

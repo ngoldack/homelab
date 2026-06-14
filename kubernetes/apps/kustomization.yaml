@@ -13,6 +13,9 @@ resources:
   - kagent
   # Deep-research backend (mcp-searxng search+fetch MCP; gpt-researcher engine)
   - research
+  # Edge stack (runs on the Hetzner edge node)
+  - technitium
+  - authentik-outpost
   # MCP enforcement proxy (per-agent JWT + CEL tool authz in front of kagent MCP)
   - agentgateway
   # Home automation

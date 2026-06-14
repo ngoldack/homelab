@@ -48,6 +48,16 @@ spec:
     hostServices:
       enabled: true
 
+    # Native WireGuard node-to-node encryption — the cross-network transport for
+    # the Hetzner edge worker (replaces NetBird/KubeSpan). Unlike KubeSpan this is
+    # compatible with the eBPF-masquerade + kube-proxy-replacement datapath.
+    # VERIFY-BEFORE-DEPLOY: enabling this re-keys node-to-node traffic
+    # cluster-wide; Talos ships the in-kernel WireGuard module (no extension).
+    encryption:
+      enabled: true
+      type: wireguard
+      nodeEncryption: true
+
     # Secure Operator deployment config
     operator:
       replicas: 2

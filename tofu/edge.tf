@@ -1,24 +1,24 @@
 # ============================================================================
 # Hetzner CX22 edge worker — public ingress for the homelab cluster.
-# Joins the EXISTING Talos cluster as a worker over KubeSpan (WireGuard mesh).
-# All public 80/443 traffic enters here; Traefik (scheduled via the node-role=edge
-# taint) routes to homelab Services over the mesh. Replaces NetBird ingress.
+# Joins the EXISTING Talos cluster as a worker. All public 80/443 traffic enters
+# here; Traefik (scheduled via the node-role=edge taint) routes to homelab
+# Services. Replaces NetBird ingress.
 #
-# !!! BLOCKER — READ BEFORE `tofu apply` !!!
-# Talos docs warn KubeSpan is INCOMPATIBLE with this cluster's advanced eBPF
-# Cilium (kubeProxyReplacement + bpf.masquerade) — asymmetric routing breaks
-# pod-to-pod traffic, which is exactly the edge->homelab path Traefik needs.
-# Resolve ONE of these before applying:
-#   (a) Drop KubeSpan here and use Cilium's native node-to-node WireGuard
-#       encryption + a routable control-plane endpoint, OR
-#   (b) Relax the homelab Cilium to a KubeSpan-compatible datapath.
-# This file implements (a-ready) KubeSpan per the spec; flip the kubespan patch
-# off and add a public CP endpoint if you choose Cilium WireGuard.
+# NETWORKING: uses Cilium's native WireGuard node-to-node encryption (enabled in
+# the Cilium HelmRelease) — NOT KubeSpan — because KubeSpan is incompatible with
+# this cluster's eBPF-masquerade Cilium datapath, whereas Cilium WireGuard works
+# with it.
 #
-# VERIFY-BEFORE-DEPLOY: the talos_image_factory_* data/resource attribute names
-# (siderolabs/talos ~0.11) and the hcloud-talos/imager provider (ALPHA) outputs;
-# and that the homelab control-plane endpoint (var.cluster_endpoint) is reachable
-# from Hetzner (NAT/KubeSpan caveat in the Talos docs).
+# !!! REQUIREMENT — READ BEFORE `tofu apply` !!!
+# Cilium WireGuard ENCRYPTS node-to-node traffic but does NOT NAT-traverse like
+# KubeSpan. The edge node (Hetzner, public IP) and the homelab nodes must have L3
+# reachability: ensure var.cluster_endpoint (control plane) is reachable from
+# Hetzner and homelab node IPs are routable from the edge (public endpoint,
+# port-forward, or an existing site link). Without that underlay the worker cannot
+# join / form pod connectivity.
+#
+# VERIFY-BEFORE-DEPLOY: the talos_image_factory_* attribute names
+# (siderolabs/talos ~0.11) and the hcloud-talos/imager provider (ALPHA) outputs.
 # ============================================================================
 
 # --- Talos image: built via the official Image Factory, imported as an hcloud
@@ -110,11 +110,6 @@ data "talos_machine_configuration" "edge" {
   config_patches = [
     yamlencode({ cluster = { network = { cni = { name = "none" } } } }),
     yamlencode({ cluster = { proxy = { disabled = true } } }),
-    # KubeSpan mesh join (see BLOCKER in the header).
-    yamlencode({
-      machine = { network = { kubespan = { enabled = true } } }
-      cluster = { discovery = { enabled = true } }
-    }),
     # Edge taint + topology labels — only edge-specific workloads land here.
     yamlencode({
       machine = {

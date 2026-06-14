@@ -28,3 +28,12 @@ output "hetzner_dr_bucket" {
     region   = var.hetzner_objectstorage_location
   }
 }
+
+output "edge_node" {
+  description = "Hetzner edge worker node public addresses (point public DNS here)."
+  value = {
+    name = hcloud_server.edge.name
+    ipv4 = hcloud_server.edge.ipv4_address
+    ipv6 = hcloud_server.edge.ipv6_address
+  }
+}

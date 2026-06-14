@@ -6,6 +6,8 @@ kind: Kustomization
 resources:
   - authentik
   - vllm
+  # Central model-routing layer: consumers reference aliases, not concrete models
+  - litellm
   - searxng
   - n8n
   - mem0

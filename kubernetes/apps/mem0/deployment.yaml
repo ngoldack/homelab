@@ -26,14 +26,14 @@ data:
     llm:
       provider: openai
       config:
-        model: qwen3-coder-80b
-        openai_base_url: http://qwen3-coder-80b.vllm.svc.cluster.local/v1
+        model: default
+        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
     embedder:
       provider: openai
       config:
-        model: BAAI/bge-small-en-v1.5
+        model: embeddings
         embedding_dims: 384
-        openai_base_url: http://embeddings.vllm.svc.cluster.local/v1
+        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
 ---
 apiVersion: apps/v1
 kind: Deployment

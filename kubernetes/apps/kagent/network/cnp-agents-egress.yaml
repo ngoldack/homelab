@@ -51,6 +51,10 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: vllm
+    # LiteLLM central model layer (agents reach models via aliases here).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: litellm
     # Mem0 memory MCP.
     - toEndpoints:
         - matchLabels:

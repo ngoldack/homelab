@@ -37,30 +37,29 @@ spec:
           # renovate: datasource=docker depName=gptresearcher/gpt-researcher
           image: gptresearcher/gpt-researcher:latest
           env:
-            # --- LLM: our in-cluster vLLM (OpenAI-compatible, no real auth) ---
+            # --- LLM: routed through LiteLLM (central model layer) via aliases ---
             - name: OPENAI_BASE_URL
-              value: "http://qwen3-coder-80b.vllm.svc.cluster.local/v1"
+              value: "http://litellm.litellm.svc.cluster.local:4000/v1"
             - name: OPENAI_API_KEY
               value: "sk-noop"
-            # VERIFY: these must equal the vLLM --served-model-name verbatim.
             - name: FAST_LLM
-              value: "openai:qwen3-coder-80b"
+              value: "openai:fast"
             - name: SMART_LLM
-              value: "openai:qwen3-coder-80b"
+              value: "openai:smart"
             - name: STRATEGIC_LLM
-              value: "openai:qwen3-coder-80b"
+              value: "openai:smart"
             # --- Retrieval: our SearXNG (JSON format already enabled) ---
             - name: RETRIEVER
               value: "searx"
             - name: SEARX_URL
               value: "http://searxng.searxng.svc.cluster.local:8080"
-            # --- Embeddings: the separate vLLM embeddings service ---
-            # VERIFY: set the embeddings model id + confirm the endpoint.
+            # --- Embeddings: the `embeddings` alias (fixes the prior bge-m3 vs
+            # bge-small mismatch — LiteLLM maps it to the served TEI model). ---
             - name: EMBEDDING
-              value: "openai:bge-m3"
+              value: "openai:embeddings"
             - name: EMBEDDING_KWARGS
               value: >-
-                {"openai_api_base":"http://embeddings.vllm.svc.cluster.local/v1",
+                {"openai_api_base":"http://litellm.litellm.svc.cluster.local:4000/v1",
                 "check_embedding_ctx_length":false}
           ports:
             - name: http

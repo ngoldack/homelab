@@ -234,3 +234,21 @@ spec:
   interval: 2h
   type: oci
   url: oci://ghcr.io/kagent-dev/substrate/helm
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: traefik
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://traefik.github.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cert-manager-webhook-hetzner
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://vadimkim.github.io/cert-manager-webhook-hetzner

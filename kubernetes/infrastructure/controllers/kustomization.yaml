@@ -8,6 +8,9 @@ resources:
   - cilium
   # Certificates
   - cert-manager
+  - cert-manager-webhook-hetzner
+  # Edge ingress (Traefik on the Hetzner edge node; routes/Gateway in configs)
+  - traefik
   # Storage
   - storage/local-path
   - storage/tns-csi

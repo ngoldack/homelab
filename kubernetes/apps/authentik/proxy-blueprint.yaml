@@ -105,6 +105,34 @@ data:
           name: Grafana
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, grafana-oauth]]
 
+      # ── Open WebUI OAuth2 / OIDC provider + application ────────────────────
+      # Open WebUI drives the OIDC flow itself, reached over its own Cilium
+      # Gateway at chat.${DOMAIN} (same mechanism as auth.${DOMAIN}). The client
+      # secret is injected via AUTHENTIK_OPENWEBUI_CLIENT_SECRET (!Env) and
+      # mirrored into the knowledge namespace's open-webui-secrets.
+      - model: authentik_providers_oauth2.oauth2provider
+        identifiers:
+          name: open-webui-oauth
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          client_type: confidential
+          client_id: open-webui
+          client_secret: !Env AUTHENTIK_OPENWEBUI_CLIENT_SECRET
+          redirect_uris:
+            - matching_mode: strict
+              url: https://chat.${DOMAIN}/oauth/oidc/callback
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+      - model: authentik_core.application
+        identifiers:
+          slug: open-webui
+        attrs:
+          name: Open WebUI
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, open-webui-oauth]]
+
       # ── agentgateway MCP OAuth2 provider (machine client_credentials) ──────
       # Issues the JWTs agentgateway validates on kagent MCP traffic. Agents use
       # client_credentials (no redirect). Long token validity because the bearer

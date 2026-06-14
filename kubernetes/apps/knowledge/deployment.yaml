@@ -84,6 +84,18 @@ spec:
               value: "docling"
             - name: DOCLING_SERVER_URL
               value: "http://docling.docling.svc.cluster.local:5001"
+            # --- SSO: Authentik OIDC (provider declared in the SSO blueprint) ---
+            # OAUTH_CLIENT_SECRET arrives via the open-webui-secrets envFrom.
+            - name: WEBUI_URL
+              value: "https://chat.${DOMAIN}"
+            - name: ENABLE_OAUTH_SIGNUP
+              value: "true"
+            - name: OAUTH_PROVIDER_NAME
+              value: "Authentik"
+            - name: OAUTH_CLIENT_ID
+              value: "open-webui"
+            - name: OPENID_PROVIDER_URL
+              value: "https://auth.${DOMAIN}/application/o/open-webui/.well-known/openid-configuration"
           ports:
             - name: http
               containerPort: 8080

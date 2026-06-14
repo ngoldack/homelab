@@ -69,6 +69,12 @@ spec:
             secretKeyRef:
               name: authentik-secrets
               key: agentgateway-oauth-client-secret
+        # Consumed by the open-webui OAuth2 provider in the SSO blueprint.
+        - name: AUTHENTIK_OPENWEBUI_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secrets
+              key: open-webui-oauth-client-secret
         # ── Media storage on in-cluster SeaweedFS (S3) ─────────────────────────
         # Bucket + service user/credentials are provisioned by the SeaweedFS
         # operator (S3 CRDs in s3.yaml). The pods talk to S3 over the external

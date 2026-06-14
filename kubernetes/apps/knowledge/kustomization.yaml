@@ -7,6 +7,7 @@ resources:
   - cnpg-cluster.yaml
   - barman-s3.sops.yaml
   - deployment.yaml
+  - gateway.yaml
 # Shared CNPG -> Hetzner DR backup wiring (ObjectStore + ScheduledBackup).
 components:
   - ../_components/cnpg-barman-backup

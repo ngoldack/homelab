@@ -572,7 +572,7 @@
         "y": 18
       },
       "id": 8,
-      "title": "KServe Service Mesh Routing Engine",
+      "title": "vLLM Serving",
       "type": "row"
     },
     {
@@ -657,13 +657,13 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(kserve_request_latencies_count[5m]))",
+          "expr": "sum(rate(vllm:request_success_total[5m]))",
           "legendFormat": "Overall Inferences",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "KServe Active Total Inference Rate",
+      "title": "vLLM Total Inference Rate",
       "type": "timeseries"
     },
     {
@@ -756,13 +756,13 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(kserve_request_latencies_sum[5m])) / sum(rate(kserve_request_latencies_count[5m]))",
+          "expr": "sum(rate(vllm:e2e_request_latency_seconds_sum[5m])) / sum(rate(vllm:e2e_request_latency_seconds_count[5m]))",
           "legendFormat": "Inference Latency",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "KServe Route Mean End-to-End Latency",
+      "title": "vLLM Mean End-to-End Latency",
       "type": "timeseries"
     }
   ],
@@ -773,7 +773,6 @@
     "kubernetes",
     "ai",
     "vllm",
-    "kserve",
     "lmcache"
   ],
   "templates": {
@@ -813,7 +812,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "AI Platform Metrics (vLLM / LMCache / KServe)",
+  "title": "AI Platform Metrics (vLLM / LMCache)",
   "uid": "ai-platform-summary",
   "version": 1
 }

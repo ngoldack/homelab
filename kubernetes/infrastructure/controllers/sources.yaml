@@ -134,16 +134,6 @@ spec:
   interval: 2h
   url: https://kedacore.github.io/charts
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: kserve
-  namespace: flux-system
-spec:
-  interval: 2h
-  type: oci
-  url: oci://ghcr.io/kserve/charts
----
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:

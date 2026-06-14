@@ -1,0 +1,8 @@
+# Traefik GatewayClass — a second Gateway API controller alongside Cilium's.
+# Keep the names distinct so the two controllers don't fight over Gateways.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: traefik
+spec:
+  controllerName: traefik.io/gateway-controller

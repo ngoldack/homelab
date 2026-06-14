@@ -178,6 +178,16 @@ data "talos_machine_configuration" "worker" {
           }
         }
       }),
+      # Raise the unprivileged user-namespace limit for gVisor/runsc (Agent
+      # Substrate ateom-gvisor worker pods). Talos' KSPP-hardened default keeps
+      # this at 0; gVisor needs unprivileged user namespaces to sandbox.
+      yamlencode({
+        machine = {
+          sysctls = {
+            "user.max_user_namespaces" = "11255"
+          }
+        }
+      }),
     ],
     # System extensions — merges cluster-wide defaults with per-pool extras.
     # Extensions are baked into Talos during installation (first boot from ISO).

@@ -1,0 +1,97 @@
+# mem0 memory server (semantic memory over pgvector), wired directly to the
+# in-cluster vLLM model Services for both its LLM (memory extraction, the
+# qwen3-coder-80b Deployment) and embedder (the TEI embeddings Deployment).
+# LiteLLM was removed. Exposes an HTTP API; kagent reaches it as an MCP server.
+#
+# VERIFY-BEFORE-DEPLOY: mem0 publishes no single canonical server image. Pin the
+# image you intend to run (the mem0 REST/OpenMemory server) and confirm its
+# config/env contract + the MCP endpoint path/port. The config below targets the
+# pgvector store + the vLLM endpoints; field names follow mem0's config schema.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mem0-config
+  namespace: mem0
+data:
+  config.yaml: |
+    vector_store:
+      provider: pgvector
+      config:
+        dbname: mem0
+        host: mem0-postgres-rw.mem0.svc.cluster.local
+        port: 5432
+        # user/password injected from env (DATABASE_URL / discrete vars).
+        collection_name: mem0_memories
+        embedding_model_dims: 384
+    llm:
+      provider: openai
+      config:
+        model: default
+        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
+    embedder:
+      provider: openai
+      config:
+        model: embeddings
+        embedding_dims: 384
+        openai_base_url: http://litellm.litellm.svc.cluster.local:4000/v1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mem0
+  namespace: mem0
+  labels:
+    app.kubernetes.io/name: mem0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mem0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mem0
+    spec:
+      containers:
+        - name: mem0
+          # VERIFY: pin the mem0 server image you will run.
+          image: mem0/mem0-api-server:latest
+          envFrom:
+            - secretRef:
+                name: mem0-secrets
+          env:
+            - name: MEM0_CONFIG_PATH
+              value: /etc/mem0/config.yaml
+          ports:
+            - name: http
+              containerPort: 8000
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mem0
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: mem0-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mem0
+  namespace: mem0
+  labels:
+    app.kubernetes.io/name: mem0
+spec:
+  selector:
+    app.kubernetes.io/name: mem0
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8000

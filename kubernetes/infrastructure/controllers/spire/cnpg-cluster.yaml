@@ -1,0 +1,21 @@
+# Dedicated PostgreSQL datastore for the SPIRE server (its own instance + creds,
+# per the repo "no bundled DBs" rule — replaces the chart's bundled SQLite).
+# Single instance: SPIRE state here is node attestations + registration entries,
+# which the controller-manager reconciles from the ClusterSPIFFEID CRs, so the DB
+# is recoverable; no Barman offsite backup is wired (unlike app data stores).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: spire-db
+  namespace: spire-system
+spec:
+  instances: 1
+  storage:
+    size: 5Gi
+    storageClass: tns-fast-nvmeof
+  bootstrap:
+    initdb:
+      database: spire
+      owner: spire
+      secret:
+        name: spire-db-credentials

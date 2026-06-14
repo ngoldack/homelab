@@ -2,30 +2,49 @@
 
 GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cluster on [Proxmox](https://www.proxmox.com/), provisioned with [OpenTofu](https://opentofu.org/) and managed by [Flux CD](https://fluxcd.io/).
 
+> **Full architecture with mermaid diagrams: [docs/architecture.md](docs/architecture.md)** — every
+> moving part (GitOps flow, operators, storage tiers, observability, the defense-in-depth security
+> stack, the AI agent fleet, the MCP topology, and the deep-research pipeline).
+
 ## Stack
 
 | Layer | Tool |
 |---|---|
 | Hypervisor | Proxmox VE |
-| OS | Talos Linux |
+| OS | Talos Linux (gVisor system extension on workers) |
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
-| CNI | Cilium (eBPF, kube-proxy replacement) |
+| CNI | Cilium (eBPF, kube-proxy replacement, Gateway API, Hubble) |
 | Storage | TrueNAS CSI (`tns-csi`, NFS + NVMe-oF) + local-path |
-| VPN Overlay | NetBird (Operator + Node Extension) |
+| Object Storage | SeaweedFS (in-cluster S3, embedded IAM, CRD-driven buckets/users) |
+| Databases | CloudNativePG (per-app Postgres, Barman DR) + Valkey operator |
+| VPN Overlay | NetBird (mesh) |
+| Identity / SSO | Authentik (forward-auth + OIDC issuer) |
 | TLS | cert-manager + Let's Encrypt |
-| Observability | VictoriaMetrics + Loki + OTel Collector + Grafana |
-| Security / Policy | Kyverno (Best Practices Pod Security Standards) |
+| Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
+| LLM Serving | vLLM (CPU), reached directly by the AI apps |
+| AI Agents | kagent + khook (22-agent fleet), Mem0 memory, Arize Phoenix traces |
+| MCP Enforcement | agentgateway (per-agent JWT + CEL tool authz) |
+| Agent Sandbox | gVisor RuntimeClass + Agent Substrate (guarded agents) |
+| Deep Research | SearXNG + mcp-searxng + gpt-researcher |
+| Home Automation | EMQX (MQTT) + Home Assistant + Zigbee2MQTT |
+| Document Tooling | Gotenberg (PDF) + Docling (parse) + Pandoc (generate) |
+| Workload Identity | SPIRE / SPIFFE (per-agent SVIDs) |
+| Runtime Security | Tetragon (eBPF) |
+| Policy / Supply chain | Kyverno + Trivy |
+| Autoscaling | KEDA |
 | GitOps | Flux CD |
 | Secrets | SOPS + age |
 | State Encryption | OpenTofu native AES-GCM |
 
 ## Cluster Layout
 
-| Node | Role | vCPU | RAM | Disk |
+Node pools are a `map(object)` in `tofu/variables.tf` (counts configurable):
+
+| Pool | Role | vCPU | RAM | Notes |
 |---|---|---|---|---|
-| master-0/1/2 | controlplane | 2 | 4 GB | 32 GB |
-| worker-default-0/1 | worker | 6 | 8 GB | 64 GB |
-| worker-large-0 | worker | 12 | 48 GB | 128 GB |
+| `master` | controlplane | 4 | 4 GB | |
+| `worker-default` | worker | 8 | 24 GB | gVisor |
+| `worker-ai` | worker | 12 | 84 GB | gVisor, `ai=true:NoSchedule` taint |
 
 ## Repository Structure
 
@@ -34,18 +53,26 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 ├── tofu/                   # OpenTofu — VM provisioning & Talos bootstrap
 └── kubernetes/
     ├── clusters/
-    │   └── production/     # Flux entrypoint for your Proxmox/Talos cluster
-    ├── infrastructure/      # Cilium, cert-manager
-    └── apps/                # Homelab applications (managed by Flux)
+    │   └── production/     # Flux entrypoints (infra-controllers → infra-configs → apps)
+    ├── infrastructure/
+    │   ├── controllers/    # operators (Cilium, CNPG, kagent, agentgateway, SPIRE, …)
+    │   │                   # + central sources.yaml (HelmRepositories)
+    │   └── configs/        # cluster-wide config (Kyverno + Tetragon policies,
+    │   │                   # cluster-issuers, object-storage, runtime-classes)
+    └── apps/               # one dir per app; kustomization.yaml is the toggle list
+        └── _components/    # shared kustomize components (cnpg-barman-backup)
 ```
+
+See **[docs/architecture.md](docs/architecture.md)** for the full diagrammed breakdown.
 
 ## Getting Started
 
 ### Prerequisites
 
-- `age`, `sops`, `tofu`, `talosctl`, `flux`, `kubectl` installed locally
+- `age`, `sops`, `tofu`, `talosctl`, `flux`, `kubectl`, `kustomize`,
+  `kubeconform`, `yamllint`, `actionlint`, `trivy`, and [`task`](https://taskfile.dev)
+  installed locally
 - Proxmox VE host reachable on the network
-- A self-hosted GitHub Actions runner on the same LAN as Proxmox
 
 ### 1. Generate Age Key
 
@@ -89,79 +116,35 @@ flux bootstrap github \
 
 ## CI / CD
 
-All automation — locally and in CI — runs through a single **Dagger** module in
-[`.dagger`](.dagger). Every command executes inside a pinned container, so
-`dagger call check` on your laptop is byte-for-byte identical to the GitHub
-branch-protection gates. There is no separate shell scripting to drift.
+This repo keeps automation deliberately simple:
 
-- **Single source of truth for tool versions:** [`.dagger/versions.json`](.dagger/versions.json)
-  (`dagger call versions` / `task versions`). Each CLI is copied as a static
-  binary out of its pinned upstream image — no `curl`/`unzip`/arch handling.
-- **Single source of truth for the engine version:** `engineVersion` in
-  [`dagger.json`](dagger.json) — workflows do not re-pin it.
-- **Network is configured _before_ Dagger:** the Dagger module is network
-  agnostic. Live workflows connect NetBird in a dedicated step first; locally
-  you connect your own mesh (`netbird up`) before running live tasks.
+- **GitHub Actions only lints.** [`ci.yaml`](.github/workflows/ci.yaml) runs on
+  every push and PR to `main` and performs static validation only — YAML lint,
+  workflow lint, a SOPS-encryption check (ciphertext inspection, no key needed),
+  OpenTofu `fmt`/`validate`, and `kustomize build` + `kubeconform` for every
+  overlay. It needs **no secrets, kubeconfig, or VPN, and never deploys or
+  mutates anything**.
+- **Everything else runs on your workstation** via the [`Taskfile`](Taskfile.yaml)
+  with host-installed tools (no containers). Provisioning and reconciliation
+  (`tofu apply`, `flux reconcile`) are run manually while your host is connected
+  to the private mesh (`netbird up`).
 
-### Workflows
+### Tasks
 
-| Workflow | Trigger | NetBird | Dagger call |
-|---|---|---|---|
-| `ci.yaml` | push / PR to `main` | no | matrix: one check per gate (`yamllint`, `actionlint`, `sops-check`, `tofu-validate`, `tofu-security`, `kube-validate`) |
-| `tofu-plan.yaml` | push to `main` (`tofu/**`) / manual | yes | `tofu-plan` |
-| `tofu-apply.yaml` | manual (protected `production` env) | yes | `tofu-apply` → `flux-reconcile` |
-| `tofu-destroy.yaml` | manual + typed confirmation | yes | `tofu-destroy` |
+Run `task --list` for the full set. Common ones:
 
-Each offline gate is an independent Dagger function, so CI runs them as a matrix
-of separate GitHub checks (granular branch protection + independent re-run).
-Locally, run them individually (`dagger call kube-validate`) or all at once
-(`dagger call check` / `task check`).
+| Task | What it does |
+|---|---|
+| `task check` | All offline checks (lint + validate), same as CI |
+| `task k8s:validate` | `kustomize build` + `kubeconform` for every overlay |
+| `task tofu:validate` | OpenTofu `fmt` + `init -backend=false` + `validate` |
+| `task sops:check` | Assert every `*.sops.yaml` is encrypted |
+| `task tofu:plan` / `tofu:apply` | Plan / apply live infra (mesh + `SOPS_AGE_KEY` required) |
+| `task flux:reconcile` | Force Flux to reconcile in dependency order |
+| `task secrets:edit -- <file>` | Open a SOPS file in your editor |
 
-### Pipeline overview
-
-```mermaid
-flowchart TD
-    subgraph local["Local — Taskfile"]
-        T["task check / task tofu:plan ..."]
-    end
-    subgraph gha["GitHub Actions"]
-        CI["ci.yaml (matrix)"]
-        PLAN["tofu-plan.yaml"]
-        APPLY["tofu-apply.yaml"]
-        DESTROY["tofu-destroy.yaml"]
-    end
-
-    NB(["NetBird connect step / host mesh"])
-
-    subgraph dagger[".dagger module — dagger call"]
-        direction TB
-        CHECK["check (local aggregate)"]
-        subgraph gates["offline gates (no secrets)"]
-            YL["yamllint"]
-            AL["actionlint"]
-            S["sops-check"]
-            TV["tofu-validate"]
-            TS["tofu-security"]
-            KV["kube-validate"]
-        end
-        TP["tofu-plan"]
-        TA["tofu-apply"]
-        TD["tofu-destroy"]
-        FR["flux-reconcile"]
-        CHECK --> YL & AL & S & TV & TS & KV
-    end
-
-    T --> CHECK
-    T --> TP & TA & TD & FR
-    CI --> YL & AL & S & TV & TS & KV
-    PLAN --> NB --> TP
-    APPLY --> NB
-    NB --> TA --> FR
-    DESTROY --> NB --> TD
-```
-
-Required secrets/inputs: `SOPS_AGE_KEY` (all live calls), `NETBIRD_SETUP_KEY`
-(NetBird connect step), `KUBECONFIG_DATA` (`flux-reconcile`).
+Live tasks read the OpenTofu state-encryption passphrase from
+`tofu/secret.sops.yaml` on demand; put `SOPS_AGE_KEY` in a gitignored `.env`.
 
 ---
 

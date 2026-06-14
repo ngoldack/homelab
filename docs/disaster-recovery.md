@@ -15,7 +15,7 @@ the procedures to recover from data loss or total cluster loss.
 All S3 backup targets live **offsite** in a single **Hetzner Object Storage** bucket
 (provisioned by OpenTofu — `tofu/object-storage.tf`, default name `ngoldack-homelab-dr`,
 location `fsn1`), separated by object prefixes (`etcd-backups/`, `k8s-backups/`,
-`cnpg/<app>/`). This is independent of the in-cluster MinIO tenant and the TrueNAS that
+`cnpg/<app>/`). This is independent of the in-cluster SeaweedFS S3 and the TrueNAS that
 serves primary storage, satisfying the offsite (3-2-1) requirement. Velero explicitly
 **skips** filesystem backup of `tns-fast-nvmeof` volumes (CNPG + Valkey) via
 `velero-resource-policy.yaml`, because Postgres is backed up consistently by Barman.
@@ -52,16 +52,18 @@ These are one-time setup steps. Until done, the jobs exist but fail/no-op.
    cd tofu && tofu apply
    ```
    If you change the bucket name/location, update the Kubernetes manifests in step 3 to match.
-3. **Set the bucket name, region and endpoint** (these are pre-filled for the defaults —
-   `ngoldack-homelab-dr`, `fsn1`, `https://fsn1.your-objectstorage.com`) in:
-   - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
-   - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
-   - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-objectstore.yaml`
-4. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME` with the same Hetzner
-   keys from step 1), then re-encrypt in place with `sops --encrypt --in-place <file>`:
-   - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
-   - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
-   - `kubernetes/apps/base/{authentik,khoj,n8n}/barman-s3.sops.yaml`
+ 3. **Set the bucket name, region and endpoint** (these are pre-filled for the defaults —
+    `ngoldack-homelab-dr`, `fsn1`, `https://fsn1.your-objectstorage.com`) in:
+    - `kubernetes/infrastructure/controllers/backup/helmrelease.yaml` (Velero BSL)
+    - `kubernetes/infrastructure/controllers/backup/talos-backup.yaml`
+    - the CNPG backup endpoint/bucket are centralized as `DR_S3_ENDPOINT` / `DR_S3_BUCKET`
+      in `kubernetes/clusters/production/cluster-vars/cluster-secrets.sops.yaml` and consumed
+      by the shared `kubernetes/apps/_components/cnpg-barman-backup` component
+ 4. **Fill the S3 credentials** in the SOPS secrets (replace `CHANGEME` with the same Hetzner
+    keys from step 1), then re-encrypt in place with `sops --encrypt --in-place <file>`:
+    - `kubernetes/infrastructure/controllers/backup/secret.sops.yaml` (Velero)
+    - `kubernetes/infrastructure/controllers/backup/talos-backup-s3.sops.yaml`
+    - `kubernetes/apps/{authentik,n8n}/barman-s3.sops.yaml`
 5. **Apply the Talos machine-config change** that grants the backup pod in-cluster etcd
    API access (`tofu/talos.tf` -> `machine.features.kubernetesTalosAPIAccess`):
    ```bash
@@ -161,7 +163,7 @@ Use this for accidentally deleted manifests/PVCs that are **not** CNPG/Valkey vo
 ## Known gaps / follow-ups
 
 - **Offsite copy (3-2-1): satisfied.** All backups are replicated to Hetzner Object Storage,
-  independent of the in-cluster MinIO tenant and the TrueNAS serving primary storage. Ensure
+  independent of the in-cluster SeaweedFS S3 and the TrueNAS serving primary storage. Ensure
   the Hetzner credentials and the age key / tfstate are themselves recoverable off-cluster.
 - **No automated backup-failure alerting.** The cluster runs `victoria-metrics-single`
   (no VM Operator / `VMRule` CRDs), so backup metrics are not yet alerted on. Follow-up:

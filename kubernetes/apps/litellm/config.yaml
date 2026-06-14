@@ -1,0 +1,60 @@
+# LiteLLM model routing config — THE central place to map stable aliases to
+# concrete backends. Switch a model everywhere by editing one entry here; all
+# consumers (kagent, mem0, gpt-researcher, ...) only ever reference the alias.
+#
+# Aliases: default/smart = the big coder model, fast = the small model,
+# embeddings = the TEI embedder, whisper = STT. Add OpenAI/Anthropic/etc. backends
+# here later without touching any consumer.
+#
+# VERIFY-BEFORE-DEPLOY: confirm vLLM served-model-names + that TEI exposes the
+# OpenAI-compatible /v1/embeddings path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+data:
+  config.yaml: |
+    model_list:
+      # default/smart route through the KEDA HTTP interceptor so the 80B coder
+      # model can idle at zero replicas and wake on the first request. The
+      # interceptor routes by the Host header to the qwen3-coder-80b Service.
+      # VERIFY-BEFORE-DEPLOY: confirm LiteLLM forwards extra_headers.Host on the
+      # wire (some HTTP clients derive Host from the URL authority instead). If it
+      # does not, point api_base back at the Service and instead wake the model
+      # via a KEDA Prometheus trigger on litellm request metrics.
+      - model_name: default
+        litellm_params:
+          model: openai/qwen3-coder-80b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: qwen3-coder-80b.vllm
+      - model_name: smart
+        litellm_params:
+          model: openai/qwen3-coder-80b
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          api_key: dummy
+          extra_headers:
+            Host: qwen3-coder-80b.vllm
+      - model_name: fast
+        litellm_params:
+          model: openai/qwen3-8b
+          api_base: http://qwen3-8b.vllm.svc.cluster.local/v1
+          api_key: dummy
+      - model_name: whisper
+        litellm_params:
+          model: openai/whisper
+          api_base: http://whisper.vllm.svc.cluster.local/v1
+          api_key: dummy
+      - model_name: embeddings
+        litellm_params:
+          model: openai/BAAI/bge-small-en-v1.5
+          api_base: http://embeddings.vllm.svc.cluster.local/v1
+          api_key: dummy
+    litellm_settings:
+      drop_params: true
+      num_retries: 2
+    # No master_key: in-cluster open proxy (vLLM was already unauthenticated).
+    # Future hardening: set general_settings.master_key + per-consumer virtual
+    # keys, backed by a dedicated CNPG instance.

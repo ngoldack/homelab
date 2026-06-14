@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: vllm
+resources:
+  - namespace.yaml
+  - secret.sops.yaml
+  - s3.yaml
+  - cache-valkey.yaml
+  - qwen3-coder-80b.yaml
+  - qwen3-8b.yaml
+  - whisper.yaml
+  - embeddings.yaml
+  # Scale-to-zero for the 80B coder model (KEDA HTTP interceptor).
+  - httpscaledobject-coder.yaml

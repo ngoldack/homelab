@@ -1,0 +1,18 @@
+# ClusterIP for the outpost's HTTP auth endpoint. The Traefik Middleware (traefik ns)
+# forwards auth subrequests here; only port 9000 is exposed (metrics :9300 is scraped
+# directly off the pod).
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-outpost
+  namespace: authentik-outpost
+  labels:
+    app.kubernetes.io/name: authentik-outpost
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: authentik-outpost
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000

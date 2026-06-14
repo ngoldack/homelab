@@ -1,0 +1,21 @@
+# Allow agentgateway (agentgateway-system) to reference the authentik-server
+# Service across namespaces for the JWKS fetch (Gateway API cross-namespace ref).
+#
+# VERIFY-BEFORE-DEPLOY: confirm agentgateway honors ReferenceGrant and the exact
+# `from` group/kind used for an AgentgatewayPolicy jwks backendRef (may be the
+# Gateway rather than the AgentgatewayPolicy). Adjust `from` if the gateway logs
+# a RefNotPermitted error.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: agentgateway-mcp-jwks
+  namespace: authentik
+spec:
+  from:
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: agentgateway-system
+  to:
+    - group: ""
+      kind: Service
+      name: authentik-server

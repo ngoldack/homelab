@@ -1,0 +1,102 @@
+# Tetragon runtime-detection policies for the kagent AI-agent platform. Ported
+# from the (removed) Falco rules onto Tetragon — the eBPF engine already running
+# in this cluster (Cilium project: shares the CNI's eBPF substrate + Hubble, and
+# the OTel->Loki pipeline). Tetragon's stdout JSON sidecar is shipped to Loki by
+# the existing OTel filelog collector; alert in Grafana/vmalert (LogQL/metrics)
+# and route to the existing n8n webhook.
+#
+# Detection-only (matchActions: Post). To actively block, add a Sigkill/Override
+# action and set spec.options policy-mode "enforcement" on the relevant policy.
+#
+# VERIFY-BEFORE-DEPLOY: confirm `security_file_permission` and `tcp_connect` are
+# traceable on the Talos kernel (`available_filter_functions`); tune the SA-token
+# path and the non-RFC1918 CIDR list (add the cluster pod/service CIDRs + IPv6).
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: kagent-shell-exec
+  namespace: kagent
+spec:
+  # Detect a shell being exec'd inside any kagent pod (agents never need one).
+  lists:
+    - name: exec-syscalls
+      type: syscalls
+      values:
+        - sys_execve
+        - sys_execveat
+  kprobes:
+    - call: "list:exec-syscalls"
+      syscall: true
+      args:
+        - index: 0
+          type: string
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: Postfix
+              values:
+                - /sh
+                - /bash
+                - /zsh
+                - /ash
+                - /dash
+          matchActions:
+            - action: Post
+---
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: kagent-sa-token-read
+  namespace: kagent
+spec:
+  # Detect a read of the projected ServiceAccount token (credential theft).
+  # security_file_permission is the race-free choke point; arg1 == 4 is MAY_READ.
+  kprobes:
+    - call: "security_file_permission"
+      syscall: false
+      args:
+        - index: 0
+          type: file
+        - index: 1
+          type: int
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: Postfix
+              values:
+                - serviceaccount/token
+            - index: 1
+              operator: Equal
+              values:
+                - "4"
+          matchActions:
+            - action: Post
+              rateLimit: "1m"
+---
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: kagent-egress-public
+  namespace: kagent
+spec:
+  # Exfil canary: any kagent pod opening a TCP connection to a non-private
+  # (public) address. Should never fire given the Cilium egress allowlist
+  # (apps/kagent/network) — if it does, investigate.
+  kprobes:
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: NotDAddr
+              values:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+                - 127.0.0.0/8
+                - 169.254.0.0/16
+          matchActions:
+            - action: Post

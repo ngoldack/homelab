@@ -1,0 +1,65 @@
+# external-dns (public) — publishes PUBLIC DNS records for ngoldack.xyz to Hetzner
+# DNS via the Hetzner webhook provider (run as a sidecar by the chart). Watches
+# Gateway API HTTPRoutes and syncs A/AAAA + ownership TXT records. Pinned to the
+# Hetzner edge node. Webhook image is Apache-2.0
+# (ghcr.io/mconfalonieri/external-dns-hetzner-webhook).
+#
+# VERIFY-BEFORE-DEPLOY:
+#   - Pin the chart version. Native provider.webhook (sidecar) requires the
+#     external-dns chart >= 1.14; pin accordingly (1.x range below is a placeholder).
+#   - Pin the webhook image tag (placeholder below).
+#   - Public A-record TARGET must be the edge node's public IP. external-dns derives
+#     targets from the Gateway address by default; for HTTPRoutes that do not resolve
+#     to the edge IP, set it explicitly via the edge Gateway's
+#     `external-dns.kubernetes.io/target` annotation or `--default-targets=<edge-ip>`.
+#   - This controller has NO annotation-filter, so it will consider every
+#     gateway-httproute; ensure internal-only routes are excluded (they are owned by
+#     external-dns-internal via a different txtOwnerId) or add a public filter.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns-public
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: external-dns
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.x"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+      interval: 1h
+  install:
+    createNamespace: true
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    provider:
+      name: webhook
+      webhook:
+        image:
+          repository: ghcr.io/mconfalonieri/external-dns-hetzner-webhook
+          # VERIFY-BEFORE-DEPLOY: pin a real released tag.
+          tag: v0.7.0
+        env:
+          - name: HETZNER_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: hetzner-credentials
+                key: api-key
+    sources:
+      - gateway-httproute
+    domainFilters:
+      - ngoldack.xyz
+    policy: sync
+    txtOwnerId: homelab-edge
+    # Pin to the edge node.
+    nodeSelector:
+      node-role: edge
+    tolerations:
+      - key: node-role
+        value: edge
+        effect: NoSchedule

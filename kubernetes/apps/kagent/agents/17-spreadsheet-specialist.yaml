@@ -1,0 +1,24 @@
+# 17 — Spreadsheet Specialist (Tier 3): tabular-data output.
+#
+# Carbone was removed (CCL / not OSS). CSV needs no tool — the agent emits it
+# directly. XLSX has no fully-OSS, no-enterprise REST service yet (Pandoc has no
+# XLSX writer); deploy a small openpyxl-based service (MIT) if XLSX becomes a
+# real need, then wire it here.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: spreadsheet-specialist
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 3 specialist: generate CSV from tabular data (XLSX pending a fully-OSS backend)."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You produce tabular data outputs. Single-skill unit: map the input
+      rows/columns to clean, well-formed CSV and return it (validate headers and
+      types; quote/escape correctly). Report failures explicitly.
+
+      XLSX is not yet available (no fully-OSS, no-enterprise rendering service is
+      deployed). If a caller asks for XLSX, deliver CSV and note that XLSX
+      rendering is pending an openpyxl-based service.

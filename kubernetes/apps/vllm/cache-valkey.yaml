@@ -1,0 +1,19 @@
+# Valkey for the vLLM serving stack: the LMCache remote KV backend
+# (LMCACHE_REMOTE_URL) for the vLLM models. Provisioned by the Valkey operator;
+# volume on the fast NVMe-oF tier per the storage conventions.
+apiVersion: valkey.io/v1alpha1
+kind: Valkey
+metadata:
+  name: vllm-cache-valkey
+  namespace: vllm
+spec:
+  replicas: 1
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tns-fast-nvmeof
+        resources:
+          requests:
+            storage: 8Gi

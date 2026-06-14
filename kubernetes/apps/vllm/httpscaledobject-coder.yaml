@@ -1,0 +1,32 @@
+# Scale-to-zero for the heaviest workload on the AI node. The qwen3-coder-80b
+# Deployment idles at zero replicas; the KEDA HTTP interceptor wakes it on the
+# first request routed with Host: qwen3-coder-80b.vllm and holds that request
+# until the pod is ready. LiteLLM's `default`/`smart` aliases point at the
+# interceptor (see apps/litellm/config.yaml) so all consumers get this for free.
+#
+# The Deployment intentionally omits a static `replicas` (KEDA owns the count;
+# a pinned value would let Flux fight the scaler back up from zero).
+#
+# VERIFY-BEFORE-DEPLOY: confirm the HTTPScaledObject schema for the installed
+# add-on version (the scaleTargetRef/replicas field names have changed across
+# releases) and raise scaledownPeriod if cold starts are frequent enough to be
+# annoying (each wake reloads ~tens of GB of weights from SeaweedFS).
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: qwen3-coder-80b
+  namespace: vllm
+spec:
+  hosts:
+    - qwen3-coder-80b.vllm
+  scaleTargetRef:
+    name: qwen3-coder-80b
+    kind: Deployment
+    apiVersion: apps/v1
+    service: qwen3-coder-80b
+    port: 80
+  replicas:
+    min: 0
+    max: 1
+  # Stay warm for 10 min after the last request before scaling back to zero.
+  scaledownPeriod: 600

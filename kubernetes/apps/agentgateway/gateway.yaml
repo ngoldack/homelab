@@ -1,0 +1,60 @@
+# agentgateway data plane for kagent MCP traffic. A dedicated Gateway (its own
+# GatewayClass `agentgateway`, separate from Cilium's) terminates MCP and routes
+# each backend on its own path. Cilium remains CNI + LB underneath.
+#
+# ${DOMAIN} is substituted by the apps Flux Kustomization (postBuild cluster-secrets).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-proxy
+  namespace: agentgateway-system
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# One route per MCP backend (non-federated, so upstream tool names pass through
+# unchanged and the kagent agents need no edits). VERIFY-BEFORE-DEPLOY: confirm a
+# single-target AgentgatewayBackend does NOT prefix tool names (federation does);
+# if it does, update the agents' toolNames or the mem0/n8n refs (which omit
+# toolNames today, so they are tolerant).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-mem0
+  namespace: agentgateway-system
+spec:
+  parentRefs:
+    - name: agentgateway-proxy
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/mem0
+      backendRefs:
+        - name: mcp-mem0
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-n8n
+  namespace: agentgateway-system
+spec:
+  parentRefs:
+    - name: agentgateway-proxy
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp/n8n
+      backendRefs:
+        - name: mcp-n8n
+          group: agentgateway.dev
+          kind: AgentgatewayBackend

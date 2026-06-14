@@ -1,0 +1,87 @@
+# SPIRE (SPIFFE workload identity) via the hardened upstream charts. CRDs ship
+# as a separate chart and install first; the umbrella HelmRelease dependsOn it.
+# Umbrella = spire-server + agent DaemonSet + controller-manager + spiffe-csi
+# + oidc-discovery-provider. Node attestation uses k8s_psat (projected SA token,
+# no host access) so it works under Talos.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: spire-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: spire-system
+  chart:
+    spec:
+      chart: spire-crds
+      # VERIFY-BEFORE-DEPLOY: pin/confirm the chart version against the spiffe repo.
+      version: "0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: spiffe
+      interval: 1h
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: spire
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: spire-system
+  dependsOn:
+    - name: spire-crds
+  chart:
+    spec:
+      chart: spire
+      # VERIFY-BEFORE-DEPLOY: pin/confirm the chart version against the spiffe repo.
+      version: "0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: spiffe
+      interval: 1h
+  values:
+    # VERIFY-BEFORE-DEPLOY: confirm value keys against the spiffe/spire chart.
+    global:
+      spire:
+        # Trust domain anchors every SPIFFE ID issued in this cluster.
+        trustDomain: homelab.local
+        clusterName: homelab
+    # Server: k8s_psat node attestor (projected SA token, no host access; works
+    # under Talos). Controller manager provisions the CRD-driven registrar.
+    spire-server:
+      controllerManager:
+        enabled: true
+        # Pin the class so standalone ClusterSPIFFEID (spec.className: spire) bind.
+        className: spire
+      # Datastore on a dedicated CloudNativePG instance (cnpg-cluster.yaml),
+      # replacing the chart's bundled SQLite. Eventual-consistency on first boot:
+      # spire-server retries until spire-db + its secret exist.
+      dataStore:
+        sql:
+          databaseType: postgres
+          databaseName: spire
+          host: spire-db-rw.spire-system.svc.cluster.local
+          port: 5432
+          username: spire
+          externalSecret:
+            enabled: true
+            name: spire-db-credentials
+            key: password
+      nodeAttestor:
+        k8sPSAT:
+          enabled: true
+    # Agent DaemonSet: same k8s_psat attestor. Agent + spiffe-csi-driver are
+    # privileged/hostPath, which is why spire-system is PSA-labeled privileged.
+    spire-agent:
+      nodeAttestor:
+        k8sPSAT:
+          enabled: true
+    # CSI driver: lets workloads mount the Workload API socket as an inline CSI
+    # volume (no hostPath, no privilege) to fetch their SVID.
+    spiffe-csi-driver:
+      enabled: true

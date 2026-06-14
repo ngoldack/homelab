@@ -15,31 +15,32 @@ spec:
         name: grafana
         namespace: flux-system
       interval: 1h
-  # The S3 credentials (tempo-s3-credentials) are provisioned by Crossplane in
-  # infra-configs, which depends on infra-controllers. disableWait keeps this
-  # HelmRelease from blocking infra-controllers readiness on the Tempo pod, which
-  # crash-loops until that connection secret/bucket exists (then self-heals).
+  # The S3 credentials (tempo-s3-credentials) are provisioned by the SeaweedFS
+  # operator (S3Credentials CRD in tempo-s3.yaml) in infra-configs, which depends
+  # on infra-controllers. disableWait keeps this HelmRelease from blocking
+  # infra-controllers readiness on the Tempo pod, which crash-loops until that
+  # connection secret/bucket exists (then self-heals).
   install:
     disableWait: true
   upgrade:
     disableWait: true
   values:
     tempo:
-      # Persist WAL/local cache on fast NFS; durable trace blocks live in MinIO.
+      # Persist WAL/local cache on fast NFS; durable trace blocks live in SeaweedFS.
       storage:
         trace:
           backend: s3
           s3:
             bucket: tempo-traces
-            # In-cluster MinIO tenant (plain HTTP, path-style).
-            endpoint: minio.minio.svc.cluster.local:80
+            # In-cluster SeaweedFS S3 gateway (plain HTTP, path-style).
+            endpoint: seaweedfs-s3.seaweedfs.svc.cluster.local:8333
             insecure: true
             forcepathstyle: true
           wal:
             path: /var/tempo/wal
       # Static keys omitted on purpose: the s3 backend falls back to the AWS
       # credential chain, picking up AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-      # injected from the Crossplane-managed connection secret below.
+      # injected from the SeaweedFS-managed connection secret below.
       extraEnvFrom:
         - secretRef:
             name: tempo-s3-credentials

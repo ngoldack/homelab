@@ -7,7 +7,7 @@
 # redirect_uri and root_url configured for the Authentik "grafana" provider.
 #
 # The shared router (perplexity-stack-router) and the "perplexity-stack" group
-# are defined alongside Authentik (kubernetes/apps/base/authentik/netbird.yaml);
+# are defined alongside Authentik (kubernetes/apps/authentik/netbird.yaml);
 # the group is referenced here by name since it lives in another namespace.
 apiVersion: netbird.io/v1alpha1
 kind: NetworkResource

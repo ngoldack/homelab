@@ -1,0 +1,26 @@
+# In-cluster ClusterIP only — port 53 is reachable by external-dns-internal (RFC-2136
+# UPDATE + AXFR) and other in-cluster resolvers, never from the public internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: technitium
+  namespace: dns
+  labels:
+    app.kubernetes.io/name: technitium
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: technitium
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+    - name: web
+      port: 5380
+      targetPort: 5380
+      protocol: TCP

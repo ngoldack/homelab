@@ -9,6 +9,16 @@ terraform {
       source  = "siderolabs/talos"
       version = "~> 0.11"
     }
+    # Hetzner Cloud — provisions the edge VPS worker node (tofu/edge.tf).
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = "~> 1.49"
+    }
+    # Imports a Talos Image Factory image into Hetzner as a snapshot (ALPHA).
+    imager = {
+      source  = "hcloud-talos/imager"
+      version = "~> 1.0"
+    }
     sops = {
       source  = "carlpett/sops"
       version = "~> 1.4"
@@ -58,6 +68,15 @@ provider "proxmox" {
 provider "talos" {
   # Configuration parameters if needed; defaults are generally fine.
 }
+
+# Hetzner Cloud — edge node provisioning (edge.tf).
+provider "hcloud" {
+  token = local.proxmox_secrets.hcloud_token
+}
+
+# The imager provider authenticates via the HCLOUD_TOKEN environment variable
+# (export it for the OpenTofu run); it takes no token argument.
+provider "imager" {}
 
 # AWS provider aimed at Hetzner Object Storage (not AWS). All AWS-specific
 # metadata/credential validation is disabled because the endpoint is S3-compatible

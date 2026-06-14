@@ -1,0 +1,52 @@
+# Exposes Open WebUI publicly at chat.${DOMAIN} over the in-cluster Cilium
+# Gateway (the same mechanism Authentik uses for auth.${DOMAIN}) so the Authentik
+# OIDC redirect flow resolves. cert-manager issues the listener cert via the
+# production ClusterIssuer.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: open-webui-gateway
+  namespace: knowledge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "chat.${DOMAIN}"
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "chat.${DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: open-webui-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: open-webui
+  namespace: knowledge
+spec:
+  parentRefs:
+    - name: open-webui-gateway
+  hostnames:
+    - chat.${DOMAIN}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: open-webui
+          port: 80

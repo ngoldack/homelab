@@ -1,18 +1,32 @@
 version: '3'
 
-# Thin convenience wrapper around the Dagger module in .dagger.
-# The same commands run in CI via .github/workflows (dagger/dagger-for-github),
-# so `task check` locally is identical to the required branch-protection gate.
+# Reusable commands for this homelab, run directly on your workstation with
+# host-installed tools (no containers, no Dagger). The same validation tasks
+# run in CI (.github/workflows/ci.yaml) - CI only lints, it never deploys.
 #
-# Secrets are sourced from the environment as Dagger secrets (env://NAME).
-# Put SOPS_AGE_KEY / KUBECONFIG_DATA in .env (gitignored).
+# Live tasks (tofu:*, flux:reconcile) read/mutate real infrastructure and assume
+# your host is already connected to the private mesh (e.g. `netbird up`).
 #
-# The live tasks (tofu:plan/apply/destroy, flux:reconcile) assume your host is
-# already connected to the private mesh (e.g. `netbird up`) before you run them
-# - the Dagger module is network agnostic and does not manage NetBird.
+# Secrets: put SOPS_AGE_KEY in .env (gitignored). The OpenTofu state-encryption
+# passphrase is read on demand from tofu/secret.sops.yaml via SOPS.
+#
+# Required tools: sops, age, tofu, kustomize, kubeconform, yamllint, actionlint,
+# trivy, flux, kubectl. Install any that are missing before running.
 
 dotenv:
   - .env
+
+vars:
+  OVERLAYS: >-
+    kubernetes/clusters/production
+    kubernetes/infrastructure/controllers
+    kubernetes/infrastructure/configs
+    kubernetes/apps
+  # Decrypt the state-encryption passphrase and emit the TF_ENCRYPTION expression
+  # OpenTofu expects. Used by every live tofu task.
+  TF_ENCRYPTION_EXPR: >-
+    key_provider "pbkdf2" "statekey" { passphrase = "$(sops -d tofu/secret.sops.yaml
+    | sed -n 's/^state_encryption_passphrase:[[:space:]]*//p' | tr -d '"')" }
 
 tasks:
   default:
@@ -21,104 +35,144 @@ tasks:
       - task --list
 
   # -------------------------
-  # Validation (offline, no secrets) - mirrors CI
+  # Validation (offline, no secrets) - same checks as CI
   # -------------------------
 
   check:
-    desc: Run every offline validation gate (the required CI gate)
+    desc: Run every offline validation check (lint + validate)
     cmds:
-      - dagger call check
-
-  versions:
-    desc: Print the pinned tool versions (single source of truth)
-    cmds:
-      - dagger call versions
+      - task: yamllint
+      - task: actionlint
+      - task: sops:check
+      - task: tofu:validate
+      - task: tofu:security
+      - task: k8s:validate
 
   yamllint:
     desc: Lint all YAML against .yamllint
     cmds:
-      - dagger call yamllint
+      - yamllint -c .yamllint kubernetes/ tofu/
 
   actionlint:
     desc: Lint the GitHub Actions workflows
     cmds:
-      - dagger call actionlint
+      - actionlint
 
   sops:check:
-    desc: Assert every *.sops.yaml file is encrypted
+    desc: Assert every *.sops.yaml file is encrypted (inspects ciphertext only)
     cmds:
-      - dagger call sops-check
+      - |
+        set -eu
+        bad=0
+        for f in $(find . -name '*.sops.yaml' -type f); do
+          [ "$(basename "$f")" = ".sops.yaml" ] && continue
+          if grep -qE '^sops:' "$f" && grep -q 'ENC\[' "$f"; then
+            echo "OK: $f"
+          else
+            echo "ERROR: unencrypted or malformed SOPS file: $f"
+            bad=1
+          fi
+        done
+        exit "$bad"
 
   tofu:validate:
     desc: OpenTofu fmt + init (no backend) + validate
+    dir: tofu
+    env:
+      # Throwaway passphrase; no real state is touched during validate.
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "ci-offline-validate-dummy-passphrase" }'
     cmds:
-      - dagger call tofu-validate
+      - tofu fmt -check -recursive
+      - tofu init -backend=false -lockfile=readonly
+      - tofu validate
 
   tofu:security:
-    desc: Trivy IaC config scan of tofu/
+    desc: Trivy IaC config scan of tofu/ (fails on CRITICAL)
     cmds:
-      - dagger call tofu-security
+      - trivy config tofu --severity CRITICAL --exit-code 1
 
   k8s:validate:
-    desc: kustomize build + kubeconform + Flux invariants
+    desc: kustomize build + kubeconform for every overlay
     cmds:
-      - dagger call kube-validate
+      - |
+        set -euo pipefail
+        for overlay in {{.OVERLAYS}}; do
+          echo "==== $overlay ===="
+          kustomize build "$overlay" | kubeconform -strict -ignore-missing-schemas -summary
+        done
 
   # -------------------------
-  # Live infrastructure (needs SOPS_AGE_KEY in env + host connected to mesh)
+  # Live infrastructure (needs SOPS_AGE_KEY in .env + host connected to the mesh)
   # -------------------------
+
+  tofu:init:
+    desc: tofu init with the state-encryption passphrase
+    dir: tofu
+    cmds:
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
 
   tofu:plan:
     desc: Plan against live infrastructure (read-only)
+    dir: tofu
     cmds:
-      - dagger call tofu-plan --sops-age-key=env://SOPS_AGE_KEY
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu plan -input=false
 
   tofu:apply:
     desc: Apply against live infrastructure
+    dir: tofu
     cmds:
-      - dagger call tofu-apply --sops-age-key=env://SOPS_AGE_KEY
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu apply -input=false
 
   tofu:destroy:
-    desc: Destroy all managed infrastructure (requires explicit confirmation)
+    desc: Destroy all managed infrastructure (prompts for confirmation)
+    dir: tofu
     cmds:
-      - >-
-        dagger call tofu-destroy --confirm=destroy-production
-        --sops-age-key=env://SOPS_AGE_KEY
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu destroy -input=false
 
   tofu:output:
     desc: Print all OpenTofu outputs
+    dir: tofu
     cmds:
-      - dagger call tofu-output --sops-age-key=env://SOPS_AGE_KEY
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output
 
   tofu:kubeconfig:
     desc: Extract kubeconfig from state to kubeconfig.yaml
+    dir: tofu
     cmds:
-      - >-
-        dagger call kubeconfig --sops-age-key=env://SOPS_AGE_KEY
-        export --path=kubeconfig.yaml
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw kubeconfig > ../kubeconfig.yaml
+      - 'echo "wrote kubeconfig.yaml"'
 
   tofu:talosconfig:
     desc: Extract talosconfig from state to talosconfig.yaml
+    dir: tofu
     cmds:
-      - >-
-        dagger call talosconfig --sops-age-key=env://SOPS_AGE_KEY
-        export --path=talosconfig.yaml
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw talosconfig > ../talosconfig.yaml
+      - 'echo "wrote talosconfig.yaml"'
 
   flux:reconcile:
-    desc: Force Flux to reconcile (git source + all Kustomizations)
+    desc: Force Flux to reconcile (git source + all Kustomizations in order)
     cmds:
-      - dagger call flux-reconcile --kubeconfig=env://KUBECONFIG_DATA
+      - flux reconcile source git flux-system
+      - flux reconcile kustomization infra-controllers
+      - flux reconcile kustomization infra-configs
+      - flux reconcile kustomization apps
 
   # -------------------------
-  # Secrets (interactive editing stays on the host via SOPS directly)
+  # Secrets (SOPS, on the host)
   # -------------------------
 
   secrets:edit:
-    desc: Open a SOPS file in your editor (decrypts, edits, re-encrypts)
+    desc: 'Open a SOPS file in your editor (e.g. task secrets:edit -- tofu/secret.sops.yaml)'
     cmds:
       - sops {{.CLI_ARGS}}
 
   secrets:decrypt:
     desc: 'Decrypt a SOPS file to stdout (e.g. task secrets:decrypt -- tofu/secret.sops.yaml)'
     cmds:
-      - dagger call secrets-decrypt --sops-age-key=env://SOPS_AGE_KEY --path={{.CLI_ARGS}}
+      - sops -d {{.CLI_ARGS}}

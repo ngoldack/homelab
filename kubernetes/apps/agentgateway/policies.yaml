@@ -1,0 +1,65 @@
+# Enforcement layer: agentgateway validates a JWT (from Authentik) on every MCP
+# request and then applies a CEL tool-authorization policy. This is the real,
+# outside-the-LLM control the security spec wanted (CEL, not Kyverno).
+#
+# VERIFY-BEFORE-DEPLOY:
+#  - Mint the Authentik token first (see apps/kagent/gateway-token.sops.yaml) or
+#    temporarily set mode: Permissive for a staged rollout (Strict rejects
+#    unauthenticated MCP calls).
+#  - Confirm AgentgatewayPolicy field shapes against the installed CRDs.
+#  - The jwks backendRef crosses namespaces (authentik) — a ReferenceGrant is
+#    provided in apps/authentik; confirm agentgateway honors it.
+#  - ${DOMAIN} is substituted by the apps Flux Kustomization.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-jwt
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: "https://auth.${DOMAIN}/application/o/agentgateway-mcp/"
+          audiences:
+            - agentgateway-mcp
+          jwks:
+            remote:
+              jwksPath: "/application/o/agentgateway-mcp/jwks/"
+              cacheDuration: "5m"
+              backendRef:
+                group: ""
+                kind: Service
+                name: authentik-server
+                namespace: authentik
+                port: 80
+---
+# Tool authorization: only holders of a valid Authentik MCP token may call tools.
+# v1 = authenticated-subject gate; tighten to per-agent/per-tool later by keying
+# CEL on jwt.sub + mcp.tool.name (e.g. restrict destructive tools to specific
+# agent identities). Combine clauses in a single CEL string to avoid the
+# documented AND/OR ambiguity across matchExpressions entries.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-tool-authz
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mcp-mem0
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: mcp-n8n
+  backend:
+    mcp:
+      authorization:
+        action: Allow
+        policy:
+          matchExpressions:
+            - 'has(jwt.sub)'

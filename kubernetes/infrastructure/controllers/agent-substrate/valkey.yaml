@@ -1,0 +1,20 @@
+# Valkey (Redis API) for the Agent Substrate control plane: ate-api uses it for
+# session/snapshot bookkeeping instead of a bundled Redis. Provisioned by the
+# Valkey operator; volume on the fast NVMe-oF tier per the storage conventions.
+# EXPERIMENTAL.
+apiVersion: valkey.io/v1alpha1
+kind: Valkey
+metadata:
+  name: substrate-valkey
+  namespace: ate-system
+spec:
+  replicas: 1
+  storage:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tns-fast-nvmeof
+        resources:
+          requests:
+            storage: 2Gi

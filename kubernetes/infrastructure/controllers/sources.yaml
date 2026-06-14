@@ -83,15 +83,6 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: k8sgpt
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://charts.k8sgpt.ai/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
   name: authentik
   namespace: flux-system
 spec:
@@ -182,17 +173,100 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: minio-operator
+  name: seaweedfs-operator
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://operator.min.io
+  url: https://seaweedfs.github.io/seaweedfs-operator/
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: crossplane-stable
+  name: emqx
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://repos.emqx.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: zigbee2mqtt
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://charts.zigbee2mqtt.io
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: home-assistant
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: http://pajikos.github.io/home-assistant-helm-chart/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agentgateway
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://charts.crossplane.io/stable
+  type: oci
+  url: oci://cr.agentgateway.dev/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: spiffe
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://spiffe.github.io/helm-charts-hardened/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agent-substrate
+  namespace: flux-system
+spec:
+  interval: 2h
+  type: oci
+  url: oci://ghcr.io/kagent-dev/substrate/helm
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: traefik
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://traefik.github.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cert-manager-webhook-hetzner
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://vadimkim.github.io/cert-manager-webhook-hetzner
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: crowdsecurity
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://crowdsecurity.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://kubernetes-sigs.github.io/external-dns/

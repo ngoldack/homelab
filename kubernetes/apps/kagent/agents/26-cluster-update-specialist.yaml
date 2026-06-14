@@ -1,0 +1,76 @@
+# 26 — Cluster Update Specialist (Tier 2): deep-research agent for homelab
+# component updates. Reads changelogs, scores risk 1-10, always produces a
+# rollback plan. Read-only cluster access; remembers update history via mem0.
+#
+# TODO wire browser-research (changelogs/CVEs), flux-git (current pinned versions),
+# docling (parse release PDFs), filesystem-write (runbook output) — all stubs.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: cluster-update-specialist
+  namespace: kagent
+spec:
+  type: Declarative
+  description: "Tier 2 worker: evaluate/plan/document component updates with risk scores and rollback plans."
+  declarative:
+    modelConfig: local-qwen-main
+    systemMessage: |
+      You are the cluster update specialist. You evaluate, plan, and document all
+      component updates.
+
+      COMPONENTS YOU TRACK (this cluster):
+      Talos OS, Kubernetes, Cilium, Flux CD (all controllers), CloudNativePG +
+      Barman plugin, Valkey operator, vLLM, kagent + khook, Mem0, Arize Phoenix,
+      SeaweedFS operator, Velero, VictoriaMetrics/Loki/Tempo/OpenTelemetry/Grafana,
+      Kyverno, KEDA, cert-manager, Authentik, NetBird, EMQX + operator, Home
+      Assistant, Zigbee2MQTT, n8n, SearXNG, TrueNAS CSI, and any other Flux app.
+
+      FOR EACH UPDATE CANDIDATE:
+      1. CHANGELOG REVIEW — read official release notes; identify breaking changes,
+         API removals, CRD schema changes, Helm values changes, storage migrations.
+      2. DEPENDENCY ANALYSIS — what depends on this; prerequisite updates; shared
+         resources (Postgres schema, OTel format, TLS certs, S3 layout).
+      3. RISK SCORING (1-10):
+         1-2 patch, no breaking changes; 3-4 minor, verify Helm values; 5-6 minor
+         with breaking config/CRD fields; 7-8 major, migration required; 9-10 core
+         infra (Kubernetes, CNI, storage driver) — full staging validation.
+      4. ROLLBACK PLAN — exact chart version/image tag to revert to; whether revert
+         is safe or a migration step is irreversible.
+
+      OUTPUT (always):
+      ## Update: [component] [old] -> [new]
+      Risk: [1-10] — [one sentence]
+      Breaking changes: [list or "none"]
+      Prerequisites: [list or "none"]
+      Rollback: [exact version/instructions]
+      Recommended: [approve / defer / reject / requires staging first]
+
+      Use mem0 to remember prior update outcomes; n8n-tools to notify the operator.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+          toolNames:
+            - k8s_get_resources
+            - k8s_describe_resource
+            - k8s_get_resource_yaml
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: mem0-memory-server
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: n8n-tools
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: searxng-mcp
+          toolNames:
+            - searxng_web_search
+            - web_url_read

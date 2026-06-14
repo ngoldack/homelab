@@ -39,6 +39,13 @@ spec:
           endpoint: "tempo.monitoring.svc.cluster.local:4317"
           tls:
             insecure: true
+        # Traces -> Arize Phoenix (LLM-specific view). kagent routes here via the
+        # gateway so agent traces land in BOTH Tempo (infra correlation) and
+        # Phoenix (LLM analysis).
+        otlp/phoenix:
+          endpoint: "phoenix.phoenix.svc.cluster.local:4317"
+          tls:
+            insecure: true
         # Metrics -> VictoriaMetrics.
         prometheusremotewrite:
           endpoint: "http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428/api/v1/write"
@@ -57,6 +64,36 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
+        # Cluster-wide scrape of pods annotated prometheus.io/scrape=true (single
+        # gateway instance => no duplicate scraping). Captures vLLM, Tetragon,
+        # cert-manager, CNPG, Trivy, Hubble (once each exposes + annotates
+        # /metrics) -> VictoriaMetrics, so vmalert has data to alert on.
+        # VERIFY-BEFORE-DEPLOY: the k8sattributes preset grants pod read RBAC; if
+        # the prometheus receiver needs more (services/endpoints), extend the
+        # chart clusterRole.
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: kubernetes-pods
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: "true"
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    action: replace
+                    target_label: __metrics_path__
+                    regex: (.+)
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $$1:$$2
+                    target_label: __address__
+                  - source_labels: [__meta_kubernetes_namespace]
+                    target_label: namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    target_label: pod
 
       processors:
         batch: {}
@@ -87,9 +124,9 @@ spec:
           traces:
             receivers: [otlp]
             processors: [memory_limiter, k8sattributes, tail_sampling, batch]
-            exporters: [otlp/tempo]
+            exporters: [otlp/tempo, otlp/phoenix]
           metrics:
-            receivers: [otlp]
+            receivers: [otlp, prometheus]
             processors: [memory_limiter, k8sattributes, batch]
             exporters: [prometheusremotewrite]
           logs:

@@ -177,3 +177,24 @@ variable "node_pools" {
     error_message = "Taint effect must be one of NoSchedule, PreferNoSchedule, or NoExecute."
   }
 }
+
+# --- Hetzner edge node (edge.tf) ---
+
+variable "hetzner_edge_server_type" {
+  description = "Hetzner Cloud server type for the edge node"
+  type        = string
+  default     = "cx22" # 2 vCPU / 4 GB, ~EUR 3.49/mo
+}
+
+variable "hetzner_edge_location" {
+  description = "Hetzner Cloud location for the edge node"
+  type        = string
+  default     = "nbg1" # Nuremberg
+}
+
+variable "edge_admin_ips" {
+  description = "CIDRs allowed to reach the edge Talos API (port 50000)."
+  type        = list(string)
+  # VERIFY-BEFORE-DEPLOY: restrict to your admin / mesh CIDRs (spec: admins only).
+  default = ["0.0.0.0/0"]
+}

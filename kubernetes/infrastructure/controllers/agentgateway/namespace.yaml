@@ -1,0 +1,9 @@
+# Dedicated namespace for the agentgateway control plane / gateway controller.
+# agentgateway runs as a normal (non-privileged) workload, so Talos's default
+# `baseline` Pod Security Admission level is sufficient — no PSA enforce label
+# is required here. The namespace is created explicitly so it exists before the
+# HelmReleases reconcile into it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentgateway-system

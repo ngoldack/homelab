@@ -28,3 +28,5 @@ resources:
   - gotenberg
   - docling
   - pandoc
+  # Knowledge plane: Open WebUI (chat + doc RAG) on its own pgvector store
+  - knowledge

@@ -1,0 +1,130 @@
+# Open WebUI — the knowledge plane front door. Wires together infra that already
+# exists in the cluster:
+#   - chat backend  -> LiteLLM (every model alias: default/smart/fast/...)
+#   - vector store   -> its own pgvector CloudNativePG (knowledge-postgres)
+#   - embeddings     -> the `embeddings` alias (TEI bge-small, 384-dim) via LiteLLM
+#   - doc extraction -> the in-cluster Docling service (PDF/DOCX/... -> text)
+# Upload a document in the UI and it is parsed by Docling, embedded by the cluster
+# embedder, and stored in pgvector for retrieval-augmented chat.
+#
+# Env var names verified against open-webui source (config.py / env.py):
+# PGVECTOR_DB_URL (must start "postgres"), DOCLING_SERVER_URL, WEBUI_SECRET_KEY
+# (mandatory or the server exits). The embedding model is 384-dim, so the pgvector
+# column length is pinned to 384 to match (default 1536 would reject inserts).
+#
+# VERIFY-BEFORE-DEPLOY: pin a concrete open-webui image tag; confirm the app can
+# write to the NFS-backed /app/backend/data PVC (NFS root-squash can block a
+# root-running container — set fsGroup/UID or a TrueNAS mapping if so).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-data
+  namespace: knowledge
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-fast-nfs
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: knowledge
+  labels:
+    app.kubernetes.io/name: open-webui
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-webui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: open-webui
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: open-webui
+          # renovate: datasource=docker depName=ghcr.io/open-webui/open-webui
+          image: ghcr.io/open-webui/open-webui:v0.6.18
+          envFrom:
+            - secretRef:
+                name: open-webui-secrets
+          env:
+            # --- Chat backend: LiteLLM central model layer (OpenAI-compatible) ---
+            - name: ENABLE_OPENAI_API
+              value: "true"
+            - name: ENABLE_OLLAMA_API
+              value: "false"
+            - name: OPENAI_API_BASE_URL
+              value: "http://litellm.litellm.svc.cluster.local:4000/v1"
+            # --- Vector store: pgvector (knowledge-postgres) ---
+            - name: VECTOR_DB
+              value: "pgvector"
+            # Match the bge-small embedding dimensionality (384); the default 1536
+            # would create a vector(1536) column and reject 384-dim inserts.
+            - name: PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
+              value: "384"
+            # --- RAG embeddings: the `embeddings` alias via LiteLLM ---
+            - name: RAG_EMBEDDING_ENGINE
+              value: "openai"
+            - name: RAG_OPENAI_API_BASE_URL
+              value: "http://litellm.litellm.svc.cluster.local:4000/v1"
+            - name: RAG_EMBEDDING_MODEL
+              value: "embeddings"
+            # --- Document extraction: the in-cluster Docling service ---
+            - name: CONTENT_EXTRACTION_ENGINE
+              value: "docling"
+            - name: DOCLING_SERVER_URL
+              value: "http://docling.docling.svc.cluster.local:5001"
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-webui-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui
+  namespace: knowledge
+  labels:
+    app.kubernetes.io/name: open-webui
+spec:
+  selector:
+    app.kubernetes.io/name: open-webui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

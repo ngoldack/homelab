@@ -21,7 +21,7 @@ GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cl
 | Identity / SSO | Authentik (forward-auth + OIDC issuer) |
 | TLS | cert-manager + Let's Encrypt |
 | Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
-| LLM Serving | Ollama (GPU, 3x Tesla P100) behind LiteLLM aliases; Qwen3-ASR for STT |
+| LLM Serving | Ollama (GPU, 3x Tesla P100) behind LiteLLM aliases; Whisper (CPU) for STT |
 | AI Agents | kagent + khook (22-agent fleet), Mem0 memory, Arize Phoenix traces |
 | MCP Enforcement | agentgateway (per-agent JWT + CEL tool authz) |
 | Agent Sandbox | gVisor RuntimeClass + Agent Substrate (guarded agents) |

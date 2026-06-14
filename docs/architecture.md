@@ -368,7 +368,7 @@ until a real Authentik client-credentials token is minted into
 | `authentik` | Identity / SSO / OIDC | CNPG, Valkey, SeaweedFS (media) |
 | `ollama` | LLM serving (GPU, OpenAI-compatible) | 3x P100, LiteLLM, PVC (models) |
 | `litellm` | Central model-alias layer | ollama |
-| `asr` | Speech-to-text (Qwen3-ASR) | 1x P100 (transformers backend) |
+| `whisper` | Speech-to-text (Whisper/Speaches) | CPU, OpenAI-compatible |
 | `searxng` | Meta-search (JSON enabled) | — |
 | `n8n` | Workflow automation / Signal notify | CNPG, Valkey |
 | `mem0` | Agent long-term memory (pgvector) | CNPG |

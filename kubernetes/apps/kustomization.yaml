@@ -8,8 +8,8 @@ resources:
   # GPU model server (Ollama on the P100s) + central model-routing layer
   - ollama
   - litellm
-  # Speech-to-text (Qwen3-ASR, transformers backend on the 3rd P100)
-  - asr
+  # Speech-to-text (Whisper via Speaches, CPU, OpenAI-compatible)
+  - whisper
   - searxng
   - n8n
   - mem0

@@ -1,0 +1,95 @@
+# Whisper STT via Speaches (faster-whisper, OpenAI-compatible). Runs on CPU - all
+# three P100s belong to Ollama - so Pascal support is a non-issue. Exposes the
+# OpenAI /v1/audio/transcriptions endpoint, so it goes back behind the LiteLLM
+# `whisper` alias (apps/litellm/config.yaml), exactly like the old setup.
+#
+# Models are downloaded on first request into the HF cache PVC. large-v3 is the
+# accurate default; on CPU a turbo/distil model (e.g.
+# deepdml/faster-whisper-large-v3-turbo-ct2) or `Systran/faster-whisper-small`
+# transcribes much faster - pick per latency needs in the request `model` field.
+#
+# VERIFY-BEFORE-DEPLOY: pin the image tag; confirm the HF cache path
+# (/home/ubuntu/.cache/huggingface/hub) and that the CPU image serves
+# /v1/audio/transcriptions out of the box.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whisper-models
+  namespace: whisper
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-fast-nfs
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisper
+  namespace: whisper
+  labels:
+    app.kubernetes.io/name: whisper
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: whisper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: whisper
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: speaches
+          # renovate: datasource=docker depName=ghcr.io/speaches-ai/speaches
+          image: ghcr.io/speaches-ai/speaches:latest-cpu
+          ports:
+            - name: http
+              containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "6"
+              memory: 8Gi
+          volumeMounts:
+            - name: models
+              mountPath: /home/ubuntu/.cache/huggingface/hub
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: whisper-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whisper
+  namespace: whisper
+  labels:
+    app.kubernetes.io/name: whisper
+spec:
+  selector:
+    app.kubernetes.io/name: whisper
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

@@ -7,8 +7,8 @@
 # VRAM on demand, so there is no per-model Service or scale-to-zero plumbing.
 #
 # Aliases: default/smart = the 32B coder, fast = the small low-latency model,
-# embeddings = the embedding model. (STT is no longer an alias — Ollama has no
-# speech-to-text; the Qwen3-ASR service is reached directly, not via OpenAI /v1.)
+# embeddings = the embedding model, whisper = STT (Speaches/faster-whisper, CPU,
+# OpenAI-compatible /v1/audio/transcriptions).
 #
 # VERIFY-BEFORE-DEPLOY: confirm the model tags are pulled in Ollama
 # (apps/ollama/helmrelease.yaml ollama.models.pull) and that Ollama's
@@ -40,6 +40,13 @@ data:
         litellm_params:
           model: openai/nomic-embed-text
           api_base: http://ollama.ollama.svc.cluster.local:11434/v1
+          api_key: dummy
+      # STT via Speaches (faster-whisper) on CPU. Pick the concrete faster-whisper
+      # model here; a turbo/distil variant is much faster on CPU.
+      - model_name: whisper
+        litellm_params:
+          model: openai/Systran/faster-whisper-large-v3
+          api_base: http://whisper.whisper.svc.cluster.local:8000/v1
           api_key: dummy
     litellm_settings:
       drop_params: true

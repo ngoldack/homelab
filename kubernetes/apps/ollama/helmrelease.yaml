@@ -3,8 +3,8 @@
 # loads/unloads them in VRAM on demand (OLLAMA_KEEP_ALIVE), and still supports the
 # Pascal P100s. Exposes an OpenAI-compatible API on :11434/v1, consumed via LiteLLM.
 #
-# GPU split: Ollama gets 2 of the 3 P100s (32GB - enough for the 32B coder at Q4 +
-# the 8B + embeddings, swapped as needed); the 3rd P100 is left for the ASR service.
+# GPU: Ollama gets all 3 P100s (48GB) - room for the 32B coder at Q4 + the 8B +
+# embeddings resident together. Whisper STT runs on CPU (no GPU contention).
 #
 # VERIFY-BEFORE-DEPLOY: pin the otwld chart version; confirm the values keys
 # (ollama.gpu.*, ollama.models.pull, runtimeClassName, persistentVolume.*) against
@@ -33,7 +33,7 @@ spec:
       gpu:
         enabled: true
         type: nvidia
-        number: 2
+        number: 3
       # Pulled once into the PVC on first start. These back the LiteLLM aliases
       # (apps/litellm/config.yaml): default/smart=qwen2.5-coder:32b,
       # fast=qwen3:8b, embeddings=nomic-embed-text. Tune the set here OR the

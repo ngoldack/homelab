@@ -203,6 +203,12 @@ data "talos_machine_configuration" "worker" {
               { name = "nvidia_modeset" },
             ]
           }
+          # Label GPU nodes so workloads can target them (nodeSelector ai=true).
+          # The pool only carries a NoSchedule taint; without a matching label the
+          # GPU pods have nothing to select on.
+          nodeLabels = {
+            "ai" = "true"
+          }
         }
       }),
     ] : [],

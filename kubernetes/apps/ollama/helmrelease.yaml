@@ -1,0 +1,80 @@
+# Ollama — the model server that replaces vLLM. Unlike vLLM (one Deployment per
+# model, Pascal-unsupported), Ollama (llama.cpp) hosts MANY models in one server,
+# loads/unloads them in VRAM on demand (OLLAMA_KEEP_ALIVE), and still supports the
+# Pascal P100s. Exposes an OpenAI-compatible API on :11434/v1, consumed via LiteLLM.
+#
+# GPU split: Ollama gets 2 of the 3 P100s (32GB - enough for the 32B coder at Q4 +
+# the 8B + embeddings, swapped as needed); the 3rd P100 is left for the ASR service.
+#
+# VERIFY-BEFORE-DEPLOY: pin the otwld chart version; confirm the values keys
+# (ollama.gpu.*, ollama.models.pull, runtimeClassName, persistentVolume.*) against
+# the chart; first start pulls ~26GB of weights into the PVC (one-off).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ollama
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: ollama
+  chart:
+    spec:
+      chart: ollama
+      version: "1.x"
+      sourceRef:
+        kind: HelmRepository
+        name: ollama
+        namespace: flux-system
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    ollama:
+      gpu:
+        enabled: true
+        type: nvidia
+        number: 2
+      # Pulled once into the PVC on first start. These back the LiteLLM aliases
+      # (apps/litellm/config.yaml): default/smart=qwen2.5-coder:32b,
+      # fast=qwen3:8b, embeddings=nomic-embed-text. Tune the set here OR the
+      # alias->model mapping in LiteLLM; consumers never change.
+      models:
+        pull:
+          - qwen2.5-coder:32b
+          - qwen3:8b
+          - nomic-embed-text
+    # GPU access via the nvidia runtime; pinned to the P100 node.
+    runtimeClassName: nvidia
+    nodeSelector:
+      ai: "true"
+    tolerations:
+      - key: ai
+        value: "true"
+        effect: NoSchedule
+    # Persist model weights so they survive restarts (no 26GB re-pull). Model
+    # weights belong on the fast NFS tier per the storage policy.
+    persistentVolume:
+      enabled: true
+      storageClass: tns-fast-nfs
+      size: 100Gi
+    extraEnv:
+      # Default context window for every model (kept VRAM-safe for the 32B on 2
+      # P100s; raise toward 64k if headroom allows).
+      - name: OLLAMA_CONTEXT_LENGTH
+        value: "32768"
+      # Keep a model resident 30m after last use before unloading from VRAM.
+      - name: OLLAMA_KEEP_ALIVE
+        value: "30m"
+      # Emit request traces to the OTel gateway (-> Tempo), matching the old vLLM.
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: "http://otel-gateway.monitoring.svc.cluster.local:4318"
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "8"
+        memory: 24Gi
+    service:
+      type: ClusterIP
+      port: 11434

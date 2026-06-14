@@ -2,15 +2,15 @@
 # exists in the cluster:
 #   - chat backend  -> LiteLLM (every model alias: default/smart/fast/...)
 #   - vector store   -> its own pgvector CloudNativePG (knowledge-postgres)
-#   - embeddings     -> the `embeddings` alias (TEI bge-small, 384-dim) via LiteLLM
+#   - embeddings     -> the `embeddings` alias (nomic-embed-text, 768-dim) via LiteLLM
 #   - doc extraction -> the in-cluster Docling service (PDF/DOCX/... -> text)
 # Upload a document in the UI and it is parsed by Docling, embedded by the cluster
 # embedder, and stored in pgvector for retrieval-augmented chat.
 #
 # Env var names verified against open-webui source (config.py / env.py):
 # PGVECTOR_DB_URL (must start "postgres"), DOCLING_SERVER_URL, WEBUI_SECRET_KEY
-# (mandatory or the server exits). The embedding model is 384-dim, so the pgvector
-# column length is pinned to 384 to match (default 1536 would reject inserts).
+# (mandatory or the server exits). The embedding model is 768-dim, so the pgvector
+# column length is pinned to 768 to match (default 1536 would reject inserts).
 #
 # VERIFY-BEFORE-DEPLOY: pin a concrete open-webui image tag; confirm the app can
 # write to the NFS-backed /app/backend/data PVC (NFS root-squash can block a
@@ -68,10 +68,10 @@ spec:
             # --- Vector store: pgvector (knowledge-postgres) ---
             - name: VECTOR_DB
               value: "pgvector"
-            # Match the bge-small embedding dimensionality (384); the default 1536
-            # would create a vector(1536) column and reject 384-dim inserts.
+            # Match the nomic-embed-text dimensionality (768); the default 1536
+            # would create a vector(1536) column and reject 768-dim inserts.
             - name: PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
-              value: "384"
+              value: "768"
             # --- RAG embeddings: the `embeddings` alias via LiteLLM ---
             - name: RAG_EMBEDDING_ENGINE
               value: "openai"

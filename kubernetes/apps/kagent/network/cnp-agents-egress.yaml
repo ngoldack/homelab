@@ -47,11 +47,8 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kagent
-    # In-cluster vLLM model Service (the LLM backend).
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: vllm
-    # LiteLLM central model layer (agents reach models via aliases here).
+    # LiteLLM central model layer (agents reach all models via aliases here; the
+    # concrete backend is Ollama, which agents never contact directly).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: litellm

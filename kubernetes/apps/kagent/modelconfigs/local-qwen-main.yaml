@@ -1,7 +1,8 @@
 # Primary reasoning/tool-use model — routed through LiteLLM (the central model
-# layer). The `default` alias maps to a concrete backend in apps/litellm/config;
-# switch the model there without touching this ModelConfig. vLLM needs no auth;
-# the kagent-vllm secret carries the dummy key the OpenAI client wants.
+# layer). The `default` alias maps to a concrete backend in apps/litellm/config
+# (now Ollama on the P100s); switch the model there without touching this
+# ModelConfig. The backend needs no auth; the kagent-vllm secret carries the
+# dummy key the OpenAI client wants.
 #
 # VERIFY-BEFORE-DEPLOY: confirm the ModelConfig apiVersion/fields against the
 # installed kagent CRDs (group kagent.dev; spec targets v1alpha2).

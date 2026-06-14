@@ -35,6 +35,25 @@ spec:
         name: mcp-gateway-token
         key: authorization
 ---
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: n8n-tools
+  namespace: kagent
+spec:
+  description: "n8n workflow tools (Signal notifications, workflow triggers)."
+  protocol: STREAMABLE_HTTP
+  # Routed through agentgateway (JWT + CEL enforcement) instead of direct.
+  url: "http://agentgateway-proxy.agentgateway-system.svc.cluster.local/mcp/n8n"
+  timeout: 30s
+  terminateOnClose: true
+  headersFrom:
+    - name: Authorization
+      valueFrom:
+        type: Secret
+        name: mcp-gateway-token
+        key: authorization
+---
 # Web search + page fetch for the deep-research pipeline (mcp-searxng, in the
 # `research` namespace, backed by our SearXNG). One server exposes both
 # searxng_web_search and web_url_read (fetch). Reached DIRECTLY for now (so the

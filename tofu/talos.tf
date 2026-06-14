@@ -189,6 +189,23 @@ data "talos_machine_configuration" "worker" {
         }
       }),
     ],
+    # NVIDIA kernel modules — only on GPU pools (paired with the nonfree-kmod-nvidia
+    # + nvidia-container-toolkit extensions in the pool's `extensions`). Loading
+    # these on a node without the driver/GPU would error, so it is gated on gpu=true.
+    each.value.gpu ? [
+      yamlencode({
+        machine = {
+          kernel = {
+            modules = [
+              { name = "nvidia" },
+              { name = "nvidia_uvm" },
+              { name = "nvidia_drm" },
+              { name = "nvidia_modeset" },
+            ]
+          }
+        }
+      }),
+    ] : [],
     # System extensions — merges cluster-wide defaults with per-pool extras.
     # Extensions are baked into Talos during installation (first boot from ISO).
     length(concat(var.talos_default_extensions, each.value.extensions)) > 0 ? [

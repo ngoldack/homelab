@@ -108,6 +108,16 @@ variable "node_pools" {
     talos_role        = string                     # "controlplane" or "worker"
     extensions        = optional(list(string), []) # per-pool Talos system extension images (merged with talos_default_extensions)
     enable_secure_nic = optional(bool, false)      # attach the secondary VLAN-isolated NIC to nodes in this pool
+    gpu               = optional(bool, false)      # load the NVIDIA kernel modules on this pool (pair with the nvidia extensions + hostpci)
+    # Proxmox PCIe passthrough devices (e.g. the Tesla P100s). Each entry maps one
+    # host PCI device into the VM. `id` is the host PCI address from `lspci -nn` on
+    # the Proxmox host (the host must have IOMMU/vfio configured for passthrough).
+    hostpci = optional(list(object({
+      device = string           # VM slot: "hostpci0", "hostpci1", ...
+      id     = optional(string) # host PCI address, e.g. "0000:01:00" (whole device)
+      pcie   = optional(bool, true)
+      rombar = optional(bool, true)
+    })), [])
     taints = optional(list(object({
       key    = string
       value  = optional(string, "")
@@ -143,8 +153,27 @@ variable "node_pools" {
       disk_size  = 256
       count      = 1
       talos_role = "worker"
+      # 3x Tesla P100 (Pascal). vLLM dropped Pascal, so this node runs Ollama
+      # (llama.cpp) which still supports it. NVIDIA driver kmod + container
+      # toolkit ship as Talos system extensions; the kernel modules are loaded
+      # via gpu=true below.
+      # VERIFY-BEFORE-DEPLOY: these extension tags MUST match the Talos version
+      # (v1.13.3) AND a driver branch that still supports Pascal (the -production
+      # 535/550 branch does; the newest branches drop it). Generate the exact
+      # tags from the Talos Image Factory / github.com/siderolabs/extensions.
       extensions = [
         "ghcr.io/siderolabs/gvisor:20260427.0",
+        "ghcr.io/siderolabs/nonfree-kmod-nvidia-production:535.247.01-v1.13.3",
+        "ghcr.io/siderolabs/nvidia-container-toolkit-production:535.247.01-v1.17.8",
+      ]
+      gpu = true
+      # VERIFY-BEFORE-DEPLOY: replace the `id`s with the real host PCI addresses
+      # from `lspci -nn | grep -i nvidia` on the Proxmox host, and ensure the host
+      # has IOMMU + vfio-pci bound to the P100s. Whole-device passthrough (no mdev).
+      hostpci = [
+        { device = "hostpci0", id = "0000:01:00" },
+        { device = "hostpci1", id = "0000:02:00" },
+        { device = "hostpci2", id = "0000:03:00" },
       ]
       enable_secure_nic = false
       taints = [

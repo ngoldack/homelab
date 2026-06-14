@@ -11,6 +11,8 @@ locals {
         index             = idx
         enable_secure_nic = pool.enable_secure_nic
         extensions        = pool.extensions
+        gpu               = pool.gpu
+        hostpci           = pool.hostpci
         taints            = pool.taints
       }
     }
@@ -72,6 +74,19 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # CDROM drive to boot into Talos live installation ISO
   cdrom {
     file_id = proxmox_download_file.talos_iso.id
+  }
+
+  # PCIe passthrough — maps host GPUs (e.g. the Tesla P100s) into this VM. Only
+  # populated for pools with `hostpci` set (worker-ai). Requires IOMMU + vfio-pci
+  # on the Proxmox host.
+  dynamic "hostpci" {
+    for_each = { for h in each.value.hostpci : h.device => h }
+    content {
+      device = hostpci.value.device
+      id     = hostpci.value.id
+      pcie   = hostpci.value.pcie
+      rombar = hostpci.value.rombar
+    }
   }
 
   operating_system {

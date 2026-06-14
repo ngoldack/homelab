@@ -13,5 +13,7 @@ resources:
   - helmrelease-otel-gateway.yaml
   - helmrelease-tempo.yaml
   - tempo-s3.yaml
+  - alertmanager.yaml
+  - vmalert.yaml
   - netbird.yaml
   - dashboards

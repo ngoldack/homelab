@@ -63,10 +63,13 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: n8n
-    # Arize Phoenix (OTLP trace export).
+    # Arize Phoenix + the OTel gateway (OTLP trace export -> Tempo + Phoenix).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: phoenix
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
     # agentgateway MCP proxy (effective once RemoteMCPServers are rerouted).
     - toEndpoints:
         - matchLabels:

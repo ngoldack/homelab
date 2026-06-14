@@ -120,14 +120,14 @@ spec:
       enabled: false
     cilium-debug-agent:
       enabled: false
-    # Emit OpenTelemetry traces to Arize Phoenix (OSS LLM trace observability).
-    # Phoenix's OTLP collector listens on gRPC :4317.
+    # Emit OpenTelemetry traces to the OTel gateway, which fans them out to BOTH
+    # Tempo (infra trace correlation) and Phoenix (LLM-specific analysis).
     otel:
       tracing:
         enabled: true
         exporter:
           otlp:
-            endpoint: "phoenix.phoenix.svc.cluster.local:4317"
+            endpoint: "otel-gateway.monitoring.svc.cluster.local:4317"
             protocol: "grpc"
             insecure: true
     # Agent Substrate (gVisor) wiring so SandboxAgents (finance/mail) can run.

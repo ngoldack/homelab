@@ -1,0 +1,111 @@
+# vmalert — evaluates alerting rules against VictoriaMetrics and pushes firing
+# alerts to Alertmanager (-> n8n -> Signal). Starter rules below; extend as the
+# OTel prometheus scrape (helmrelease-otel-collector) captures more /metrics.
+#
+# VERIFY-BEFORE-DEPLOY: pin the image tag; rules beyond `up`-based ones need their
+# source /metrics to actually be scraped (e.g. kube-state-metrics for pod/restart
+# rules is NOT deployed — add it or rely on khook for pod events).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-rules
+  namespace: monitoring
+data:
+  homelab.yaml: |
+    groups:
+      - name: homelab-core
+        rules:
+          - alert: TargetDown
+            expr: up == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Scrape target down: {{ $labels.job }} / {{ $labels.instance }}"
+          - alert: CertificateExpiringSoon
+            # cert-manager exposes this once its /metrics is scraped.
+            expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 7 * 24 * 3600
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: "Certificate {{ $labels.name }} expires in < 7 days"
+          - alert: VMSelfMissingData
+            expr: absent(up{job="victoriametrics"})
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "VictoriaMetrics has no self-scrape data"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmalert
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: vmalert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmalert
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmalert
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vmalert
+          # renovate: datasource=docker depName=victoriametrics/vmalert
+          image: victoriametrics/vmalert:v1.111.0
+          args:
+            - "--datasource.url=http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428"
+            - "--remoteWrite.url=http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428"
+            - "--notifier.url=http://alertmanager.monitoring.svc.cluster.local:9093"
+            - "--rule=/etc/vmalert/rules/*.yaml"
+            - "--evaluationInterval=30s"
+          ports:
+            - name: http
+              containerPort: 8880
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/vmalert/rules
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: rules
+          configMap:
+            name: vmalert-rules
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmalert
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: vmalert
+spec:
+  selector:
+    app.kubernetes.io/name: vmalert
+  ports:
+    - name: http
+      port: 8880
+      targetPort: 8880

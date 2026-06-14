@@ -16,7 +16,9 @@ metadata:
     app.kubernetes.io/name: qwen3-coder-80b
     app.kubernetes.io/part-of: vllm
 spec:
-  replicas: 1
+  # No static `replicas`: the KEDA HTTP add-on (httpscaledobject-coder.yaml) owns
+  # the replica count and scales this 0<->1 on demand. Pinning a value here would
+  # let Flux reset it and fight the scaler back up from zero.
   strategy:
     # Big model + single node: never run two copies at once (would OOM).
     type: Recreate

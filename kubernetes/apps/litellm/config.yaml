@@ -16,16 +16,27 @@ metadata:
 data:
   config.yaml: |
     model_list:
+      # default/smart route through the KEDA HTTP interceptor so the 80B coder
+      # model can idle at zero replicas and wake on the first request. The
+      # interceptor routes by the Host header to the qwen3-coder-80b Service.
+      # VERIFY-BEFORE-DEPLOY: confirm LiteLLM forwards extra_headers.Host on the
+      # wire (some HTTP clients derive Host from the URL authority instead). If it
+      # does not, point api_base back at the Service and instead wake the model
+      # via a KEDA Prometheus trigger on litellm request metrics.
       - model_name: default
         litellm_params:
           model: openai/qwen3-coder-80b
-          api_base: http://qwen3-coder-80b.vllm.svc.cluster.local/v1
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
           api_key: dummy
+          extra_headers:
+            Host: qwen3-coder-80b.vllm
       - model_name: smart
         litellm_params:
           model: openai/qwen3-coder-80b
-          api_base: http://qwen3-coder-80b.vllm.svc.cluster.local/v1
+          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
           api_key: dummy
+          extra_headers:
+            Host: qwen3-coder-80b.vllm
       - model_name: fast
         litellm_params:
           model: openai/qwen3-8b

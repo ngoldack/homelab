@@ -44,7 +44,7 @@ spec:
           effect: "NoSchedule"
       initContainers:
         - name: fetch-model
-          image: amazon/aws-cli:2.31.21
+          image: amazon/aws-cli:2.34.63
           command:
             - /bin/sh
             - -c

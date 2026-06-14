@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nvidia-device-plugin
+  labels:
+    # The device plugin needs privileged access to the GPU device nodes.
+    pod-security.kubernetes.io/enforce: privileged

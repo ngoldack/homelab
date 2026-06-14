@@ -63,6 +63,7 @@ spec:
     additionalDataSources:
       - name: VictoriaMetrics
         type: prometheus
+        uid: victoriametrics
         access: proxy
         url: http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428
         isDefault: true
@@ -71,6 +72,7 @@ spec:
           timeInterval: 15s
       - name: Loki
         type: loki
+        uid: loki
         access: proxy
         url: http://loki.monitoring.svc.cluster.local:3100
         jsonData:

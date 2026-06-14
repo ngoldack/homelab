@@ -10,6 +10,9 @@ configMapGenerator:
   - name: ai-platform-summary-dashboard
     files:
       - ai-platform-summary.json
+  - name: container-logs-dashboard
+    files:
+      - container-logs.json
 
 generatorOptions:
   labels:

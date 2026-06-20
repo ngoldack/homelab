@@ -65,7 +65,7 @@ spec:
         - name: vllm
           # CPU-only build (AVX2). GPU upgrade path: swap to vllm/vllm-openai
           # and add --device=cuda + nvidia.com/gpu resources.
-          image: vllm/vllm-openai-cpu:v0.22.0-x86_64
+          image: vllm/vllm-openai-cpu:v0.23.0-x86_64
           command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - "--model"

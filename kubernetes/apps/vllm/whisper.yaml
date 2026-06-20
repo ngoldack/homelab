@@ -58,7 +58,7 @@ spec:
               mountPath: /models
       containers:
         - name: vllm
-          image: vllm/vllm-openai-cpu:v0.22.0-x86_64
+          image: vllm/vllm-openai-cpu:v0.23.0-x86_64
           command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - "--model"

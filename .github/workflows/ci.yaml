@@ -80,6 +80,10 @@ jobs:
         run: |
           set -euo pipefail
           kustomize_install="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
+          # GitHub runners now pre-install kustomize; install_kustomize.sh aborts
+          # ("exists. Remove it first.") if the target is present, so clear it to
+          # pin our version.
+          sudo rm -f /usr/local/bin/kustomize
           curl -fsSL "$kustomize_install" | bash -s -- 5.4.3 /usr/local/bin
           kubeconform_url="https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
           curl -fsSL "$kubeconform_url" | tar -xz -C /usr/local/bin kubeconform

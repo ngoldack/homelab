@@ -31,16 +31,23 @@ spec:
     # - tns-tank-nfs:    tank (HDD) over NFS — huge files / media libraries (Emby)
     # - tns-fast-nfs:    fast (NVMe) over NFS — default tier for config/general PVCs
     # - tns-fast-nvmeof: fast (NVMe) over NVMe-oF — databases / high-performance block
+    #
+    # reclaimPolicy: Retain on ALL tiers — deleting a PVC/PV MUST NOT delete the
+    # underlying TrueNAS (nas-main) dataset. Volumes are reclaimed manually on the NAS.
+    # VERIFY-BEFORE-DEPLOY: confirm the tns-csi chart honors per-class reclaimPolicy.
     storageClasses:
       - name: tns-tank-nfs
         protocol: nfs
         pool: tank
         defaultClass: false
+        reclaimPolicy: Retain
       - name: tns-fast-nfs
         protocol: nfs
         pool: fast
         defaultClass: true
+        reclaimPolicy: Retain
       - name: tns-fast-nvmeof
         protocol: nvmeof
         pool: fast
         defaultClass: false
+        reclaimPolicy: Retain

@@ -1,34 +1,5 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Application toggle list: each entry is a directory under kubernetes/apps that
-# Flux reconciles. Comment out or remove a line to disable that app (Flux prunes
-# it on the next reconcile); add it back to re-enable.
-resources:
-  - authentik
-  # GPU model server (Ollama on the P100s) + central model-routing layer
-  - ollama
-  - litellm
-  # Speech-to-text (Whisper via Speaches, CPU, OpenAI-compatible)
-  - whisper
-  - searxng
-  - n8n
-  - mem0
-  - phoenix
-  - kagent
-  # Deep-research backend (mcp-searxng search+fetch MCP; gpt-researcher engine)
-  - research
-  # Edge stack (runs on the Hetzner edge node)
-  - technitium
-  - authentik-outpost
-  # MCP enforcement proxy (per-agent JWT + CEL tool authz in front of kagent MCP)
-  - agentgateway
-  # Home automation
-  - mqtt
-  - zigbee2mqtt
-  - homeassistant
-  # Document tooling (MCP-backing services)
-  - gotenberg
-  - docling
-  - pandoc
-  # Knowledge plane: Open WebUI (chat + doc RAG) on its own pgvector store
-  - knowledge
+# Flux reconciles. v0 (MVP) ships only llama-cpp (added in the llama.cpp step).
+resources: []

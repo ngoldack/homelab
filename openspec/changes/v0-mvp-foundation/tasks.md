@@ -1,10 +1,10 @@
 ## 1. Repo reduction & layout
 
-- [ ] 1.1 Branch `v0-mvp-foundation`; rename `kubernetes/clusters/production` → `kubernetes/clusters/homelab` and fix Flux Kustomization `path:` references
-- [ ] 1.2 Delete out-of-scope apps from `kubernetes/apps/` (vllm, ollama, whisper, knowledge, research, phoenix, seaweedfs, mqtt, zigbee2mqtt, homeassistant, gotenberg, docling, pandoc, mem0, n8n, kagent, agentgateway, authentik, authentik-outpost, technitium, litellm) and remove their entries from `apps/kustomization.yaml`
-- [ ] 1.3 Trim `infrastructure/controllers` to: cilium, gateway-api, nvidia-device-plugin, storage CSI, observability, cert-manager(only if needed by v0 — otherwise defer to v1); delete the rest (spire, tetragon, security/trivy, crowdsec, external-dns, traefik, netbird, agent-substrate, khook, kagent, seaweedfs-operator, emqx-operator, cnpg/valkey operators, keda, headlamp)
-- [ ] 1.4 Trim `infrastructure/configs` to runtime-classes + cilium config; delete kyverno-policies, tetragon-policies, cluster-issuers, edge-ingress, object-storage
-- [ ] 1.5 `kustomize build` all overlays + `yamllint` pass on the reduced tree
+- [x] 1.1 Branch `v0-mvp-foundation`; rename `kubernetes/clusters/production` → `kubernetes/clusters/homelab` and fix Flux Kustomization `path:` references
+- [x] 1.2 Delete out-of-scope apps from `kubernetes/apps/` (vllm, ollama, whisper, knowledge, research, phoenix, seaweedfs, mqtt, zigbee2mqtt, homeassistant, gotenberg, docling, pandoc, mem0, n8n, kagent, agentgateway, authentik, authentik-outpost, technitium, litellm) and remove their entries from `apps/kustomization.yaml`
+- [x] 1.3 Trim `infrastructure/controllers` to: cilium, gateway-api, nvidia-device-plugin, storage CSI, observability, cert-manager(only if needed by v0 — otherwise defer to v1); delete the rest (spire, tetragon, security/trivy, crowdsec, external-dns, traefik, netbird, agent-substrate, khook, kagent, seaweedfs-operator, emqx-operator, cnpg/valkey operators, keda, headlamp)
+- [x] 1.4 Trim `infrastructure/configs` to runtime-classes + cilium config; delete kyverno-policies, tetragon-policies, cluster-issuers, edge-ingress, object-storage
+- [x] 1.5 `kustomize build` all overlays + `yamllint` pass on the reduced tree
 
 ## 2. tofu — single homelab node + GPU
 

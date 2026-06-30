@@ -29,3 +29,15 @@ Model weights SHALL persist across restarts and the server SHALL expose Promethe
 #### Scenario: No re-download on restart
 - **WHEN** the pod restarts
 - **THEN** weights are read from the PVC without re-downloading
+
+### Requirement: Dedicated CPU inference for a large coder model
+The system SHALL serve a large coder model (`qwen3-coder-next`) via llama.cpp on CPU, on a dedicated CPU-only node (72GB), exposed OpenAI-compatible in-cluster under the `coder` alias.
+
+#### Scenario: Coder model runs only on the CPU node
+- **WHEN** the CPU llama.cpp pod is scheduled
+- **THEN** it lands only on the `workload=cpu-inference` node (nodeSelector + toleration of its taint)
+- **AND** it serves completions on CPU (`-ngl 0`) with the model mlock'd into RAM
+
+#### Scenario: Coder model is reachable
+- **WHEN** a client POSTs to `/v1/chat/completions` on the CPU llama.cpp Service
+- **THEN** it receives a completion from the coder model

@@ -114,6 +114,7 @@ variable "node_pools" {
     extensions        = optional(list(string), []) # per-pool Talos system extension images (merged with talos_default_extensions)
     enable_secure_nic = optional(bool, false)      # attach the secondary VLAN-isolated NIC to nodes in this pool
     gpu               = optional(bool, false)      # load the NVIDIA kernel modules on this pool (pair with the nvidia extensions + hostpci)
+    node_labels       = optional(map(string), {})  # Kubernetes node labels applied via Talos machine.nodeLabels
     # Proxmox PCIe passthrough devices (e.g. the Tesla P100s). Each entry maps one
     # host PCI device into the VM. `id` is the host PCI address from `lspci -nn` on
     # the Proxmox host (the host must have IOMMU/vfio configured for passthrough).
@@ -130,14 +131,19 @@ variable "node_pools" {
     })), [])
   }))
   default = {
-    # v0 MVP: a single Talos node on the homelab Proxmox host. It is a control
-    # plane that also schedules all workloads (allowSchedulingOnControlPlanes,
-    # set in talos.tf), with the Tesla P100 passed through. Multi-node / the
-    # dual-P100 ai-host / the Hetzner cloud node arrive in later phases.
+    # v0 homelab compute = two Talos VMs on the pmx-main Proxmox host (96GB total):
+    #   - pmx-main      : control plane + GPU (P100) inference. Small RAM/CPU since
+    #                     the GPU model lives in VRAM; runs the cluster + chat model.
+    #   - cpu-inference : DEDICATED CPU-only model server (72GB, most cores) for a
+    #                     large coder model (qwen3-coder-next) via llama.cpp. Tainted
+    #                     so only the CPU inference workload lands there.
+    # VERIFY-BEFORE-DEPLOY: 20GB + 72GB + Proxmox host overhead is tight on 96GB -
+    # tune the split (or let observability schedule on the CPU node) if the control
+    # plane is starved. Same for cores (6 + 24 of the 7945HX's 32 threads).
     "pmx-main" = {
-      cpu_cores  = 16
-      memory     = 90112 # 88 GB (headroom on the 96GB host)
-      disk_size  = 256
+      cpu_cores  = 6
+      memory     = 20480 # 20 GB (GPU model is in VRAM; rest of the host RAM -> cpu-inference)
+      disk_size  = 128
       count      = 1
       talos_role = "controlplane"
       extensions = []
@@ -148,7 +154,25 @@ variable "node_pools" {
         { device = "hostpci0", id = "0000:01:00" },
       ]
       enable_secure_nic = false
-      taints            = [] # single node: schedulable, no taint
+      taints            = [] # control plane is schedulable (allowSchedulingOnControlPlanes)
+    }
+    "cpu-inference" = {
+      cpu_cores  = 24
+      memory     = 73728 # 72 GB for the large CPU model (mlock'd into RAM)
+      disk_size  = 128
+      count      = 1
+      talos_role = "worker"
+      extensions = []
+      gpu        = false
+      node_labels = {
+        "site"     = "homelab"
+        "workload" = "cpu-inference"
+      }
+      enable_secure_nic = false
+      # Dedicated: only the tolerating CPU-inference workload schedules here.
+      taints = [
+        { key = "workload", value = "cpu-inference", effect = "NoSchedule" },
+      ]
     }
   }
 

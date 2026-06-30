@@ -1,0 +1,125 @@
+# Dedicated CPU-only inference: a large coder model (qwen3-coder-next) served by
+# llama.cpp on the cpu-inference Talos node (72GB RAM, most cores). Separate from
+# the GPU llama-server (chat) - this one is pinned to the tainted CPU node so it
+# gets the whole 72GB and never competes with the GPU/control-plane node.
+#
+# MODEL: qwen3-coder-next is a placeholder name - until its GGUF exists, point -hf
+# at a current Qwen3-Coder GGUF (e.g. a 30B-A3B build). The model is mlock'd into
+# RAM; size the request to the chosen quant (a 30B-A3B Q8 ~32GB; larger fills more
+# of the 72GB).
+#
+# VERIFY-BEFORE-DEPLOY: pin the image tag (CPU `server` build); set the real -hf
+# repo:quant; tune --threads to the node's allocated cores (24) and the memory
+# request to the model size; confirm the cpu-inference node label + taint.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llama-coder-models
+  namespace: llama-cpp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-fast-nfs
+  resources:
+    requests:
+      storage: 80Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-cpp-coder
+  namespace: llama-cpp
+  labels:
+    app.kubernetes.io/name: llama-cpp-coder
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llama-cpp-coder
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llama-cpp-coder
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Dedicated CPU node only.
+      nodeSelector:
+        workload: cpu-inference
+      tolerations:
+        - key: workload
+          value: cpu-inference
+          effect: NoSchedule
+      containers:
+        - name: llama-server
+          # CPU build (no -cuda). renovate: datasource=docker depName=ghcr.io/ggml-org/llama.cpp
+          image: ghcr.io/ggml-org/llama.cpp:server
+          args:
+            # Model: swap to the real qwen3-coder-next GGUF when it exists.
+            - "-hf"
+            - "Qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q8_0"
+            - "--alias"
+            - "coder"
+            # CPU tuning
+            - "-ngl"
+            - "0"
+            - "--threads"
+            - "24"
+            - "--ctx-size"
+            - "16384"
+            - "--cont-batching"
+            - "--parallel"
+            - "2"
+            - "--mlock"
+            # serving
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--metrics"
+          env:
+            - name: HF_HOME
+              value: /models
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "20"
+              memory: 48Gi
+            limits:
+              cpu: "24"
+              memory: 70Gi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: llama-coder-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-cpp-coder
+  namespace: llama-cpp
+  labels:
+    app.kubernetes.io/name: llama-cpp-coder
+spec:
+  selector:
+    app.kubernetes.io/name: llama-cpp-coder
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

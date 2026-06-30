@@ -260,6 +260,14 @@ data "talos_machine_configuration" "worker" {
           }
         }
       }),
+    ] : [],
+    # Node labels — applied at kubelet registration via machine.nodeLabels.
+    length(each.value.node_labels) > 0 ? [
+      yamlencode({
+        machine = {
+          nodeLabels = each.value.node_labels
+        }
+      }),
     ] : []
   )
 }

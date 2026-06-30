@@ -4,3 +4,4 @@ namespace: llama-cpp
 resources:
   - namespace.yaml
   - deployment.yaml
+  - deployment-cpu.yaml

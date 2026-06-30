@@ -54,10 +54,15 @@ variable "talos_default_extensions" {
   description = "Talos system extension images installed on every node. Applied before per-pool extensions. See https://github.com/siderolabs/extensions for available images."
   type        = list(string)
   default = [
-    "ghcr.io/siderolabs/netbird:0.71.2",     # WireGuard-based Zero Trust overlay network
-    "ghcr.io/siderolabs/nvme-cli:v2.14",     # NVMe-oF command line interface
-    "ghcr.io/siderolabs/iscsi-tools:v0.2.0", # iSCSI initiator tools (required for Longhorn, etc.)
-    "ghcr.io/siderolabs/nfs-utils:v0.1.1",   # rpcbind + rpc.statd for NFSv3 file locking
+    "ghcr.io/siderolabs/nvme-cli:v2.14",     # NVMe-oF CLI (tns-fast-nvmeof tier)
+    "ghcr.io/siderolabs/iscsi-tools:v0.2.0", # iSCSI initiator tools
+    "ghcr.io/siderolabs/nfs-utils:v0.1.1",   # NFS client (tns-*-nfs tiers)
+    # NVIDIA driver kmod + container toolkit for the P100 (single-node = the
+    # control-plane IS the GPU node, so these must be cluster-wide defaults).
+    # VERIFY-BEFORE-DEPLOY: pin tags matching the Talos version AND a Pascal-
+    # supporting driver (the host runs 580.159.04); generate from the Image Factory.
+    "ghcr.io/siderolabs/nonfree-kmod-nvidia-production:535.247.01-v1.13.3",
+    "ghcr.io/siderolabs/nvidia-container-toolkit-production:535.247.01-v1.17.8",
   ]
 }
 
@@ -125,60 +130,25 @@ variable "node_pools" {
     })), [])
   }))
   default = {
-    "master" = {
-      cpu_cores         = 4
-      memory            = 4096 # 4 GB
-      disk_size         = 32
-      count             = 1
-      talos_role        = "controlplane"
-      extensions        = []
-      enable_secure_nic = false
-      taints            = []
-    }
-    "worker-default" = {
-      cpu_cores  = 8
-      memory     = 24576 # 24 GB
-      disk_size  = 64
-      count      = 1
-      talos_role = "worker"
-      extensions = [
-        "ghcr.io/siderolabs/gvisor:20260427.0",
-      ]
-      enable_secure_nic = false
-      taints            = []
-    }
-    "worker-ai" = {
-      cpu_cores  = 12
-      memory     = 86016 # 84 GB
+    # v0 MVP: a single Talos node on the homelab Proxmox host. It is a control
+    # plane that also schedules all workloads (allowSchedulingOnControlPlanes,
+    # set in talos.tf), with the Tesla P100 passed through. Multi-node / the
+    # dual-P100 ai-host / the Hetzner cloud node arrive in later phases.
+    "pmx-main" = {
+      cpu_cores  = 16
+      memory     = 90112 # 88 GB (headroom on the 96GB host)
       disk_size  = 256
       count      = 1
-      talos_role = "worker"
-      # 3x Tesla P100 (Pascal). vLLM dropped Pascal, so this node runs Ollama
-      # (llama.cpp) which still supports it. NVIDIA driver kmod + container
-      # toolkit ship as Talos system extensions; the kernel modules are loaded
-      # via gpu=true below.
-      # VERIFY-BEFORE-DEPLOY: these extension tags MUST match the Talos version
-      # (v1.13.3) AND a driver branch that still supports Pascal (the -production
-      # 535/550 branch does; the newest branches drop it). Generate the exact
-      # tags from the Talos Image Factory / github.com/siderolabs/extensions.
-      extensions = [
-        "ghcr.io/siderolabs/gvisor:20260427.0",
-        "ghcr.io/siderolabs/nonfree-kmod-nvidia-production:535.247.01-v1.13.3",
-        "ghcr.io/siderolabs/nvidia-container-toolkit-production:535.247.01-v1.17.8",
-      ]
-      gpu = true
-      # VERIFY-BEFORE-DEPLOY: replace the `id`s with the real host PCI addresses
-      # from `lspci -nn | grep -i nvidia` on the Proxmox host, and ensure the host
-      # has IOMMU + vfio-pci bound to the P100s. Whole-device passthrough (no mdev).
+      talos_role = "controlplane"
+      extensions = []
+      gpu        = true
+      # VERIFY-BEFORE-DEPLOY: set the real host PCI id from `lspci -nn | grep -i
+      # nvidia`; the Proxmox host needs IOMMU + vfio-pci bound to the P100.
       hostpci = [
         { device = "hostpci0", id = "0000:01:00" },
-        { device = "hostpci1", id = "0000:02:00" },
-        { device = "hostpci2", id = "0000:03:00" },
       ]
       enable_secure_nic = false
-      taints = [
-        { key = "ai", value = "true", effect = "NoSchedule" },
-      ]
+      taints            = [] # single node: schedulable, no taint
     }
   }
 
@@ -207,23 +177,4 @@ variable "node_pools" {
   }
 }
 
-# --- Hetzner edge node (edge.tf) ---
-
-variable "hetzner_edge_server_type" {
-  description = "Hetzner Cloud server type for the edge node"
-  type        = string
-  default     = "cx22" # 2 vCPU / 4 GB, ~EUR 3.49/mo
-}
-
-variable "hetzner_edge_location" {
-  description = "Hetzner Cloud location for the edge node"
-  type        = string
-  default     = "nbg1" # Nuremberg
-}
-
-variable "edge_admin_ips" {
-  description = "CIDRs allowed to reach the edge Talos API (port 50000)."
-  type        = list(string)
-  # VERIFY-BEFORE-DEPLOY: restrict to your admin / mesh CIDRs (spec: admins only).
-  default = ["0.0.0.0/0"]
-}
+# Hetzner cloud/edge variables + hcloud provider arrive in v1 (public ingress).

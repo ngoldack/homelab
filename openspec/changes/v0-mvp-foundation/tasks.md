@@ -8,9 +8,9 @@
 
 ## 2. tofu — single homelab node + GPU
 
-- [ ] 2.1 Reduce `node_pools` to one `pmx-main` node (control-plane, schedulable); remove edge.tf / multi-node pools; add `site=homelab` nodeLabel
-- [ ] 2.2 Add NVIDIA Talos extensions + kernel modules pinned to a Pascal-supporting `580.159.04` build; gate on `gpu=true`
-- [ ] 2.3 `tofu fmt` + `tofu init -backend=false && tofu validate` pass
+- [x] 2.1 Reduce `node_pools` to one `pmx-main` node (control-plane, schedulable); remove edge.tf / multi-node pools; add `site=homelab` nodeLabel
+- [x] 2.2 Add NVIDIA Talos extensions + kernel modules pinned to a Pascal-supporting `580.159.04` build; gate on `gpu=true`
+- [x] 2.3 `tofu fmt` + `tofu init -backend=false && tofu validate` pass
 
 ## 3. Cilium networking
 

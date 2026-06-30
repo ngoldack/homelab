@@ -70,28 +70,28 @@ spec:
         jsonData:
           prometheusType: Prometheus
           timeInterval: 15s
-      - name: Loki
-        type: loki
-        uid: loki
+      - name: VictoriaLogs
+        # Requires the victoriametrics-logs-datasource plugin (installed below).
+        type: victoriametrics-logs-datasource
+        uid: victorialogs
         access: proxy
-        url: http://loki.monitoring.svc.cluster.local:3100
-        jsonData:
-          maxLines: 1000
-      - name: Tempo
-        type: tempo
+        url: http://victoria-logs-single-server.monitoring.svc.cluster.local:9428
+      - name: VictoriaTraces
+        # VictoriaTraces exposes a Jaeger-compatible query API.
+        # VERIFY-BEFORE-DEPLOY: confirm the datasource type/URL for your release.
+        type: jaeger
+        uid: victoriatraces
         access: proxy
-        url: http://tempo.monitoring.svc.cluster.local:3200
+        url: http://victoria-traces.monitoring.svc.cluster.local:10428
         jsonData:
-          # Correlate spans with logs (Loki) and exemplar metrics (VictoriaMetrics).
           tracesToLogsV2:
-            datasourceUid: loki
-            filterByTraceID: true
+            datasourceUid: victorialogs
           tracesToMetrics:
             datasourceUid: victoriametrics
-          serviceMap:
-            datasourceUid: victoriametrics
-          nodeGraph:
-            enabled: true
+
+    # VictoriaLogs Grafana datasource plugin.
+    plugins:
+      - victoriametrics-logs-datasource
 
     resources:
       requests:

@@ -1,0 +1,37 @@
+# VictoriaLogs — log storage for the VictoriaMetrics stack (replaces Loki).
+# Ingests OTLP from the OTel collector; queried by Grafana via the VictoriaLogs
+# datasource (LogsQL). Service: victoria-logs-single-server:9428.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-logs-single
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: monitoring
+  chart:
+    spec:
+      chart: victoria-logs-single
+      version: "0.x"
+      sourceRef:
+        kind: HelmRepository
+        name: vm
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    server:
+      retentionPeriod: 30d
+      persistentVolume:
+        enabled: true
+        storageClassName: tns-fast-nfs
+        size: 20Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi

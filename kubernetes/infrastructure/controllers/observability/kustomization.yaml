@@ -6,14 +6,12 @@ namespace: monitoring
 resources:
   - namespace.yaml
   - secret.sops.yaml
-  - helmrelease-grafana.yaml
+  # VictoriaMetrics stack: metrics + logs + traces
   - helmrelease-victoriametrics.yaml
-  - helmrelease-loki.yaml
+  - helmrelease-victorialogs.yaml
+  - helmrelease-victoriatraces.yaml
+  # Collection
   - helmrelease-otel-collector.yaml
-  - helmrelease-otel-gateway.yaml
-  - helmrelease-tempo.yaml
-  - tempo-s3.yaml
-  - alertmanager.yaml
-  - vmalert.yaml
-  - netbird.yaml
+  # Dashboards
+  - helmrelease-grafana.yaml
   - dashboards

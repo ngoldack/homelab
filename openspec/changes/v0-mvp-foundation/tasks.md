@@ -24,10 +24,10 @@
 
 ## 5. Observability (VictoriaMetrics stack)
 
-- [ ] 5.1 VictoriaMetrics (single) for metrics + VictoriaLogs for logs + VictoriaTraces for traces (drop Loki/Tempo); PVCs on `standard`
-- [ ] 5.2 One OTel collector DaemonSet (filelog + hostmetrics + OTLP) with `tolerations: [operator: Exists]`; export metrics→VictoriaMetrics, logs→VictoriaLogs, traces→VictoriaTraces (control-plane/GPU node covered)
-- [ ] 5.3 Grafana with VictoriaMetrics + VictoriaLogs + VictoriaTraces datasources (pinned uids) + "Container Logs (All)" and cluster-overview dashboards
-- [ ] 5.4 `kustomize build` + kubeconform + yamllint pass
+- [x] 5.1 VictoriaMetrics (single) for metrics + VictoriaLogs for logs + VictoriaTraces for traces (drop Loki/Tempo); PVCs on `standard`
+- [x] 5.2 One OTel collector DaemonSet (filelog + hostmetrics + OTLP) with `tolerations: [operator: Exists]`; export metrics→VictoriaMetrics, logs→VictoriaLogs, traces→VictoriaTraces (control-plane/GPU node covered)
+- [x] 5.3 Grafana with VictoriaMetrics + VictoriaLogs + VictoriaTraces datasources (pinned uids) + "Container Logs (All)" and cluster-overview dashboards
+- [x] 5.4 `kustomize build` + kubeconform + yamllint pass
 
 ## 6. llama.cpp (qwen3.5:9b on P100)
 

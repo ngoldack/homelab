@@ -20,12 +20,11 @@ spec:
     crds: CreateReplace
   values:
     mode: daemonset
-    # Node-local agent: ships pod/host logs and host metrics. Application traces
-    # and OTLP telemetry go to the otel-gateway (deployment) for tail sampling.
-
-    # Must run on EVERY node, including tainted ones (control-plane, ai, edge),
-    # or those nodes' container logs never reach Loki. A node-local log/metric
-    # agent tolerating all taints is the standard pattern.
+    # Single node-local agent for the whole VictoriaMetrics stack: ships pod logs
+    # (filelog) -> VictoriaLogs, host/pod metrics -> VictoriaMetrics, and OTLP
+    # traces -> VictoriaTraces. No separate gateway tier in the v0 MVP.
+    #
+    # Must run on EVERY node including tainted ones, or those nodes' logs are lost.
     tolerations:
       - operator: Exists
 
@@ -44,13 +43,20 @@ spec:
 
     config:
       exporters:
+        # Metrics -> VictoriaMetrics
         prometheusremotewrite:
           endpoint: "http://victoria-metrics-single-server.monitoring.svc.cluster.local:8428/api/v1/write"
           tls:
             insecure: true
-        otlphttp/loki:
-          # Loki ingests OTLP over HTTP at the /otlp path (not gRPC on 3100).
-          endpoint: "http://loki.monitoring.svc.cluster.local:3100/otlp"
+        # Logs -> VictoriaLogs (OTLP ingestion; otlphttp appends /v1/logs).
+        otlphttp/victorialogs:
+          endpoint: "http://victoria-logs-single-server.monitoring.svc.cluster.local:9428/insert/opentelemetry"
+          tls:
+            insecure: true
+        # Traces -> VictoriaTraces (OTLP ingestion; otlphttp appends /v1/traces).
+        # VERIFY-BEFORE-DEPLOY: confirm VictoriaTraces' OTLP path + port (young project).
+        otlphttp/victoriatraces:
+          endpoint: "http://victoria-traces.monitoring.svc.cluster.local:10428/insert/opentelemetry"
           tls:
             insecure: true
 
@@ -78,7 +84,11 @@ spec:
           logs:
             receivers: [otlp, filelog]
             processors: [memory_limiter, k8sattributes, batch]
-            exporters: [otlphttp/loki]
+            exporters: [otlphttp/victorialogs]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, k8sattributes, batch]
+            exporters: [otlphttp/victoriatraces]
 
     resources:
       requests:

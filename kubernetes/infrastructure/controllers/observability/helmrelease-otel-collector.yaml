@@ -23,6 +23,12 @@ spec:
     # Node-local agent: ships pod/host logs and host metrics. Application traces
     # and OTLP telemetry go to the otel-gateway (deployment) for tail sampling.
 
+    # Must run on EVERY node, including tainted ones (control-plane, ai, edge),
+    # or those nodes' container logs never reach Loki. A node-local log/metric
+    # agent tolerating all taints is the standard pattern.
+    tolerations:
+      - operator: Exists
+
     # contrib distro: includes filelog, hostmetrics, k8sattributes,
     # prometheusremotewrite (the chart requires image.repository to be set).
     image:

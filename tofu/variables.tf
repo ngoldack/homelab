@@ -134,11 +134,11 @@ variable "node_pools" {
     # v0 homelab compute = two Talos VMs on the pmx-main Proxmox host (96GB total):
     #   - pmx-main      : control plane + GPU (P100) inference. Small RAM/CPU since
     #                     the GPU model lives in VRAM; runs the cluster + chat model.
-    #   - cpu-inference : DEDICATED CPU-only model server (72GB, most cores) for a
+    #   - cpu-inference : DEDICATED CPU-only model server (64GB, most cores) for a
     #                     large coder model (qwen3-coder-next) via llama.cpp. Tainted
     #                     so only the CPU inference workload lands there.
-    # VERIFY-BEFORE-DEPLOY: 20GB + 72GB + Proxmox host overhead is tight on 96GB -
-    # tune the split (or let observability schedule on the CPU node) if the control
+    # VERIFY-BEFORE-DEPLOY: 20GB + 64GB leaves ~12GB host overhead on 96GB - tune
+    # the split (or let observability schedule on the CPU node) if the control
     # plane is starved. Same for cores (6 + 24 of the 7945HX's 32 threads).
     "pmx-main" = {
       cpu_cores  = 6
@@ -158,7 +158,7 @@ variable "node_pools" {
     }
     "cpu-inference" = {
       cpu_cores  = 24
-      memory     = 73728 # 72 GB for the large CPU model (mlock'd into RAM)
+      memory     = 65536 # 64 GB for the large CPU model (mlock'd into RAM)
       disk_size  = 128
       count      = 1
       talos_role = "worker"

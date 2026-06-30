@@ -34,7 +34,7 @@
 - [x] 6.1 `apps/llama-cpp`: Deployment with the upstream CUDA `llama-server` image, `runtimeClassName: nvidia`, `nvidia.com/gpu: 1`, node pinned to `site=homelab`
 - [x] 6.2 Pascal tuning args: `-ngl 99`, `--flash-attn`, `--cont-batching`, `--parallel`, `--ctx-size 16384`, `--mlock`, `--metrics`; weights on a `standard` (tns-fast-nfs) PVC; OpenAI-compatible `:8080`; prometheus scrape annotations
 - [x] 6.3 Add `llama-cpp` to `apps/kustomization.yaml`; build + kubeconform pass
-- [x] 6.4 tofu: add the `cpu-inference` node pool (worker, 72GB, 24 cores, `workload=cpu-inference` label + taint); shrink `pmx-main` to ~20GB/6 cores so the 96GB host fits both
+- [x] 6.4 tofu: add the `cpu-inference` node pool (worker, 64GB, 24 cores, `workload=cpu-inference` label + taint); shrink `pmx-main` to ~20GB/6 cores so the 96GB host fits 20+64
 - [x] 6.5 `apps/llama-cpp/deployment-cpu.yaml`: CPU `llama-server` for `qwen3-coder-next` (`-ngl 0`, --threads 24, --mlock, alias `coder`), pinned to the cpu-inference node via nodeSelector + toleration; weights on a tns-fast-nfs PVC
 
 ## 7. Validate & ship

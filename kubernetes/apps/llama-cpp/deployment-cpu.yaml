@@ -1,12 +1,12 @@
 # Dedicated CPU-only inference: a large coder model (qwen3-coder-next) served by
-# llama.cpp on the cpu-inference Talos node (72GB RAM, most cores). Separate from
+# llama.cpp on the cpu-inference Talos node (64GB RAM, most cores). Separate from
 # the GPU llama-server (chat) - this one is pinned to the tainted CPU node so it
-# gets the whole 72GB and never competes with the GPU/control-plane node.
+# gets the whole 64GB and never competes with the GPU/control-plane node.
 #
 # MODEL: qwen3-coder-next is a placeholder name - until its GGUF exists, point -hf
 # at a current Qwen3-Coder GGUF (e.g. a 30B-A3B build). The model is mlock'd into
 # RAM; size the request to the chosen quant (a 30B-A3B Q8 ~32GB; larger fills more
-# of the 72GB).
+# of the 64GB).
 #
 # VERIFY-BEFORE-DEPLOY: pin the image tag (CPU `server` build); set the real -hf
 # repo:quant; tune --threads to the node's allocated cores (24) and the memory
@@ -97,10 +97,10 @@ spec:
           resources:
             requests:
               cpu: "20"
-              memory: 48Gi
+              memory: 40Gi
             limits:
               cpu: "24"
-              memory: 70Gi
+              memory: 56Gi
           volumeMounts:
             - name: models
               mountPath: /models

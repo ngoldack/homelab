@@ -8,7 +8,7 @@
 
 ## 2. tofu — single homelab node + GPU
 
-- [x] 2.1 Reduce `node_pools` to one `pmx-main` node (control-plane, schedulable); remove edge.tf / multi-node pools; add `site=homelab` nodeLabel
+- [x] 2.1 Define `node_pools` as 4 VMs on pmx-main (cp + wk + wk-gpu + wk-cpu), site=homelab labels; remove edge.tf / multi-site pools
 - [x] 2.2 Add NVIDIA Talos extensions + kernel modules pinned to a Pascal-supporting `580.159.04` build; gate on `gpu=true`
 - [x] 2.3 `tofu fmt` + `tofu init -backend=false && tofu validate` pass
 
@@ -34,7 +34,7 @@
 - [x] 6.1 `apps/llama-cpp`: Deployment with the upstream CUDA `llama-server` image, `runtimeClassName: nvidia`, `nvidia.com/gpu: 1`, node pinned to `site=homelab`
 - [x] 6.2 Pascal tuning args: `-ngl 99`, `--flash-attn`, `--cont-batching`, `--parallel`, `--ctx-size 16384`, `--mlock`, `--metrics`; weights on a `standard` (tns-fast-nfs) PVC; OpenAI-compatible `:8080`; prometheus scrape annotations
 - [x] 6.3 Add `llama-cpp` to `apps/kustomization.yaml`; build + kubeconform pass
-- [x] 6.4 tofu: add the `cpu-inference` node pool (worker, 64GB, 24 cores, `workload=cpu-inference` label + taint); shrink `pmx-main` to ~20GB/6 cores so the 96GB host fits 20+64
+- [x] 6.4 tofu: 4 node pools on pmx-main (cp 4GB, wk 12GB, wk-gpu 12GB+P100, wk-cpu 64GB tainted); NVIDIA extensions per-pool on wk-gpu only
 - [x] 6.5 `apps/llama-cpp/deployment-cpu.yaml`: CPU `llama-server` for `qwen3-coder-next` (`-ngl 0`, --threads 24, --mlock, alias `coder`), pinned to the cpu-inference node via nodeSelector + toleration; weights on a tns-fast-nfs PVC
 
 ## 7. Validate & ship

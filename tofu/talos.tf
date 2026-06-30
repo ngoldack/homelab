@@ -102,28 +102,12 @@ data "talos_machine_configuration" "controlplane" {
           }
         }
       }),
-      # v0 single node: the control plane also schedules all workloads.
-      yamlencode({
-        cluster = {
-          allowSchedulingOnControlPlanes = true
-        }
-      }),
-      # The single node carries the Tesla P100: load the NVIDIA kernel modules
-      # (driver + container toolkit ship via talos_default_extensions) and label
-      # the node so workloads can target it (site=homelab, ai=true).
+      # Dedicated control plane (4-node topology): NOT schedulable, no GPU.
+      # Label it with its site; all workloads run on the worker pools.
       yamlencode({
         machine = {
-          kernel = {
-            modules = [
-              { name = "nvidia" },
-              { name = "nvidia_uvm" },
-              { name = "nvidia_drm" },
-              { name = "nvidia_modeset" },
-            ]
-          }
           nodeLabels = {
             "site" = "homelab"
-            "ai"   = "true"
           }
         }
       }),

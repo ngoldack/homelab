@@ -1,12 +1,12 @@
 ## ADDED Requirements
 
-### Requirement: Single-node Talos cluster on the homelab main host
-The system SHALL provision a Talos OS Kubernetes node as a virtual machine on the Proxmox VE host `pmx-main` (homelab site) and bootstrap a single-node cluster that schedules workloads on the control plane. The homelab host is always Proxmox; Talos is never installed bare-metal.
+### Requirement: Talos cluster on the homelab main host
+The system SHALL provision four Talos VMs on the Proxmox VE host `pmx-main` (homelab site) and bootstrap a cluster: a dedicated control plane (`cp`), a general worker (`wk`), a GPU worker (`wk-gpu`, P100 passthrough), and a dedicated CPU-inference worker (`wk-cpu`, tainted). The homelab host is always Proxmox; Talos is never installed bare-metal.
 
 #### Scenario: Cluster reachable after bootstrap
-- **WHEN** the Talos machine config is applied and the cluster is bootstrapped
-- **THEN** `kubectl get nodes` reports `pmx-main` in `Ready` state
-- **AND** the node is labelled with its site (`site=homelab`)
+- **WHEN** the Talos machine configs are applied and the cluster is bootstrapped
+- **THEN** `kubectl get nodes` reports all four nodes in `Ready` state
+- **AND** every node is labelled with its site (`site=homelab`)
 
 #### Scenario: Talos defers networking to Cilium
 - **WHEN** the machine config is generated

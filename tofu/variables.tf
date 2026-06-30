@@ -57,12 +57,6 @@ variable "talos_default_extensions" {
     "ghcr.io/siderolabs/nvme-cli:v2.14",     # NVMe-oF CLI (tns-fast-nvmeof tier)
     "ghcr.io/siderolabs/iscsi-tools:v0.2.0", # iSCSI initiator tools
     "ghcr.io/siderolabs/nfs-utils:v0.1.1",   # NFS client (tns-*-nfs tiers)
-    # NVIDIA driver kmod + container toolkit for the P100 (single-node = the
-    # control-plane IS the GPU node, so these must be cluster-wide defaults).
-    # VERIFY-BEFORE-DEPLOY: pin tags matching the Talos version AND a Pascal-
-    # supporting driver (the host runs 580.159.04); generate from the Image Factory.
-    "ghcr.io/siderolabs/nonfree-kmod-nvidia-production:535.247.01-v1.13.3",
-    "ghcr.io/siderolabs/nvidia-container-toolkit-production:535.247.01-v1.17.8",
   ]
 }
 
@@ -131,44 +125,64 @@ variable "node_pools" {
     })), [])
   }))
   default = {
-    # v0 homelab compute = two Talos VMs on the pmx-main Proxmox host (96GB total):
-    #   - pmx-main      : control plane + GPU (P100) inference. Small RAM/CPU since
-    #                     the GPU model lives in VRAM; runs the cluster + chat model.
-    #   - cpu-inference : DEDICATED CPU-only model server (64GB, most cores) for a
-    #                     large coder model (qwen3-coder-next) via llama.cpp. Tainted
-    #                     so only the CPU inference workload lands there.
-    # VERIFY-BEFORE-DEPLOY: 20GB + 64GB leaves ~12GB host overhead on 96GB - tune
-    # the split (or let observability schedule on the CPU node) if the control
-    # plane is starved. Same for cores (6 + 24 of the 7945HX's 32 threads).
-    "pmx-main" = {
-      cpu_cores  = 6
-      memory     = 20480 # 20 GB (GPU model is in VRAM; rest of the host RAM -> cpu-inference)
-      disk_size  = 128
+    # v0 homelab compute = four Talos VMs on the pmx-main Proxmox host (96GB / 32
+    # threads, Ryzen 9 7945HX). NVIDIA driver/toolkit ship per-pool on the GPU
+    # worker only (not cluster-wide), so the cp / general / cpu nodes stay clean.
+    # VERIFY-BEFORE-DEPLOY: 4+12+12+64 = 92GB VMs leaves ~4GB host overhead; tune
+    # if Proxmox/ZFS is starved. Cores 2+4+4+20 = 30 (+2 host).
+    "cp" = {
+      cpu_cores  = 2
+      memory     = 4096 # 4 GB - dedicated control plane (not schedulable)
+      disk_size  = 32
       count      = 1
       talos_role = "controlplane"
-      extensions = []
+      node_labels = {
+        "site" = "homelab"
+      }
+    }
+    "wk" = {
+      cpu_cores  = 4
+      memory     = 12288 # 12 GB - general worker (cluster services: observability, etc.)
+      disk_size  = 48
+      count      = 1
+      talos_role = "worker"
+      node_labels = {
+        "site" = "homelab"
+      }
+    }
+    "wk-gpu" = {
+      cpu_cores  = 4
+      memory     = 12288 # 12 GB - GPU model is in VRAM; modest host RAM
+      disk_size  = 48
+      count      = 1
+      talos_role = "worker"
       gpu        = true
-      # VERIFY-BEFORE-DEPLOY: set the real host PCI id from `lspci -nn | grep -i
-      # nvidia`; the Proxmox host needs IOMMU + vfio-pci bound to the P100.
+      # NVIDIA driver kmod + container toolkit (only this pool has the P100).
+      # VERIFY-BEFORE-DEPLOY: pin tags matching the Talos version AND a Pascal-
+      # supporting driver (host runs 580.159.04); generate from the Image Factory.
+      extensions = [
+        "ghcr.io/siderolabs/nonfree-kmod-nvidia-production:535.247.01-v1.13.3",
+        "ghcr.io/siderolabs/nvidia-container-toolkit-production:535.247.01-v1.17.8",
+      ]
+      # VERIFY-BEFORE-DEPLOY: real host PCI id (`lspci -nn | grep -i nvidia`);
+      # Proxmox host needs IOMMU + vfio-pci bound to the P100.
       hostpci = [
         { device = "hostpci0", id = "0000:01:00" },
       ]
-      enable_secure_nic = false
-      taints            = [] # control plane is schedulable (allowSchedulingOnControlPlanes)
+      node_labels = {
+        "site" = "homelab"
+      }
     }
-    "cpu-inference" = {
-      cpu_cores  = 24
-      memory     = 65536 # 64 GB for the large CPU model (mlock'd into RAM)
-      disk_size  = 128
+    "wk-cpu" = {
+      cpu_cores  = 20
+      memory     = 65536 # 64 GB - dedicated CPU model (qwen3-coder-next, mlock'd)
+      disk_size  = 48
       count      = 1
       talos_role = "worker"
-      extensions = []
-      gpu        = false
       node_labels = {
         "site"     = "homelab"
         "workload" = "cpu-inference"
       }
-      enable_secure_nic = false
       # Dedicated: only the tolerating CPU-inference workload schedules here.
       taints = [
         { key = "workload", value = "cpu-inference", effect = "NoSchedule" },

@@ -16,7 +16,7 @@ metadata:
   namespace: seaweedfs
 spec:
   # renovate: datasource=docker depName=chrislusf/seaweedfs
-  image: chrislusf/seaweedfs:3.97
+  image: chrislusf/seaweedfs:3.99
   master:
     replicas: 1
     volumeSizeLimitMB: 30000

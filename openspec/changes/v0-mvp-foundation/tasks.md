@@ -14,13 +14,13 @@
 
 ## 3. Cilium networking
 
-- [ ] 3.1 Cilium HelmRelease: kube-proxy replacement, Hubble, Gateway API, LB-IPAM pool, encryption-ready; Talos `cni:none` + `proxy.disabled`
-- [ ] 3.2 `kustomize build infrastructure/controllers` + kubeconform pass
+- [x] 3.1 Cilium HelmRelease: kube-proxy replacement, Hubble, Gateway API, LB-IPAM pool, encryption-ready; Talos `cni:none` + `proxy.disabled`
+- [x] 3.2 `kustomize build infrastructure/controllers` + kubeconform pass
 
 ## 4. Storage (existing tiers)
 
-- [ ] 4.1 Ensure the TrueNAS CSI driver + the four StorageClasses exist (`tns-fast-nvmeof`, `tns-fast-nfs`, `tns-tank-nfs`, `local-path`); mark `tns-fast-nfs` (standard) as cluster default
-- [ ] 4.2 Verify a default-class PVC binds; document the tier-per-workload rule
+- [x] 4.1 Ensure the TrueNAS CSI driver + the four StorageClasses exist (`tns-fast-nvmeof`, `tns-fast-nfs`, `tns-tank-nfs`, `local-path`); mark `tns-fast-nfs` (standard) as cluster default
+- [x] 4.2 Verify a default-class PVC binds; document the tier-per-workload rule
 
 ## 5. Observability (VictoriaMetrics stack)
 
@@ -37,6 +37,6 @@
 
 ## 7. Validate & ship
 
-- [ ] 7.1 Full matrix: `kustomize build` ×(clusters/homelab, controllers, configs, apps) + `kubeconform -strict -ignore-missing-schemas` + `yamllint -c .yamllint` + `tofu validate`
-- [ ] 7.2 SOPS: any new secret is a `*.sops.yaml`, encrypted in place; `task sops:check` passes
+- [x] 7.1 Full matrix: `kustomize build` ×(clusters/homelab, controllers, configs, apps) + `kubeconform -strict -ignore-missing-schemas` + `yamllint -c .yamllint` + `tofu validate`
+- [x] 7.2 SOPS: any new secret is a `*.sops.yaml`, encrypted in place; `task sops:check` passes
 - [ ] 7.3 Per-group Conventional Commits; open PR; on merge, manual `tofu apply` then `flux reconcile`; verify node Ready, `nvidia.com/gpu`, a `/v1/chat/completions` call, logs in Grafana

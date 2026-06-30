@@ -24,7 +24,7 @@ fragile, meshed independent clusters are not.
 
 ```mermaid
 flowchart LR
-  subgraph HL["homelab (id 1) — Proxmox, all heavy compute"]
+  subgraph HL["home (id 1) — Proxmox, all heavy compute"]
     direction TB
     HLk["4 Talos VMs<br/>cp · wk · wk-gpu · wk-cpu"]
   end
@@ -41,17 +41,17 @@ flowchart LR
 
 | Cluster | Phase | Host | Role |
 |---|---|---|---|
-| **homelab** (id 1) | v0 | Minisforum AR900i (Proxmox) | all heavy compute (LLMs, observability) |
+| **home** (id 1) | v0 | Minisforum AR900i (Proxmox) | all heavy compute (LLMs, observability) |
 | **cloud** (id 2) | v1 | 1 Hetzner VPS | public ingress edge + Hetzner S3 backups |
 | **offsite** (id 3) | v3 | 1 TrueNAS Scale VM (6GB) | DR / remote presence |
 
 Cross-cluster traffic uses **global services** (`service.cilium.io/global: "true"`):
-e.g. a cloud ingress route targets a homelab Service over the mesh. homelab is
+e.g. a cloud ingress route targets a home Service over the mesh. home is
 built **mesh-ready** in v0; cloud + the actual mesh land in v1.
 
 ---
 
-## 2. homelab cluster — node topology
+## 2. home cluster — node topology
 
 Four Talos VMs on the single Proxmox host `pmx-main` (Minisforum AR900i, 96GB /
 32 threads, 1× Tesla P100). Talos is always a Proxmox VM (never bare-metal); the
@@ -112,7 +112,7 @@ flowchart LR
 
 ---
 
-## 4. Storage tiers (homelab — TrueNAS CSI)
+## 4. Storage tiers (home — TrueNAS CSI)
 
 Pick the tier per workload:
 
@@ -157,7 +157,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   Dev["workstation"] -->|git push| Repo["Git repo"]
-  Repo --> FHL["Flux @ homelab<br/>clusters/homelab"]
+  Repo --> FHL["Flux @ home<br/>clusters/home"]
   Repo --> FCL["Flux @ cloud (v1)<br/>clusters/cloud"]
   Repo --> FOS["Flux @ offsite (v3)<br/>clusters/offsite"]
   FHL --> KHL["infrastructure/ + apps/"]
@@ -168,7 +168,7 @@ flowchart LR
   `clusters/<name>/` entrypoint and reconciles a subset.
 - **Secrets:** SOPS + age; every secret is a `*.sops.yaml` encrypted in place
   (key anchored in `.sops.yaml`). Flux decrypts at apply time.
-- **tofu/** provisions the Proxmox VMs (homelab) and the Hetzner cluster (v1);
+- **tofu/** provisions the Proxmox VMs (home) and the Hetzner cluster (v1);
   the offsite TrueNAS VM is created by hand (no provider).
 - **Validation (workstation/CI):** `kustomize build` + `kubeconform -strict`,
   `yamllint`, `tofu validate`, `task sops:check`. Conventional Commits.
@@ -176,13 +176,13 @@ flowchart LR
 ### Repo layout
 
 ```
-clusters/<name>/         Flux entrypoints (homelab; cloud=v1; offsite=v3)
+clusters/<name>/         Flux entrypoints (home; cloud=v1; offsite=v3)
 infrastructure/
-  controllers/           operators, CNI/CSI, observability (homelab)
+  controllers/           operators, CNI/CSI, observability (home)
   configs/               cluster-wide config
   cloud/   (v1)          minimal cloud-cluster infra (Cilium id 2 + mesh + Gateway)
 apps/<app>/              flat, one dir per app (v0: llama-cpp)
-tofu/                    Proxmox + Talos (+ Hetzner in v1)
+tofu/locations/<loc>/    OpenTofu per location (home=Proxmox; cloud=v1; offsite=v3)
 openspec/                the phased plan (v0–v3)
 ```
 
@@ -192,7 +192,7 @@ openspec/                the phased plan (v0–v3)
 
 ```mermaid
 flowchart LR
-  v0["v0 — MVP foundation<br/>homelab cluster (4 VMs)<br/>Cilium · storage · VM-stack<br/>llama.cpp GPU + CPU"]
+  v0["v0 — MVP foundation<br/>home cluster (4 VMs)<br/>Cilium · storage · VM-stack<br/>llama.cpp GPU + CPU"]
   v1["v1 — platform<br/>cloud cluster + Cluster Mesh<br/>ingress · backup(S3) · Authentik<br/>CNPG · Valkey · LiteLLM"]
   v2["v2 — agents<br/>n8n · kagent · agentgateway · mem0<br/>all via LiteLLM → llama.cpp"]
   v3["v3 — offsite<br/>TrueNAS VM cluster<br/>joins mesh for DR"]
@@ -201,7 +201,7 @@ flowchart LR
 
 | Phase | Adds |
 |---|---|
-| **v0** | homelab cluster (cp/wk/wk-gpu/wk-cpu); Cilium; 4 storage tiers; VictoriaMetrics+Logs+Traces+Grafana; llama.cpp (GPU `qwen3.5:9b` + CPU `qwen3-coder-next`). Cilium is built **mesh-ready**. |
+| **v0** | home cluster (cp/wk/wk-gpu/wk-cpu); Cilium; 4 storage tiers; VictoriaMetrics+Logs+Traces+Grafana; llama.cpp (GPU `qwen3.5:9b` + CPU `qwen3-coder-next`). Cilium is built **mesh-ready**. |
 | **v1** | the **cloud** cluster (Hetzner VPS) + **Cilium Cluster Mesh**; public ingress; backups → Hetzner S3; Authentik (SSO); CloudNativePG + Valkey operators; **LiteLLM** in front of llama.cpp. |
 | **v2** | n8n, kagent, agentgateway, mem0 — wired **LiteLLM → llama.cpp** (no model redeploy). |
 | **v3** | the **offsite** cluster (TrueNAS Scale VM) joined to the mesh for disaster recovery / remote presence. |

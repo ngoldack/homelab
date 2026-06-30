@@ -40,7 +40,8 @@ provider "proxmox" {
   # API token auth: "<user>@<realm>!<tokenid>=<uuid>" (read from SOPS). The user is
   # embedded in the token, so no separate username/password is needed. SSH (below)
   # still handles the operations the Proxmox API token cannot perform on its own.
-  api_token = local.proxmox_secrets.proxmox_api_token
+  # Per-host key convention: proxmox_<host>_api_token (host = Proxmox node name).
+  api_token = local.proxmox_secrets["proxmox_pmx-main_api_token"]
   insecure  = true
 
   ssh {

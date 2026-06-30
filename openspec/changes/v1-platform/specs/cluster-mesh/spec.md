@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Cilium Cluster Mesh joins the clusters
-The homelab and cloud clusters SHALL be joined by Cilium Cluster Mesh: each cluster has a unique `cluster.id` and `cluster.name`, a shared/trusted CA, and a reachable `clustermesh-apiserver`.
+The home and cloud clusters SHALL be joined by Cilium Cluster Mesh: each cluster has a unique `cluster.id` and `cluster.name`, a shared/trusted CA, and a reachable `clustermesh-apiserver`.
 
 #### Scenario: Clusters are meshed
-- **WHEN** the mesh is established between homelab (id 1) and cloud (id 2)
+- **WHEN** the mesh is established between home (id 1) and cloud (id 2)
 - **THEN** `cilium clustermesh status` reports both clusters connected and healthy
 
 #### Scenario: Unique identities
 - **WHEN** a cluster is added to the mesh
-- **THEN** it uses a cluster.id/name not used by any other cluster (homelab=1, cloud=2, offsite=3)
+- **THEN** it uses a cluster.id/name not used by any other cluster (home=1, cloud=2, offsite=3)
 
 ### Requirement: Cross-cluster service discovery
 A Service SHALL be reachable from another meshed cluster when marked global.
@@ -23,4 +23,4 @@ The mesh design SHALL allow a third cluster (offsite, id 3) to join later withou
 
 #### Scenario: Offsite can join later
 - **WHEN** the offsite cluster is provisioned (v3)
-- **THEN** it joins the existing mesh by adding cluster.id 3 + the shared CA, no change to homelab/cloud
+- **THEN** it joins the existing mesh by adding cluster.id 3 + the shared CA, no change to home/cloud

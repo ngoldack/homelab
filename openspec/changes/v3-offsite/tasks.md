@@ -6,7 +6,7 @@
 ## 2. Cilium + mesh
 
 - [ ] 2.1 `kubernetes/clusters/offsite/` Flux entrypoint (its own Flux install) with Cilium (cluster.id 3, name offsite, shared mesh CA, clustermesh-apiserver)
-- [ ] 2.2 `cilium clustermesh connect` offsite ↔ homelab and offsite ↔ cloud; authorize the new peer on the others
+- [ ] 2.2 `cilium clustermesh connect` offsite ↔ home and offsite ↔ cloud; authorize the new peer on the others
 - [ ] 2.3 Verify `cilium clustermesh status` healthy across all three clusters
 
 ## 3. Minimal DR workloads

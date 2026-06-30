@@ -8,9 +8,9 @@
 
 - [ ] 2.1 `kubernetes/clusters/cloud/` Flux entrypoint + `infrastructure/cloud/` (own Cilium id 2/name cloud + mesh, shared Gateway CRDs)
 - [ ] 2.2 tofu: re-add the Hetzner VPS as its OWN single-node Talos cluster (separate machine secrets, hcloud provider), `cluster.id=2`, cp schedulable
-- [ ] 2.3 Enable Cluster Mesh on homelab (id 1) too; `cilium clustermesh connect` homelab↔cloud. KEY: the clustermesh-apiserver must be reachable across WAN/NAT — expose via the cloud edge or a WireGuard/VPN transport
+- [ ] 2.3 Enable Cluster Mesh on home (id 1) too; `cilium clustermesh connect` home↔cloud. KEY: the clustermesh-apiserver must be reachable across WAN/NAT — expose via the cloud edge or a WireGuard/VPN transport
 - [ ] 2.4 Verify `cilium clustermesh status` healthy + a global Service (`service.cilium.io/global: "true"`) resolves cross-cluster
-- [ ] 2.5 Cilium Gateway on the cloud cluster; external traffic routes to homelab global Services
+- [ ] 2.5 Cilium Gateway on the cloud cluster; external traffic routes to home global Services
 
 ## 3. cert-manager + TLS
 

@@ -63,7 +63,7 @@ jobs:
           tofu_wrapper: false
 
       - name: Validate OpenTofu
-        working-directory: tofu
+        working-directory: tofu/locations/home
         env:
           # Throwaway passphrase: init builds the pbkdf2 key eagerly, but no real
           # state is read or written during fmt/validate.
@@ -92,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           for overlay in \
-            kubernetes/clusters/production \
+            kubernetes/clusters/home \
             kubernetes/infrastructure/controllers \
             kubernetes/infrastructure/configs \
             kubernetes/apps; do

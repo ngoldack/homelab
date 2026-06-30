@@ -9,8 +9,8 @@ The system SHALL run a single-node Talos cluster on a TrueNAS Scale VM (6GB, con
 
 #### Scenario: Offsite joins the existing mesh
 - **WHEN** the offsite cluster (id 3) is connected
-- **THEN** `cilium clustermesh status` on homelab and cloud shows offsite connected
-- **AND** no change to the homelab/cloud cluster.id/name was required
+- **THEN** `cilium clustermesh status` on home and cloud shows offsite connected
+- **AND** no change to the home/cloud cluster.id/name was required
 
 ### Requirement: Minimal DR footprint
 The offsite cluster SHALL run only the minimal set needed for disaster recovery / remote presence, not the LLM or full app stack.

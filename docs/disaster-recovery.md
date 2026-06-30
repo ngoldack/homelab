@@ -1,6 +1,6 @@
 # Backup & Disaster Recovery
 
-This document describes the recovery model for the homelab Talos/Flux cluster.
+This document describes the recovery model for the home Talos/Flux cluster.
 
 > **Phase status:** v0 (current) ships **no automated backup tooling**. Recovery
 > relies on the GitOps desired state plus the Talos PKI held in the encrypted
@@ -56,7 +56,7 @@ re-derives from Git.
      --from-file=age.agekey=age.key
    flux bootstrap github \
      --owner=ngoldack --repository=homelab \
-     --branch=main --path=kubernetes/clusters/homelab
+     --branch=main --path=kubernetes/clusters/home
    ```
 3. Flux reconciles controllers, configs, and apps from Git. PVCs re-bind to the
    existing TrueNAS datasets via the CSI driver, so application data returns

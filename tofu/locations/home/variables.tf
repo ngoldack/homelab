@@ -24,7 +24,7 @@ variable "proxmox_storage_pool" {
 variable "cluster_name" {
   description = "Name of the Talos cluster"
   type        = string
-  default     = "homelab-talos"
+  default     = "home-talos"
 }
 
 variable "talos_version" {
@@ -100,7 +100,7 @@ variable "node_pools" {
     })), [])
   }))
   default = {
-    # v0 homelab compute = four Talos VMs on the pmx-main Proxmox host (96GB / 32
+    # v0 home compute = four Talos VMs on the pmx-main Proxmox host (96GB / 32
     # threads, Ryzen 9 7945HX). NVIDIA driver/toolkit ship per-pool on the GPU
     # worker only (not cluster-wide), so the cp / general / cpu nodes stay clean.
     # VERIFY-BEFORE-DEPLOY: 4+12+12+64 = 92GB VMs leaves ~4GB host overhead; tune
@@ -155,7 +155,7 @@ variable "node_pools" {
       count      = 1
       talos_role = "worker"
       node_labels = {
-        "site"     = "homelab"
+        "site"     = "home"
         "workload" = "cpu-inference"
       }
       # Dedicated: only the tolerating CPU-inference workload schedules here.

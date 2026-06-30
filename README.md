@@ -14,7 +14,7 @@ v1–v3 add the cloud cluster + mesh, platform, agents, and offsite.
 
 | Layer | Tool | Phase |
 |---|---|---|
-| Hypervisor | Proxmox VE (homelab); Hetzner (cloud); TrueNAS Scale (offsite) | — |
+| Hypervisor | Proxmox VE (home); Hetzner (cloud); TrueNAS Scale (offsite) | — |
 | OS | Talos Linux | v0 |
 | Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`; `hcloud` in v1) | v0 |
 | CNI / mesh | Cilium (eBPF, kube-proxy replacement, Gateway API, Hubble, WireGuard, **Cluster Mesh**) | v0 / mesh v1 |
@@ -36,21 +36,22 @@ Three independent clusters joined by Cilium Cluster Mesh (`openspec/` for the pl
 
 | Cluster | Phase | Nodes |
 |---|---|---|
-| **homelab** (id 1) | v0 | 4 Talos VMs on `pmx-main`: `cp` (control plane), `wk` (general), `wk-gpu` (P100 → GPU model), `wk-cpu` (64GB → CPU model) |
+| **home** (id 1) | v0 | 4 Talos VMs on `pmx-main`: `cp` (control plane), `wk` (general), `wk-gpu` (P100 → GPU model), `wk-cpu` (64GB → CPU model) |
 | **cloud** (id 2) | v1 | 1 Hetzner VPS (cp+workloads) — public ingress edge |
 | **offsite** (id 3) | v3 | 1 TrueNAS Scale VM (cp+workloads) — DR |
 
-Node pools are a `map(object)` in `tofu/variables.tf`.
+Node pools are a `map(object)` in `tofu/locations/home/variables.tf`.
 
 ## Repository Structure
 
 ```
 .
 ├── openspec/               # the phased plan (v0–v3): proposals, specs, tasks
-├── tofu/                   # OpenTofu — Proxmox VMs + Talos (+ Hetzner in v1)
+├── tofu/
+│   └── locations/          # OpenTofu per location: home (Proxmox); cloud=v1; offsite=v3
 └── kubernetes/
     ├── clusters/
-    │   └── homelab/        # Flux entrypoints (infra-controllers → infra-configs → apps)
+    │   └── home/        # Flux entrypoints (infra-controllers → infra-configs → apps)
     ├── infrastructure/
     │   ├── controllers/    # Cilium, gateway-api, NVIDIA device plugin, storage CSI,
     │   │                   # observability + central sources.yaml (HelmRepositories)
@@ -81,14 +82,14 @@ age-keygen -o age.key
 
 ```bash
 # Fill in proxmox_api_password and state_encryption_passphrase, then encrypt:
-SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/secret.sops.yaml
+SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/locations/home/secret.sops.yaml
 ```
 
 ### 3. Provision Infrastructure
 
 ```bash
 export SOPS_AGE_KEY_FILE=age.key
-export TOFU_ENCRYPTION_PASSPHRASE_statekey=$(sops -d tofu/secret.sops.yaml | yq .state_encryption_passphrase)
+export TOFU_ENCRYPTION_PASSPHRASE_statekey=$(sops -d tofu/locations/home/secret.sops.yaml | yq .state_encryption_passphrase)
 
 cd tofu
 tofu init && tofu apply
@@ -106,7 +107,7 @@ flux bootstrap github \
   --owner=<your-github-username> \
   --repository=homelab \
   --branch=main \
-  --path=kubernetes/clusters/homelab \
+  --path=kubernetes/clusters/home \
   --personal
 ```
 
@@ -140,7 +141,7 @@ Run `task --list` for the full set. Common ones:
 | `task secrets:edit -- <file>` | Open a SOPS file in your editor |
 
 Live tasks read the OpenTofu state-encryption passphrase from
-`tofu/secret.sops.yaml` on demand; put `SOPS_AGE_KEY` in a gitignored `.env`.
+`tofu/locations/home/secret.sops.yaml` on demand; put `SOPS_AGE_KEY` in a gitignored `.env`.
 
 ---
 

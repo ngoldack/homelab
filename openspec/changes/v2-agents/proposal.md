@@ -4,7 +4,7 @@ With the platform (LiteLLM, Postgres, Valkey, auth, ingress) in place, v2 adds t
 
 ## What Changes
 
-- **Site `homelab`.** All v2 components run on the homelab cluster (the `cloud` node stays ingress-only).
+- **Site `home`.** All v2 components run on the home cluster (the `cloud` node stays ingress-only).
 - **ADD n8n** for workflow automation, using its own Postgres (CNPG) + Valkey, with its LLM/agent steps pointed at LiteLLM.
 - **ADD kagent** — the AI agent fleet (declarative agents + MCP) using the LiteLLM `default` alias as its ModelConfig backend.
 - **ADD agentgateway** — MCP gateway enforcing per-agent auth (JWT via Authentik) + tool authorization in front of kagent's MCP servers.

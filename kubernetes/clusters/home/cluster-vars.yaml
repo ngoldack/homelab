@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m0s
-  path: ./kubernetes/clusters/homelab/cluster-vars
+  path: ./kubernetes/clusters/home/cluster-vars
   prune: true
   wait: true
   timeout: 5m

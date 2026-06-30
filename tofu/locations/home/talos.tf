@@ -107,7 +107,7 @@ data "talos_machine_configuration" "controlplane" {
       yamlencode({
         machine = {
           nodeLabels = {
-            "site" = "homelab"
+            "site" = "home"
           }
         }
       }),

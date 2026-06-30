@@ -4,8 +4,8 @@
 
 This repo manages **Talos OS** Kubernetes clusters using **OpenTofu** for VM provisioning and **Flux CD** for GitOps delivery. It is built in phases, planned and tracked in OpenSpec (`openspec/changes/`) — read the relevant change before making architectural edits:
 
-- **v0 (current): `homelab`** — a single Proxmox-hosted cluster (4 VMs on `pmx-main`): one control-plane, a general worker, a GPU worker (P100) and a CPU-inference worker. Cilium (kube-proxy replacement) is installed mesh-**ready** but not yet meshed. This is the only cluster that exists today.
-- **v1: `cloud`** — a Hetzner edge cluster joined to `homelab` via Cilium Cluster Mesh; adds ingress, in-cluster S3, Authentik, CloudNativePG, Valkey, LiteLLM.
+- **v0 (current): `home`** — a single Proxmox-hosted cluster (4 VMs on `pmx-main`): one control-plane, a general worker, a GPU worker (P100) and a CPU-inference worker. Cilium (kube-proxy replacement) is installed mesh-**ready** but not yet meshed. This is the only cluster that exists today.
+- **v1: `cloud`** — a Hetzner edge cluster joined to `home` via Cilium Cluster Mesh; adds ingress, in-cluster S3, Authentik, CloudNativePG, Valkey, LiteLLM.
 - **v3: `offsite`** — a TrueNAS-hosted cluster for offsite/DR.
 
 Anything beyond v0 (cloud, cluster mesh, S3, databases, Authentik, ingress) is **not deployed yet** — treat it as the design in OpenSpec, not as live config.
@@ -14,7 +14,7 @@ Two main directories:
 
 - `tofu/` — OpenTofu infrastructure code (Proxmox VMs, Talos machine configs, secrets). Uses `bpg/proxmox` and `siderolabs/talos` providers. Node pools are a single `map(object)` in `variables.tf`.
 - `kubernetes/` — manifests reconciled by Flux, following the canonical Flux layout:
-  - `kubernetes/clusters/<name>/` — per-cluster Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`). v0 has `clusters/homelab/`.
+  - `kubernetes/clusters/<name>/` — per-cluster Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`). v0 has `clusters/home/`.
   - `kubernetes/infrastructure/controllers/` — operators, CNI/CSI, and the central Helm `sources.yaml` (v0: `cilium`, the VictoriaMetrics/Grafana stack, the NVIDIA device plugin, `local-path`, the TrueNAS CSI driver).
   - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers.
   - `kubernetes/apps/<app>/` — one directory per application (its own `kustomization.yaml`); flat layout, no base/overlay split. `kubernetes/apps/kustomization.yaml` is the toggle list: add/remove an `<app>` entry to enable/disable it (v0 ships just `llama-cpp`). Shared building blocks live in `kubernetes/apps/_components/`.
@@ -22,9 +22,11 @@ Two main directories:
 ## Conventions
 
 ### OpenTofu (`tofu/`)
-- Sensitive values (API passwords, passphrases) are **never** declared as `variable` blocks. They are read exclusively from `tofu/secret.sops.yaml` via the `carlpett/sops` provider (`data "sops_file" "secrets"`).
+- Tofu is **separated by location**: `tofu/locations/<home|cloud|offsite>/` is a self-contained root module per location (its own state + its own `secret.sops.yaml`). v0 ships `tofu/locations/home/` (Proxmox); `cloud` (Hetzner, v1) and `offsite` (TrueNAS, v3) are placeholders. Run against a location, e.g. `tofu -chdir=tofu/locations/home ...` or the `task tofu:*` runners.
+- Sensitive values (API tokens, passphrases) are **never** declared as `variable` blocks. They are read exclusively from the location's `secret.sops.yaml` via the `carlpett/sops` provider (`data "sops_file" "secrets"`).
+- **Per-host naming**: the home location runs on Proxmox hosts `pmx-main` (v0), and later `pmx-ai`, `pmx-core` (Dell R210ii), `pmx-test`, plus `pbs` (Proxmox Backup Server). Per-host secrets/references are keyed by host — the API token is `proxmox_<host>_api_token` (e.g. `proxmox_pmx-main_api_token`). Proxmox uses **API-token** auth (`api_token = "<user>@<realm>!<tokenid>=<uuid>"`), not username/password.
 - All Talos machine configs must disable the default CNI (`cni.name = none`) and kube-proxy (`proxy.disabled = true`) — Cilium replaces both.
-- `tofu/terraform.tfstate` is committed to Git — it is encrypted at rest via OpenTofu native AES-GCM state encryption. Do not move it to a remote backend.
+- Each location's `terraform.tfstate` is committed to Git — encrypted at rest via OpenTofu native AES-GCM state encryption. Do not move it to a remote backend.
 - Node pools are defined as a single `map(object)` variable in `variables.tf`. Do not add individual variables per node type.
 
 ### Kubernetes (`kubernetes/`)
@@ -79,10 +81,10 @@ When installing or modifying any application, AI agents **MUST** respect these c
 
 ```bash
 # Validate OpenTofu config (no credentials needed)
-tofu -chdir=tofu init -backend=false && tofu -chdir=tofu validate
+tofu -chdir=tofu/locations/home init -backend=false && tofu -chdir=tofu/locations/home validate
 
 # Build every Flux Kustomize entrypoint (v0)
-kustomize build kubernetes/clusters/homelab
+kustomize build kubernetes/clusters/home
 kustomize build kubernetes/infrastructure/controllers
 kustomize build kubernetes/infrastructure/configs
 kustomize build kubernetes/apps

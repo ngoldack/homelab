@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: valkey-operator
-      version: "0.1.x" # Uses official newer valkey-operator layout
+      version: "0.1.x"  # Uses official newer valkey-operator layout
       sourceRef:
         kind: HelmRepository
         name: valkey-operator

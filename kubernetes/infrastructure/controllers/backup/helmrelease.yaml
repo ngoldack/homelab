@@ -66,9 +66,9 @@ spec:
     schedules:
       daily-backup:
         disabled: false
-        schedule: "0 2 * * *" # Every day at 2:00 AM
+        schedule: "0 2 * * *"  # Every day at 2:00 AM
         template:
-          ttl: 240h # Retain backups for 10 days
+          ttl: 240h  # Retain backups for 10 days
           includedNamespaces:
             - "*"
           storageLocation: hetzner-dr

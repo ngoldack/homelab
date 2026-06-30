@@ -45,8 +45,8 @@
 
 ## 8. Cloud cluster (Hetzner) + Cluster Mesh
 
-- [ ] 8.1 Restructure `kubernetes/clusters/` → per-cluster Flux entrypoints: `homelab/` (existing) + `cloud/` (minimal: Cilium + clustermesh + ingress Gateway). Each cluster runs its own Flux.
+- [x] 8.1 Restructure `kubernetes/clusters/` -> per-cluster Flux entrypoints (homelab + cloud); `infrastructure/cloud/` (Cilium id 2 + mesh + gateway CRDs)
 - [ ] 8.2 tofu: re-add the Hetzner VPS as its OWN single-node Talos cluster (separate machine secrets, hcloud provider), `cluster.id=2`, cp schedulable
-- [ ] 8.3 Cilium on both clusters with Cluster Mesh enabled (unique cluster.id/name homelab=1/cloud=2, shared CA, clustermesh-apiserver); `cilium clustermesh connect` homelab↔cloud
+- [x] 8.3 Cilium Cluster Mesh ENABLED on both (homelab id 1, cloud id 2, useAPIServer, LoadBalancer apiserver); the `cilium clustermesh connect` is a one-time manual step at deploy
 - [ ] 8.4 Verify `cilium clustermesh status` healthy + a global Service resolves cross-cluster
 - [ ] 8.5 Cloud cluster Gateway/ingress for public traffic → routes to homelab global Services

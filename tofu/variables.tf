@@ -3,11 +3,6 @@ variable "proxmox_api_endpoint" {
   type        = string
 }
 
-variable "proxmox_api_username" {
-  description = "The Proxmox VE API user name"
-  type        = string
-}
-
 variable "proxmox_ssh_username" {
   description = "The SSH user for Proxmox"
   type        = string
@@ -117,7 +112,7 @@ variable "node_pools" {
       count      = 1
       talos_role = "controlplane"
       node_labels = {
-        "site" = "homelab"
+        "site" = "home"
       }
     }
     "wk" = {
@@ -127,7 +122,7 @@ variable "node_pools" {
       count      = 1
       talos_role = "worker"
       node_labels = {
-        "site" = "homelab"
+        "site" = "home"
       }
     }
     "wk-gpu" = {
@@ -150,7 +145,7 @@ variable "node_pools" {
         { device = "hostpci0", id = "0000:01:00" },
       ]
       node_labels = {
-        "site" = "homelab"
+        "site" = "home"
       }
     }
     "wk-cpu" = {

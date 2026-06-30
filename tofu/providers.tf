@@ -37,9 +37,11 @@ terraform {
 
 provider "proxmox" {
   endpoint = var.proxmox_api_endpoint
-  username = var.proxmox_api_username
-  password = local.proxmox_secrets.proxmox_api_password
-  insecure = true
+  # API token auth: "<user>@<realm>!<tokenid>=<uuid>" (read from SOPS). The user is
+  # embedded in the token, so no separate username/password is needed. SSH (below)
+  # still handles the operations the Proxmox API token cannot perform on its own.
+  api_token = local.proxmox_secrets.proxmox_api_token
+  insecure  = true
 
   ssh {
     agent    = true

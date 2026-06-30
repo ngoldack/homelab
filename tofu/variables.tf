@@ -78,26 +78,6 @@ variable "network_secure_vlan_id" {
   default     = null
 }
 
-variable "hetzner_objectstorage_location" {
-  description = "Hetzner Object Storage location/region. Object Storage is EU-only."
-  type        = string
-  default     = "fsn1" # Falkenstein
-  validation {
-    condition     = contains(["fsn1", "nbg1", "hel1"], var.hetzner_objectstorage_location)
-    error_message = "Hetzner Object Storage location must be one of: fsn1, nbg1, hel1."
-  }
-}
-
-variable "hetzner_dr_bucket_name" {
-  description = "Hetzner Object Storage bucket for offsite disaster-recovery backups. Must be globally unique across ALL Hetzner customers, 3-63 chars, lowercase, no dots."
-  type        = string
-  default     = "ngoldack-homelab-dr"
-  validation {
-    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.hetzner_dr_bucket_name))
-    error_message = "Bucket name must be 3-63 chars, lowercase alphanumeric or hyphen, and not start/end with a hyphen (no dots allowed)."
-  }
-}
-
 variable "node_pools" {
   type = map(object({
     cpu_cores         = number

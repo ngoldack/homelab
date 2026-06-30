@@ -9,6 +9,7 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 - **ADD offsite backup** of cluster + database state to a Hetzner S3 bucket.
 - **ADD Authentik** for SSO/OIDC + forward-auth, fronting exposed UIs.
 - **ADD CloudNativePG operator** (per-app Postgres + scheduled S3 backups) and the **Valkey operator**.
+- **ADD in-cluster S3** — S3-compatible object storage via the **SeaweedFS operator** (https://github.com/seaweedfs/seaweedfs-operator); each app gets its own bucket + credentials (no MinIO, no Crossplane). Distinct from the Hetzner *offsite-backup* bucket above.
 - **ADD LiteLLM** as the central model layer in front of llama.cpp — consumers reference stable aliases (`default`, `fast`, `embeddings`), not the model.
 - **ADD cert-manager** for TLS at the edge.
 - Synergy: LiteLLM points at the v0 llama.cpp Services; no model is re-deployed.
@@ -20,6 +21,7 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 - `offsite-backup`: scheduled backup of cluster + database state to a remote Hetzner S3 bucket.
 - `identity`: Authentik-based SSO (OIDC + forward-auth).
 - `data-operators`: CloudNativePG and Valkey operators providing per-app database/cache instances with backups.
+- `object-storage`: in-cluster S3 (SeaweedFS operator) providing per-app buckets + credentials.
 - `model-gateway`: LiteLLM central alias layer in front of llama.cpp.
 
 ### Modified Capabilities
@@ -29,6 +31,6 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 ## Impact
 
 - **tofu/**: add the Hetzner `cloud` node (hcloud provider) + S3 bucket; site tags `cloud`.
-- **kubernetes/**: `infrastructure/controllers` gains cert-manager, CNPG + Valkey operators, backup (Velero/CNPG-Barman); `infrastructure/configs` gains cluster-issuers + edge Gateway; `apps/` gains authentik + litellm.
+- **kubernetes/**: `infrastructure/controllers` gains cert-manager, CNPG + Valkey operators, the SeaweedFS operator (in-cluster S3, volume data on `tns-fast-nvmeof`), backup (Velero/CNPG-Barman); `infrastructure/configs` gains cluster-issuers + edge Gateway; `apps/` gains authentik + litellm.
 - **Secrets**: Hetzner S3 creds, Authentik secret, DB credentials — all `*.sops.yaml`.
 - First **public exposure**: review attack surface; only Authentik-protected routes are external.

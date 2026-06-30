@@ -33,7 +33,13 @@
 - [ ] 6.1 `apps/litellm`: config-only proxy mapping aliases (`default`/`fast`/`embeddings`) → the v0 llama.cpp Service (OpenAI base url)
 - [ ] 6.2 Expose `litellm.<ns>.svc:4000/v1`; no model redeploy (reuse llama.cpp)
 
-## 7. Validate & ship
+## 7. In-cluster S3 (SeaweedFS)
+
+- [ ] 7.1 SeaweedFS operator (https://github.com/seaweedfs/seaweedfs-operator) in `infrastructure/controllers`; volume data on `tns-fast-nvmeof`
+- [ ] 7.2 Per-app bucket + credentials pattern (own bucket/creds, no sharing; MinIO/Crossplane excluded), documented
+- [ ] 7.3 An app reads/writes its own bucket via the in-cluster S3 endpoint
+
+## 8. Validate & ship
 
 - [ ] 7.1 Full matrix (kustomize build ×N + kubeconform + yamllint + tofu validate) + `task sops:check`
 - [ ] 7.2 Per-capability Conventional Commits; PR; on merge `tofu apply` (cloud node + bucket) then `flux reconcile`

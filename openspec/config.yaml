@@ -6,27 +6,37 @@ context: |
   delivered in phases (v0 -> v1 -> v2); each phase adds the minimum set of apps and
   reuses earlier components (synergy: n8n/kagent -> LiteLLM -> llama.cpp).
 
-  SITES (3, tag every node/resource with its site):
-  - homelab  (MAIN, all compute):
-      * Always a Proxmox VE host; Talos runs as VM(s) with PCIe passthrough
-        (never bare-metal).
-      * pmx-main: Minisforum AR900i, 96GB DDR5, 1x Tesla P100 - main k8s host.
-        NVIDIA driver 580.159.04 already installed; P100 passed through to the VM.
-      * ai-host (FUTURE, not built): custom dual Xeon E5-2678v3, 32GB, 2x P100 -
-        dedicated AI workload host (llama.cpp, qwen3.6:35b, optional LMCache).
-  - cloud (Hetzner): smallest VPS, public IP, ingress node for all non-LAN traffic
-    + Hetzner S3 for offsite backups. LATER STAGE (v1).
-  - offsite: no node yet. Reserved/marked only.
+  CLUSTERS (3 SEPARATE Talos/Cilium clusters joined by Cilium Cluster Mesh; tag
+  every node/resource with its cluster):
+  - homelab (MAIN, all heavy compute) - cluster-id 1:
+      * Always a Proxmox VE host; Talos runs as VMs (never bare-metal).
+      * pmx-main: Minisforum AR900i, 96GB DDR5, 1x Tesla P100. FOUR VMs:
+        cp (control plane), wk (general worker), wk-gpu (P100 -> qwen3.5:9b),
+        wk-cpu (64GB, dedicated CPU -> qwen3-coder-next). Driver 580.159.04.
+  - cloud (Hetzner) - cluster-id 2 - v0:
+      * ONE VPS = a single-node cluster (control plane that ALSO runs workloads).
+      * Public IP; the ingress edge for all non-LAN traffic + Hetzner S3 backups.
+  - offsite (v3) - cluster-id 3:
+      * ONE VM on TrueNAS Scale, 6GB = a single-node cluster (cp + workloads).
+      * Disaster-recovery / remote presence. No tofu provider for TrueNAS VMs -
+        provision the VM by hand, then Talos+Flux as usual.
 
-  STORAGE TIERS (already exist - TrueNAS CSI; pick the tier per workload):
+  CLUSTER MESH: all three clusters run Cilium and are connected with Cilium
+  Cluster Mesh (unique cluster.id/name, shared CA, clustermesh-apiserver). Cross-
+  cluster service discovery via global services (service.cilium.io/global: true).
+  Each cluster has its own Flux + clusters/<name>/ entrypoint and runs a SUBSET.
+
+  STORAGE TIERS (homelab - TrueNAS CSI; pick the tier per workload):
   - fast     = tns-fast-nvmeof  (NVMe-oF block) - ONLY where it materially helps (DBs).
   - standard = tns-fast-nfs     (fast pool, NFS) - DEFAULT for everything.
   - storage  = tns-tank-nfs     (tank/HDD pool, NFS) - huge media libraries only.
   - local    = local-path       (node-local) - tmp/scratch only.
+  (cloud/offsite single-node clusters use local-path; homelab tiers are LAN-only.)
 
   STACK & CONVENTIONS:
-  - Talos OS (immutable), Flux CD (GitOps), Cilium (ALL networking uses Cilium and
-    its features: kube-proxy replacement, Gateway API, Hubble, encryption, LB-IPAM).
+  - Talos OS (immutable), Flux CD (GitOps, one Flux per cluster), Cilium (ALL
+    networking uses Cilium and its features: kube-proxy replacement, Gateway API,
+    Hubble, encryption, LB-IPAM, and Cluster Mesh to join the 3 clusters).
   - LLM serving: llama.cpp (llama-server) tuned for Pascal/P100. NOT vLLM (dropped
     Pascal) and not Ollama. Models exposed OpenAI-compatible; consumers reach them
     only via LiteLLM aliases (from v1).
@@ -46,13 +56,17 @@ context: |
       openspec/           (this plan)
 
   PHASES (reduce apps to the minimum per phase):
-  - v0 (MVP foundation): Talos main host (Proxmox VM + P100 passthrough); the 4
-    existing storage tiers; Cilium networking; observability (VictoriaMetrics +
-    VictoriaLogs + VictoriaTraces + Grafana); llama.cpp on the single P100
-    (qwen3.5:9b) with ALL P100/Pascal optimizations.
-  - v1 (platform, partial): backup to Hetzner S3; Hetzner ingress node; Authentik;
-    CloudNativePG operator + backups; Valkey operator; LiteLLM (in front of llama.cpp).
+  - v0 (MVP foundation): the homelab cluster (4 Talos VMs on pmx-main:
+    cp/wk/wk-gpu/wk-cpu) AND the cloud cluster (single Hetzner VPS, cp+workloads);
+    both run Cilium and are joined by Cluster Mesh; the 4 storage tiers;
+    observability (VictoriaMetrics + VictoriaLogs + VictoriaTraces + Grafana) on
+    homelab; llama.cpp on homelab (qwen3.5:9b on wk-gpu, qwen3-coder-next on wk-cpu).
+  - v1 (platform): backup to Hetzner S3; Authentik; CloudNativePG operator +
+    backups; Valkey operator; LiteLLM (in front of llama.cpp). The public ingress
+    runs on the cloud cluster (which already exists from v0).
   - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through LiteLLM -> llama.cpp.
+  - v3 (offsite): the offsite cluster (single TrueNAS Scale VM, 6GB, cp+workloads)
+    provisioned by hand and joined to the Cluster Mesh for DR / remote presence.
 
 rules:
   proposal:

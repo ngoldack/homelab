@@ -6,7 +6,7 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 
 - **Sites `homelab` + `cloud`.** The `cloud` (Hetzner) site joins: smallest VPS as a public-IP ingress node, plus Hetzner S3 for backups. `offsite` stays a marker.
 - **ADD offsite backup** of cluster state + databases to a Hetzner S3 bucket.
-- **ADD the Hetzner ingress node** — a Talos node at the `cloud` site with a public IP; all non-LAN traffic enters here and is routed to homelab services. Uses Cilium features end to end (encryption homelab↔cloud, Gateway API).
+- **Reuses the v0 cloud cluster.** The Hetzner cloud cluster + Cluster Mesh already exist (v0); v1 adds the public ingress ROUTES on it (Gateway + TLS) pointing at homelab global Services, plus Hetzner S3 for backups. No new cluster/node.
 - **ADD Authentik** for SSO/OIDC + forward-auth, fronting the UIs that get exposed.
 - **ADD CloudNativePG operator** (per-app Postgres instances + scheduled backups to Hetzner S3) and the **Valkey operator**.
 - **ADD LiteLLM** as the central model layer in front of llama.cpp — consumers reference stable aliases (`default`, `fast`, `embeddings`), not the model.
@@ -17,7 +17,6 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 
 ### New Capabilities
 - `offsite-backup`: scheduled backup of cluster + database state to a remote Hetzner S3 bucket.
-- `public-ingress`: the Hetzner `cloud` ingress node and the path for external traffic into homelab, secured with Cilium + TLS.
 - `identity`: Authentik-based SSO (OIDC + forward-auth).
 - `data-operators`: CloudNativePG and Valkey operators providing per-app database/cache instances with backups.
 - `model-gateway`: LiteLLM central alias layer in front of llama.cpp.

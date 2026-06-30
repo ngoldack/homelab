@@ -42,3 +42,11 @@
 - [x] 7.1 Full matrix: `kustomize build` ×(clusters/homelab, controllers, configs, apps) + `kubeconform -strict -ignore-missing-schemas` + `yamllint -c .yamllint` + `tofu validate`
 - [x] 7.2 SOPS: any new secret is a `*.sops.yaml`, encrypted in place; `task sops:check` passes
 - [ ] 7.3 Per-group Conventional Commits; open PR; on merge, manual `tofu apply` then `flux reconcile`; verify node Ready, `nvidia.com/gpu`, a `/v1/chat/completions` call, logs in Grafana
+
+## 8. Cloud cluster (Hetzner) + Cluster Mesh
+
+- [ ] 8.1 Restructure `kubernetes/clusters/` → per-cluster Flux entrypoints: `homelab/` (existing) + `cloud/` (minimal: Cilium + clustermesh + ingress Gateway). Each cluster runs its own Flux.
+- [ ] 8.2 tofu: re-add the Hetzner VPS as its OWN single-node Talos cluster (separate machine secrets, hcloud provider), `cluster.id=2`, cp schedulable
+- [ ] 8.3 Cilium on both clusters with Cluster Mesh enabled (unique cluster.id/name homelab=1/cloud=2, shared CA, clustermesh-apiserver); `cilium clustermesh connect` homelab↔cloud
+- [ ] 8.4 Verify `cilium clustermesh status` healthy + a global Service resolves cross-cluster
+- [ ] 8.5 Cloud cluster Gateway/ingress for public traffic → routes to homelab global Services

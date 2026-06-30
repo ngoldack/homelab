@@ -16,11 +16,12 @@ The repository has grown to 30+ applications across overlapping concerns, most o
 ## Capabilities
 
 ### New Capabilities
-- `talos-cluster`: Talos OS provisioning + Kubernetes bootstrap on the homelab main host, including GPU (NVIDIA P100) enablement.
-- `cilium-networking`: Cilium as the exclusive CNI and the contract that all networking uses Cilium features.
-- `cluster-storage`: a CSI-provisioned default StorageClass for persistent workloads.
-- `observability`: metrics + logs + dashboards (VictoriaMetrics, Loki, Grafana) with full cluster-wide collection.
-- `llm-serving`: OpenAI-compatible LLM inference via llama.cpp on the Tesla P100, tuned for Pascal.
+- `talos-cluster`: Talos OS provisioning + Kubernetes bootstrap. v0 stands up TWO clusters: homelab (4 VMs on pmx-main, incl. GPU enablement) and cloud (one Hetzner VPS, single-node cp+workloads).
+- `cilium-networking`: Cilium as the exclusive CNI in every cluster.
+- `cluster-mesh`: Cilium Cluster Mesh joining the homelab + cloud clusters (cross-cluster service discovery, shared trust), ready for offsite (v3).
+- `cluster-storage`: the four TrueNAS CSI tiers on homelab (default `standard`); local-path on the single-node clusters.
+- `observability`: metrics + logs + traces + dashboards (VictoriaMetrics + VictoriaLogs + VictoriaTraces + Grafana) on homelab.
+- `llm-serving`: OpenAI-compatible llama.cpp on homelab — qwen3.5:9b on the GPU worker, qwen3-coder-next on the dedicated CPU worker.
 
 ### Modified Capabilities
 - (none — greenfield reset; no existing OpenSpec specs yet.)

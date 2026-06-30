@@ -329,7 +329,7 @@ sequenceDiagram
 ```
 
 A turnkey alternative — **gpt-researcher** (`apps/research`, Apache-2.0) — runs
-the same plan→search→synthesize→report loop autonomously over our SearXNG + vLLM,
+the same plan→search→synthesize→report loop autonomously over our SearXNG + Ollama,
 exposed as a REST engine (wiring it into `research-chief` needs the `gptr-mcp`
 wrapper — TODO).
 
@@ -366,12 +366,14 @@ until a real Authentik client-credentials token is minted into
 | App | Purpose | Notable backing services |
 |---|---|---|
 | `authentik` | Identity / SSO / OIDC | CNPG, Valkey, SeaweedFS (media) |
-| `vllm` | LLM serving (OpenAI-compatible) | Valkey cache, SeaweedFS (models) |
+| `ollama` | LLM serving (GPU, OpenAI-compatible) | 3x P100, LiteLLM, PVC (models) |
+| `litellm` | Central model-alias layer | ollama |
+| `whisper` | Speech-to-text (Whisper/Speaches) | CPU, OpenAI-compatible |
 | `searxng` | Meta-search (JSON enabled) | — |
 | `n8n` | Workflow automation / Signal notify | CNPG, Valkey |
 | `mem0` | Agent long-term memory (pgvector) | CNPG |
 | `phoenix` | LLM trace observability | CNPG |
-| `kagent` | AI agent fleet (22 agents + MCP) | vLLM, mem0, n8n, searxng-mcp |
+| `kagent` | AI agent fleet (22 agents + MCP) | LiteLLM, mem0, n8n, searxng-mcp |
 | `agentgateway` | MCP JWT + CEL enforcement | Authentik (OIDC) |
 | `research` | Deep-research backend | mcp-searxng + gpt-researcher |
 | `mqtt` | EMQX broker (3-node) | — |

@@ -32,7 +32,7 @@ SOPS-encrypted, and operator-first where the operator is mature.
 Each is a flagged `RemoteMCPServer` in `apps/kagent/mcp-servers/scaffolds.yaml`
 (or `document-tools.yaml`), referenced by **no** agent until its backend exists.
 Build the backend/bridge, confirm tool names, then wire into the listed agents:
-- [x] `browser-research` — DONE via `searxng-mcp` (`apps/research`, MIT, HTTP-native): `searxng_web_search` + `web_url_read` against the in-cluster SearXNG. Wired into research-chief, web-search, document-ingest, cluster-update, k8s-sre. This makes the deep-research pipeline functional. Also deployed `gpt-researcher` (Apache-2.0) as a turnkey Perplexity-style engine on SearXNG+vLLM (REST :8000; agent wiring needs the gptr-mcp wrapper — TODO).
+- [x] `browser-research` — DONE via `searxng-mcp` (`apps/research`, MIT, HTTP-native): `searxng_web_search` + `web_url_read` against the in-cluster SearXNG. Wired into research-chief, web-search, document-ingest, cluster-update, k8s-sre. This makes the deep-research pipeline functional. Also deployed `gpt-researcher` (Apache-2.0) as a turnkey Perplexity-style engine on SearXNG+Ollama (via LiteLLM) (REST :8000; agent wiring needs the gptr-mcp wrapper — TODO).
 - [ ] `flux-git` — read Flux/Kustomize/Helm state + open Git PRs. Used by gitops-flux + cluster-update.
 - [ ] `homeassistant-api` — read states, write automations. Used by homeassistant-expert (+ read for zigbee-mqtt).
 - [ ] `zigbee2mqtt-api` — bridge health, devices, network map, pairing. Used by zigbee-mqtt-agent.

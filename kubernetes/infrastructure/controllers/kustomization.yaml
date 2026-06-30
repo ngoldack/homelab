@@ -36,7 +36,9 @@ resources:
   - cnpg-operator
   - cnpg-barman-plugin
   - valkey-operator
-  # AI/ML autoscaling (KEDA; vLLM is served as plain Deployments, reached directly)
+  # GPU enablement (NVIDIA device plugin + nvidia RuntimeClass for the P100 node)
+  - nvidia-device-plugin
+  # AI/ML autoscaling (KEDA; Ollama manages its own model load/unload natively)
   - keda
   # Object storage (SeaweedFS: S3-compatible, embedded IAM, CRD-driven buckets/users)
   - seaweedfs-operator

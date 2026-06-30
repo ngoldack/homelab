@@ -1,13 +1,18 @@
 # LiteLLM model routing config — THE central place to map stable aliases to
 # concrete backends. Switch a model everywhere by editing one entry here; all
-# consumers (kagent, mem0, gpt-researcher, ...) only ever reference the alias.
+# consumers (kagent, mem0, gpt-researcher, Open WebUI, ...) only reference aliases.
 #
-# Aliases: default/smart = the big coder model, fast = the small model,
-# embeddings = the TEI embedder, whisper = STT. Add OpenAI/Anthropic/etc. backends
-# here later without touching any consumer.
+# Backends now run on Ollama (the P100s are Pascal; vLLM dropped Pascal support).
+# Ollama exposes an OpenAI-compatible API on :11434/v1 and loads/unloads models in
+# VRAM on demand, so there is no per-model Service or scale-to-zero plumbing.
 #
-# VERIFY-BEFORE-DEPLOY: confirm vLLM served-model-names + that TEI exposes the
-# OpenAI-compatible /v1/embeddings path.
+# Aliases: default/smart = the 32B coder, fast = the small low-latency model,
+# embeddings = the embedding model, whisper = STT (Speaches/faster-whisper, CPU,
+# OpenAI-compatible /v1/audio/transcriptions).
+#
+# VERIFY-BEFORE-DEPLOY: confirm the model tags are pulled in Ollama
+# (apps/ollama/helmrelease.yaml ollama.models.pull) and that Ollama's
+# /v1/embeddings works for nomic-embed-text.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,45 +21,36 @@ metadata:
 data:
   config.yaml: |
     model_list:
-      # default/smart route through the KEDA HTTP interceptor so the 80B coder
-      # model can idle at zero replicas and wake on the first request. The
-      # interceptor routes by the Host header to the qwen3-coder-80b Service.
-      # VERIFY-BEFORE-DEPLOY: confirm LiteLLM forwards extra_headers.Host on the
-      # wire (some HTTP clients derive Host from the URL authority instead). If it
-      # does not, point api_base back at the Service and instead wake the model
-      # via a KEDA Prometheus trigger on litellm request metrics.
       - model_name: default
         litellm_params:
-          model: openai/qwen3-coder-80b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          model: openai/qwen2.5-coder:32b
+          api_base: http://ollama.ollama.svc.cluster.local:11434/v1
           api_key: dummy
-          extra_headers:
-            Host: qwen3-coder-80b.vllm
       - model_name: smart
         litellm_params:
-          model: openai/qwen3-coder-80b
-          api_base: http://keda-add-ons-http-interceptor-proxy.keda.svc.cluster.local:8080/v1
+          model: openai/qwen2.5-coder:32b
+          api_base: http://ollama.ollama.svc.cluster.local:11434/v1
           api_key: dummy
-          extra_headers:
-            Host: qwen3-coder-80b.vllm
       - model_name: fast
         litellm_params:
-          model: openai/qwen3-8b
-          api_base: http://qwen3-8b.vllm.svc.cluster.local/v1
-          api_key: dummy
-      - model_name: whisper
-        litellm_params:
-          model: openai/whisper
-          api_base: http://whisper.vllm.svc.cluster.local/v1
+          model: openai/qwen3:8b
+          api_base: http://ollama.ollama.svc.cluster.local:11434/v1
           api_key: dummy
       - model_name: embeddings
         litellm_params:
-          model: openai/BAAI/bge-small-en-v1.5
-          api_base: http://embeddings.vllm.svc.cluster.local/v1
+          model: openai/nomic-embed-text
+          api_base: http://ollama.ollama.svc.cluster.local:11434/v1
+          api_key: dummy
+      # STT via Speaches (faster-whisper) on CPU. Pick the concrete faster-whisper
+      # model here; a turbo/distil variant is much faster on CPU.
+      - model_name: whisper
+        litellm_params:
+          model: openai/Systran/faster-whisper-large-v3
+          api_base: http://whisper.whisper.svc.cluster.local:8000/v1
           api_key: dummy
     litellm_settings:
       drop_params: true
       num_retries: 2
-    # No master_key: in-cluster open proxy (vLLM was already unauthenticated).
+    # No master_key: in-cluster open proxy (Ollama is unauthenticated in-cluster).
     # Future hardening: set general_settings.master_key + per-consumer virtual
     # keys, backed by a dedicated CNPG instance.

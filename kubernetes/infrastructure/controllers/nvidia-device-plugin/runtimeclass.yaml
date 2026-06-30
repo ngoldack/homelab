@@ -1,0 +1,14 @@
+# NVIDIA RuntimeClass. The `nvidia-container-toolkit` Talos system extension on
+# the worker-ai pool (tofu/variables.tf) registers the `nvidia` containerd runtime
+# handler; this RuntimeClass exposes it so GPU workloads opt in with
+# spec.runtimeClassName: nvidia (the device plugin + Ollama + the ASR service).
+#
+# Co-located with the device plugin (rather than configs/runtime-classes, where
+# gvisor lives) on purpose: the plugin runs in the infra-controllers tier and
+# references this class, which reconciles AFTER infra-configs - keeping them
+# together avoids the plugin pods sitting Pending on a missing RuntimeClass.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

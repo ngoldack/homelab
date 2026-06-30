@@ -5,9 +5,11 @@ kind: Kustomization
 # it on the next reconcile); add it back to re-enable.
 resources:
   - authentik
-  - vllm
-  # Central model-routing layer: consumers reference aliases, not concrete models
+  # GPU model server (Ollama on the P100s) + central model-routing layer
+  - ollama
   - litellm
+  # Speech-to-text (Whisper via Speaches, CPU, OpenAI-compatible)
+  - whisper
   - searxng
   - n8n
   - mem0

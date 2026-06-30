@@ -1,0 +1,126 @@
+# llama.cpp (llama-server) — the v0 model server. Serves an OpenAI-compatible API
+# on the single Tesla P100 (Pascal). Chosen over vLLM (dropped Pascal) and Ollama
+# for the finest control on old hardware + a clean path to LMCache and the future
+# dual-P100 ai-host.
+#
+# MODEL: the target is `qwen3.5:9b`. That tag is a future/placeholder model - until
+# its GGUF exists, point `-hf` at a current ~9-14B GGUF (e.g. a Qwen2.5 instruct
+# build) to bring the MVP up. Weights download once into the HF cache PVC.
+#
+# Pascal/P100 tuning: full GPU offload (-ngl 99; a 9B at Q5_K_M ~6-7GB fits 16GB),
+# llama.cpp flash-attention (runs on Pascal, shrinks KV), continuous batching +
+# parallel slots, a 16k context, mlock, and Prometheus /metrics. P100 uses fast
+# FP16 + HBM2 (llama.cpp's default CUDA path).
+#
+# VERIFY-BEFORE-DEPLOY: pin the image tag and confirm it includes the sm_60 (Pascal)
+# CUDA build; set the real `-hf` repo:quant for qwen3.5:9b when it exists; confirm
+# the nvidia RuntimeClass + driver 580.159.04 expose the P100.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llama-models
+  namespace: llama-cpp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: tns-fast-nfs
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-cpp
+  namespace: llama-cpp
+  labels:
+    app.kubernetes.io/name: llama-cpp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llama-cpp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llama-cpp
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        site: homelab
+      containers:
+        - name: llama-server
+          # renovate: datasource=docker depName=ghcr.io/ggml-org/llama.cpp
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda
+          args:
+            # Model: swap to the real qwen3.5:9b GGUF when it exists.
+            - "-hf"
+            - "Qwen/Qwen2.5-7B-Instruct-GGUF:Q5_K_M"
+            - "--alias"
+            - "default"
+            # Pascal/P100 tuning
+            - "-ngl"
+            - "99"
+            - "--flash-attn"
+            - "--ctx-size"
+            - "16384"
+            - "--cont-batching"
+            - "--parallel"
+            - "4"
+            - "--mlock"
+            # serving
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--metrics"
+          env:
+            - name: HF_HOME
+              value: /models
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: llama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-cpp
+  namespace: llama-cpp
+  labels:
+    app.kubernetes.io/name: llama-cpp
+spec:
+  selector:
+    app.kubernetes.io/name: llama-cpp
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

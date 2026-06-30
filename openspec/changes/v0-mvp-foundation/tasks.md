@@ -31,9 +31,9 @@
 
 ## 6. llama.cpp (qwen3.5:9b on P100)
 
-- [ ] 6.1 `apps/llama-cpp`: Deployment with the upstream CUDA `llama-server` image, `runtimeClassName: nvidia`, `nvidia.com/gpu: 1`, node pinned to `site=homelab`
-- [ ] 6.2 Pascal tuning args: `-ngl 99`, `--flash-attn`, `--cont-batching`, `--parallel`, `--ctx-size 16384`, `--mlock`, `--metrics`; weights on a `standard` (tns-fast-nfs) PVC; OpenAI-compatible `:8080`; prometheus scrape annotations
-- [ ] 6.3 Add `llama-cpp` to `apps/kustomization.yaml`; build + kubeconform pass
+- [x] 6.1 `apps/llama-cpp`: Deployment with the upstream CUDA `llama-server` image, `runtimeClassName: nvidia`, `nvidia.com/gpu: 1`, node pinned to `site=homelab`
+- [x] 6.2 Pascal tuning args: `-ngl 99`, `--flash-attn`, `--cont-batching`, `--parallel`, `--ctx-size 16384`, `--mlock`, `--metrics`; weights on a `standard` (tns-fast-nfs) PVC; OpenAI-compatible `:8080`; prometheus scrape annotations
+- [x] 6.3 Add `llama-cpp` to `apps/kustomization.yaml`; build + kubeconform pass
 
 ## 7. Validate & ship
 

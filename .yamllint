@@ -4,6 +4,9 @@ extends: default
 # not subject to our formatting rules (re-formatting would complicate upgrades).
 ignore: |
   kubernetes/infrastructure/controllers/cnpg-barman-plugin/manifest.yaml
+  # SOPS-encrypted files are machine-generated (the #ENC[...] comment lines have
+  # no leading space and trip the comments rule); they are never hand-formatted.
+  **/*.sops.yaml
 
 rules:
   line-length:
@@ -14,4 +17,5 @@ rules:
   comments:
     # Disable comments indentation rules to allow easier commenting out of yaml code blocks
     level: warning
+  comments-indentation: disable
   truthy: disable

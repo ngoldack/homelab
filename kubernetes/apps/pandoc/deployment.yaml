@@ -42,7 +42,7 @@ spec:
       containers:
         - name: pandoc-server
           # renovate: datasource=docker depName=pandoc/core
-          image: pandoc/core:3.5
+          image: pandoc/core:3.10
           command: ["pandoc-server"]
           ports:
             - name: http

@@ -1,0 +1,54 @@
+schema: spec-driven
+
+context: |
+  PROJECT: Homelab AI platform. Talos Kubernetes + Flux GitOps + Cilium, serving
+  self-hosted LLMs via llama.cpp on NVIDIA Tesla P100 (Pascal). Goal is a lean MVP
+  delivered in phases (v0 -> v1 -> v2); each phase adds the minimum set of apps and
+  reuses earlier components (synergy: n8n/kagent -> LiteLLM -> llama.cpp).
+
+  SITES (3, tag every node/resource with its site):
+  - homelab  (MAIN, all compute):
+      * pmx-main: Minisforum AR900i, 96GB DDR5, 1x Tesla P100 - main k8s host.
+        NVIDIA driver 580.159.04 already installed on the host.
+      * ai-host (FUTURE, not built): custom dual Xeon E5-2678v3, 32GB, 2x P100 -
+        dedicated AI workload host (llama.cpp, qwen3.6:35b, optional LMCache).
+  - cloud (Hetzner): smallest VPS, public IP, ingress node for all non-LAN traffic
+    + Hetzner S3 for offsite backups. LATER STAGE (v1).
+  - offsite: no node yet. Reserved/marked only.
+
+  STACK & CONVENTIONS:
+  - Talos OS (immutable), Flux CD (GitOps), Cilium (ALL networking uses Cilium and
+    its features: kube-proxy replacement, Gateway API, Hubble, encryption, LB-IPAM).
+  - LLM serving: llama.cpp (llama-server) tuned for Pascal/P100. NOT vLLM (dropped
+    Pascal) and not Ollama. Models exposed OpenAI-compatible; consumers reach them
+    only via LiteLLM aliases (from v1).
+  - Observability: VictoriaMetrics (metrics) + Loki (logs) + Grafana (dashboards).
+  - Secrets: SOPS + age, key anchored in .sops.yaml (homelab_age_key); every secret
+    is a *.sops.yaml file encrypted in place. Do not introduce a second key provider.
+  - Validation: kustomize build + kubeconform (-strict -ignore-missing-schemas),
+    yamllint (.yamllint), tofu validate. Conventional Commits.
+  - Repo layout (community Flux best practice, kept simple):
+      clusters/homelab/   (Flux entrypoints: infra-controllers, infra-configs, apps)
+      infrastructure/{controllers,configs}/
+      apps/<app>/         (flat, one dir per app; apps/kustomization.yaml = toggle)
+      tofu/               (Proxmox + Talos + Hetzner, site-tagged)
+      openspec/           (this plan)
+
+  PHASES (reduce apps to the minimum per phase):
+  - v0 (MVP foundation): Talos main host; storage CSI; Cilium networking; monitoring
+    (VictoriaMetrics + Loki + Grafana); llama.cpp on the single P100 (qwen3.5:9b) with
+    ALL P100/Pascal optimizations.
+  - v1 (platform, partial): backup to Hetzner S3; Hetzner ingress node; Authentik;
+    CloudNativePG operator + backups; Valkey operator; LiteLLM (in front of llama.cpp).
+  - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through LiteLLM -> llama.cpp.
+
+rules:
+  proposal:
+    - State which of the 3 sites (homelab/cloud/offsite) the change touches.
+    - List apps ADDED and apps/components REMOVED (this project is a deliberate reduction to MVP).
+  design:
+    - Call out P100/Pascal-specific tuning when LLM serving is involved.
+    - Prefer reusing an existing component over adding a new one (note the synergy).
+  tasks:
+    - Each task must be independently validatable (kustomize build / kubeconform / yamllint / tofu validate).
+    - Group tasks so each maps to one Conventional Commit.

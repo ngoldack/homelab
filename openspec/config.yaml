@@ -8,13 +8,21 @@ context: |
 
   SITES (3, tag every node/resource with its site):
   - homelab  (MAIN, all compute):
+      * Always a Proxmox VE host; Talos runs as VM(s) with PCIe passthrough
+        (never bare-metal).
       * pmx-main: Minisforum AR900i, 96GB DDR5, 1x Tesla P100 - main k8s host.
-        NVIDIA driver 580.159.04 already installed on the host.
+        NVIDIA driver 580.159.04 already installed; P100 passed through to the VM.
       * ai-host (FUTURE, not built): custom dual Xeon E5-2678v3, 32GB, 2x P100 -
         dedicated AI workload host (llama.cpp, qwen3.6:35b, optional LMCache).
   - cloud (Hetzner): smallest VPS, public IP, ingress node for all non-LAN traffic
     + Hetzner S3 for offsite backups. LATER STAGE (v1).
   - offsite: no node yet. Reserved/marked only.
+
+  STORAGE TIERS (already exist - TrueNAS CSI; pick the tier per workload):
+  - fast     = tns-fast-nvmeof  (NVMe-oF block) - ONLY where it materially helps (DBs).
+  - standard = tns-fast-nfs     (fast pool, NFS) - DEFAULT for everything.
+  - storage  = tns-tank-nfs     (tank/HDD pool, NFS) - huge media libraries only.
+  - local    = local-path       (node-local) - tmp/scratch only.
 
   STACK & CONVENTIONS:
   - Talos OS (immutable), Flux CD (GitOps), Cilium (ALL networking uses Cilium and
@@ -22,7 +30,10 @@ context: |
   - LLM serving: llama.cpp (llama-server) tuned for Pascal/P100. NOT vLLM (dropped
     Pascal) and not Ollama. Models exposed OpenAI-compatible; consumers reach them
     only via LiteLLM aliases (from v1).
-  - Observability: VictoriaMetrics (metrics) + Loki (logs) + Grafana (dashboards).
+  - Observability: the VictoriaMetrics stack END TO END - VictoriaMetrics (metrics)
+    + VictoriaLogs (logs) + VictoriaTraces (traces) + Grafana (dashboards). Prefer
+    VM-ecosystem components; do NOT use Loki or Tempo. One OTel collector ships
+    logs/traces/metrics to the three VM backends.
   - Secrets: SOPS + age, key anchored in .sops.yaml (homelab_age_key); every secret
     is a *.sops.yaml file encrypted in place. Do not introduce a second key provider.
   - Validation: kustomize build + kubeconform (-strict -ignore-missing-schemas),
@@ -35,9 +46,10 @@ context: |
       openspec/           (this plan)
 
   PHASES (reduce apps to the minimum per phase):
-  - v0 (MVP foundation): Talos main host; storage CSI; Cilium networking; monitoring
-    (VictoriaMetrics + Loki + Grafana); llama.cpp on the single P100 (qwen3.5:9b) with
-    ALL P100/Pascal optimizations.
+  - v0 (MVP foundation): Talos main host (Proxmox VM + P100 passthrough); the 4
+    existing storage tiers; Cilium networking; observability (VictoriaMetrics +
+    VictoriaLogs + VictoriaTraces + Grafana); llama.cpp on the single P100
+    (qwen3.5:9b) with ALL P100/Pascal optimizations.
   - v1 (platform, partial): backup to Hetzner S3; Hetzner ingress node; Authentik;
     CloudNativePG operator + backups; Valkey operator; LiteLLM (in front of llama.cpp).
   - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through LiteLLM -> llama.cpp.

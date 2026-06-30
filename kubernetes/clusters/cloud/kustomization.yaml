@@ -1,7 +1,0 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-# Flux entrypoint for the CLOUD cluster (single Hetzner VPS, id 2). The cloud
-# cluster bootstraps its OWN Flux pointing here. v0 = Cilium + Cluster Mesh +
-# Gateway CRDs only; public ingress routes + S3 backups land in v1.
-resources:
-  - infrastructure.yaml

@@ -4,11 +4,13 @@
 - [ ] 1.2 Backup controller (CNPG Barman plugin for DBs + cluster-state backup) targeting the bucket
 - [ ] 1.3 A scheduled backup runs and is restorable (documented restore check)
 
-## 2. Hetzner ingress node (cloud site)
+## 2. Cloud cluster (Hetzner) + Cluster Mesh
 
-- [ ] 2.1 tofu: smallest Hetzner VPS as a Talos node, public IP, `site=cloud`, joined to the cluster
-- [ ] 2.2 Cilium spanning homelab↔cloud with transparent encryption; verify L3 reachability
-- [ ] 2.3 Cilium Gateway API entrypoint on the cloud node; external traffic routes to homelab services
+- [ ] 2.1 `kubernetes/clusters/cloud/` Flux entrypoint + `infrastructure/cloud/` (own Cilium id 2/name cloud + mesh, shared Gateway CRDs)
+- [ ] 2.2 tofu: re-add the Hetzner VPS as its OWN single-node Talos cluster (separate machine secrets, hcloud provider), `cluster.id=2`, cp schedulable
+- [ ] 2.3 Enable Cluster Mesh on homelab (id 1) too; `cilium clustermesh connect` homelab↔cloud. KEY: the clustermesh-apiserver must be reachable across WAN/NAT — expose via the cloud edge or a WireGuard/VPN transport
+- [ ] 2.4 Verify `cilium clustermesh status` healthy + a global Service (`service.cilium.io/global: "true"`) resolves cross-cluster
+- [ ] 2.5 Cilium Gateway on the cloud cluster; external traffic routes to homelab global Services
 
 ## 3. cert-manager + TLS
 

@@ -18,23 +18,6 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
-    # --- Cluster Mesh: this is the homelab cluster (id 1). Joined to the cloud
-    # (id 2) and later offsite (id 3) clusters via Cilium Cluster Mesh. Each
-    # cluster has a unique name/id and shares a CA so they trust each other.
-    # VERIFY-BEFORE-DEPLOY: the clustermesh-apiserver must be reachable from the
-    # peer clusters across the WAN/NAT - homelab is behind NAT, so expose it via
-    # the cloud edge or a WireGuard/VPN transport; tune the service type/IP. The
-    # actual peer wiring is a one-time `cilium clustermesh connect` (exchanges the
-    # CA + apiserver certs), run from the workstation.
-    cluster:
-      name: homelab
-      id: 1
-    clustermesh:
-      useAPIServer: true
-      apiserver:
-        service:
-          type: LoadBalancer
-
     # Enable Cilium Gateway API support (K8s Service Mesh / Ingress)
     gatewayAPI:
       enabled: true

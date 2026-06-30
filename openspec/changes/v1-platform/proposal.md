@@ -4,25 +4,26 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 
 ## What Changes
 
-- **Sites `homelab` + `cloud`.** The `cloud` (Hetzner) site joins: smallest VPS as a public-IP ingress node, plus Hetzner S3 for backups. `offsite` stays a marker.
-- **ADD offsite backup** of cluster state + databases to a Hetzner S3 bucket.
-- **Reuses the v0 cloud cluster.** The Hetzner cloud cluster + Cluster Mesh already exist (v0); v1 adds the public ingress ROUTES on it (Gateway + TLS) pointing at homelab global Services, plus Hetzner S3 for backups. No new cluster/node.
-- **ADD Authentik** for SSO/OIDC + forward-auth, fronting the UIs that get exposed.
-- **ADD CloudNativePG operator** (per-app Postgres instances + scheduled backups to Hetzner S3) and the **Valkey operator**.
+- **Clusters `homelab` + `cloud`.** v1 stands up the **cloud** cluster: one Hetzner VPS = a single-node Talos/Cilium cluster (cp+workloads), and joins it to homelab via **Cilium Cluster Mesh** (homelab id 1, cloud id 2). homelab was built mesh-ready in v0.
+- **ADD the cloud cluster + Cluster Mesh** — its own Flux + Cilium (id 2); `cilium clustermesh connect` peers it with homelab across the WAN. The cloud cluster is the **public ingress edge**: a Gateway + TLS routes external traffic to homelab Services marked global.
+- **ADD offsite backup** of cluster + database state to a Hetzner S3 bucket.
+- **ADD Authentik** for SSO/OIDC + forward-auth, fronting exposed UIs.
+- **ADD CloudNativePG operator** (per-app Postgres + scheduled S3 backups) and the **Valkey operator**.
 - **ADD LiteLLM** as the central model layer in front of llama.cpp — consumers reference stable aliases (`default`, `fast`, `embeddings`), not the model.
-- **ADD cert-manager** (if not already in v0) for TLS at the edge.
-- Synergy: LiteLLM points at the v0 llama.cpp Service; no model is re-deployed.
+- **ADD cert-manager** for TLS at the edge.
+- Synergy: LiteLLM points at the v0 llama.cpp Services; no model is re-deployed.
 
 ## Capabilities
 
 ### New Capabilities
+- `cluster-mesh`: the cloud cluster (Hetzner, id 2) + Cilium Cluster Mesh joining it to homelab; cross-cluster global services. (homelab was prepared in v0; offsite (id 3) joins in v3.)
 - `offsite-backup`: scheduled backup of cluster + database state to a remote Hetzner S3 bucket.
 - `identity`: Authentik-based SSO (OIDC + forward-auth).
 - `data-operators`: CloudNativePG and Valkey operators providing per-app database/cache instances with backups.
 - `model-gateway`: LiteLLM central alias layer in front of llama.cpp.
 
 ### Modified Capabilities
-- `cilium-networking`: add transparent encryption and Gateway-API ingress spanning the homelab↔cloud link.
+- `cilium-networking`: enable Cluster Mesh + the cross-cluster (homelab↔cloud) encrypted transport.
 - `llm-serving`: model is now consumed through LiteLLM aliases rather than directly.
 
 ## Impact

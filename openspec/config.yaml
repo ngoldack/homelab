@@ -13,9 +13,11 @@ context: |
       * pmx-main: Minisforum AR900i, 96GB DDR5, 1x Tesla P100. FOUR VMs:
         cp (control plane), wk (general worker), wk-gpu (P100 -> qwen3.5:9b),
         wk-cpu (64GB, dedicated CPU -> qwen3-coder-next). Driver 580.159.04.
-  - cloud (Hetzner) - cluster-id 2 - v0:
+  - cloud (Hetzner) - cluster-id 2 - v1:
       * ONE VPS = a single-node cluster (control plane that ALSO runs workloads).
       * Public IP; the ingress edge for all non-LAN traffic + Hetzner S3 backups.
+      * Joins homelab via Cluster Mesh. (Homelab is built mesh-ready in v0; the
+        cloud cluster + the actual mesh land together in v1.)
   - offsite (v3) - cluster-id 3:
       * ONE VM on TrueNAS Scale, 6GB = a single-node cluster (cp + workloads).
       * Disaster-recovery / remote presence. No tofu provider for TrueNAS VMs -
@@ -56,14 +58,14 @@ context: |
       openspec/           (this plan)
 
   PHASES (reduce apps to the minimum per phase):
-  - v0 (MVP foundation): the homelab cluster (4 Talos VMs on pmx-main:
-    cp/wk/wk-gpu/wk-cpu) AND the cloud cluster (single Hetzner VPS, cp+workloads);
-    both run Cilium and are joined by Cluster Mesh; the 4 storage tiers;
-    observability (VictoriaMetrics + VictoriaLogs + VictoriaTraces + Grafana) on
-    homelab; llama.cpp on homelab (qwen3.5:9b on wk-gpu, qwen3-coder-next on wk-cpu).
-  - v1 (platform): backup to Hetzner S3; Authentik; CloudNativePG operator +
-    backups; Valkey operator; LiteLLM (in front of llama.cpp). The public ingress
-    runs on the cloud cluster (which already exists from v0).
+  - v0 (MVP foundation): the homelab cluster ONLY (4 Talos VMs on pmx-main:
+    cp/wk/wk-gpu/wk-cpu); the 4 storage tiers; Cilium; observability
+    (VictoriaMetrics + VictoriaLogs + VictoriaTraces + Grafana); llama.cpp
+    (qwen3.5:9b on wk-gpu, qwen3-coder-next on wk-cpu).
+  - v1 (platform): ADD the cloud cluster (single Hetzner VPS, cp+workloads) +
+    Cilium Cluster Mesh joining homelab(id 1)+cloud(id 2); public ingress routes
+    on the cloud cluster; backup to Hetzner S3; Authentik; CloudNativePG operator
+    + backups; Valkey operator; LiteLLM (in front of llama.cpp).
   - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through LiteLLM -> llama.cpp.
   - v3 (offsite): the offsite cluster (single TrueNAS Scale VM, 6GB, cp+workloads)
     provisioned by hand and joined to the Cluster Mesh for DR / remote presence.

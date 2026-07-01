@@ -33,6 +33,14 @@ spec:
     image:
       repository: otel/opentelemetry-collector-contrib
 
+    # Node name for the prometheus receiver's node-filter relabel (below), so
+    # each DaemonSet agent scrapes only the annotated pods on its own node.
+    extraEnvs:
+      - name: NODE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: spec.nodeName
+
     presets:
       logsCollection:
         enabled: true
@@ -67,6 +75,39 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
+        # Scrape pods annotated prometheus.io/scrape (llama.cpp /metrics via the
+        # LLMKube InferenceServices, agentgateway in v1, etc.) and remote-write
+        # them to VictoriaMetrics. Node-filtered so each DaemonSet agent only
+        # scrapes pods on its own node — no duplicate series.
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: kubernetes-pods
+                scrape_interval: 30s
+                kubernetes_sd_configs:
+                  - role: pod
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_node_name]
+                    action: keep
+                    regex: ${env:NODE_NAME}
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: "true"
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    action: replace
+                    target_label: __metrics_path__
+                    regex: (.+)
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $$1:$$2
+                    target_label: __address__
+                  - source_labels: [__meta_kubernetes_namespace]
+                    action: replace
+                    target_label: namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    action: replace
+                    target_label: pod
 
       processors:
         batch: {}
@@ -78,7 +119,7 @@ spec:
       service:
         pipelines:
           metrics:
-            receivers: [otlp, hostmetrics]
+            receivers: [otlp, hostmetrics, prometheus]
             processors: [memory_limiter, k8sattributes, batch]
             exporters: [prometheusremotewrite]
           logs:

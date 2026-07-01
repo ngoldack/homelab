@@ -28,10 +28,11 @@
 - [ ] 5.2 Valkey operator (controllers)
 - [ ] 5.3 Each app that needs a DB/cache gets its OWN instance + credentials (pattern documented)
 
-## 6. LiteLLM (model gateway)
+## 6. agentgateway (model gateway)
 
-- [ ] 6.1 `apps/litellm`: config-only proxy mapping aliases (`default`/`fast`/`embeddings`) → the v0 llama.cpp Service (OpenAI base url)
-- [ ] 6.2 Expose `litellm.<ns>.svc:4000/v1`; no model redeploy (reuse llama.cpp)
+- [ ] 6.1 Install agentgateway (Gateway API CRDs already in v0; `agentgateway-crds` + `agentgateway` OCI Helm charts from `cr.agentgateway.dev`)
+- [ ] 6.2 `apps/agentgateway`: routes mapping stable model names → the v0 llama.cpp InferenceService backends (OpenAI base url); no model redeploy
+- [ ] 6.3 Wire agentgateway OTel traces → the OTel collector + Prometheus metrics scraped into VictoriaMetrics; verify an LLM call is observable end-to-end
 
 ## 7. In-cluster S3 (SeaweedFS)
 
@@ -43,4 +44,4 @@
 
 - [ ] 7.1 Full matrix (kustomize build ×N + kubeconform + yamllint + tofu validate) + `task sops:check`
 - [ ] 7.2 Per-capability Conventional Commits; PR; on merge `tofu apply` (cloud node + bucket) then `flux reconcile`
-- [ ] 7.3 Verify: backup completes; external request reaches an Authentik-protected service over TLS; `curl` LiteLLM alias returns a completion from llama.cpp
+- [ ] 7.3 Verify: backup completes; external request reaches an Authentik-protected service over TLS; `curl` agentgateway alias returns a completion from llama.cpp

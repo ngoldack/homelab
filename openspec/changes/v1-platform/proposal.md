@@ -1,6 +1,6 @@
 ## Why
 
-With the v0 foundation serving a model, v1 turns it into a usable platform: it becomes durable (offsite backups), reachable from outside the LAN (the Hetzner ingress node), authenticated (Authentik), and gains the stateful building blocks (Postgres, Valkey) plus the central model layer (LiteLLM) that v2's agents depend on.
+With the v0 foundation serving a model, v1 turns it into a usable platform: it becomes durable (offsite backups), reachable from outside the LAN (the Hetzner ingress node), authenticated (Authentik), and gains the stateful building blocks (Postgres, Valkey) plus the central model gateway (agentgateway) that v2's agents depend on.
 
 ## What Changes
 
@@ -10,9 +10,9 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 - **ADD Authentik** for SSO/OIDC + forward-auth, fronting exposed UIs.
 - **ADD CloudNativePG operator** (per-app Postgres + scheduled S3 backups) and the **Valkey operator**.
 - **ADD in-cluster S3** — S3-compatible object storage via the **SeaweedFS operator** (https://github.com/seaweedfs/seaweedfs-operator); each app gets its own bucket + credentials (no MinIO, no Crossplane). Distinct from the Hetzner *offsite-backup* bucket above.
-- **ADD LiteLLM** as the central model layer in front of llama.cpp — consumers reference stable aliases (`default`, `fast`, `embeddings`), not the model.
+- **ADD agentgateway** as the central AI gateway (OpenAI-compatible) in front of llama.cpp — consumers reference stable model names, not the backend. It also handles MCP/A2A traffic and emits OpenTelemetry traces + Prometheus metrics for LLM observability. Uses Gateway API (installed in v0).
 - **ADD cert-manager** for TLS at the edge.
-- Synergy: LiteLLM points at the v0 llama.cpp Services; no model is re-deployed.
+- Synergy: agentgateway points at the v0 llama.cpp InferenceServices; no model is re-deployed.
 
 ## Capabilities
 
@@ -22,15 +22,15 @@ With the v0 foundation serving a model, v1 turns it into a usable platform: it b
 - `identity`: Authentik-based SSO (OIDC + forward-auth).
 - `data-operators`: CloudNativePG and Valkey operators providing per-app database/cache instances with backups.
 - `object-storage`: in-cluster S3 (SeaweedFS operator) providing per-app buckets + credentials.
-- `model-gateway`: LiteLLM central alias layer in front of llama.cpp.
+- `model-gateway`: agentgateway central AI gateway (OpenAI-compatible + MCP/A2A) in front of llama.cpp.
 
 ### Modified Capabilities
 - `cilium-networking`: enable Cluster Mesh + the cross-cluster (home↔cloud) encrypted transport.
-- `llm-serving`: model is now consumed through LiteLLM aliases rather than directly.
+- `llm-serving`: model is now consumed through the agentgateway endpoint rather than directly.
 
 ## Impact
 
 - **tofu/**: add the Hetzner `cloud` node (hcloud provider) + S3 bucket; site tags `cloud`.
-- **kubernetes/**: `infrastructure/controllers` gains cert-manager, CNPG + Valkey operators, the SeaweedFS operator (in-cluster S3, volume data on `tns-fast-nvmeof`), backup (Velero/CNPG-Barman); `infrastructure/configs` gains cluster-issuers + edge Gateway; `apps/` gains authentik + litellm.
+- **kubernetes/**: `infrastructure/controllers` gains cert-manager, CNPG + Valkey operators, the SeaweedFS operator (in-cluster S3, volume data on `tns-fast-nvmeof`), backup (Velero/CNPG-Barman); `infrastructure/configs` gains cluster-issuers + edge Gateway; `apps/` gains authentik + agentgateway.
 - **Secrets**: Hetzner S3 creds, Authentik secret, DB credentials — all `*.sops.yaml`.
 - First **public exposure**: review attack surface; only Authentik-protected routes are external.

@@ -21,11 +21,11 @@ v1–v3 add the cloud cluster + mesh, platform, agents, and offsite.
 | Storage | TrueNAS CSI — 4 tiers (`tns-fast-nvmeof`, `tns-fast-nfs` default, `tns-tank-nfs`, `local-path`) | v0 |
 | Observability | VictoriaMetrics + VictoriaLogs + VictoriaTraces + OTel Collector + Grafana | v0 |
 | LLM Serving | **llama.cpp** — `qwen3.5:9b` on the P100 (GPU) + `qwen3-coder-next` on a dedicated CPU node | v0 |
-| Model gateway | LiteLLM (stable aliases in front of llama.cpp) | v1 |
+| Model gateway | agentgateway (stable aliases in front of llama.cpp) | v1 |
 | Identity / SSO | Authentik (OIDC + forward-auth) | v1 |
 | Databases | CloudNativePG (per-app Postgres, S3 backups) + Valkey operator | v1 |
 | Backups | → Hetzner S3 (offsite) | v1 |
-| Agents | n8n, kagent, agentgateway, mem0 — all via LiteLLM → llama.cpp | v2 |
+| Agents | n8n, kagent, agentgateway, mem0 — all via agentgateway → llama.cpp | v2 |
 | GitOps | Flux CD (one per cluster) | v0 |
 | Secrets | SOPS + age (`*.sops.yaml`) | v0 |
 | State Encryption | OpenTofu native AES-GCM | v0 |

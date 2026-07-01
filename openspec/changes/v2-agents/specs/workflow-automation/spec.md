@@ -5,4 +5,4 @@ The system SHALL run n8n with its own Postgres and Valkey, able to call the mode
 
 #### Scenario: Workflow calls the model layer
 - **WHEN** an n8n workflow invokes an LLM step
-- **THEN** the call goes to LiteLLM and returns a completion from llama.cpp
+- **THEN** the call goes to agentgateway and returns a completion from llama.cpp

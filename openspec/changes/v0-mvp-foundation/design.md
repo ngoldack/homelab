@@ -16,7 +16,7 @@ Hardware: Minisforum AR900i, 96GB DDR5, 1x Tesla P100 (Pascal, CC 6.0, 16GB HBM2
 
 **Non-Goals:**
 - No public ingress, TLS, or auth (v1). LAN-only.
-- No LiteLLM, databases, or backups yet (v1). v0 consumers hit llama.cpp directly.
+- No agentgateway, databases, or backups yet (v1). v0 consumers hit llama.cpp directly.
 - No agents (v2). No multi-node / `ai-host` / `cloud` / `offsite` (later).
 - No Loki or Tempo — logs and traces live on VictoriaLogs / VictoriaTraces.
 

@@ -87,7 +87,7 @@ OpenAI-compatible APIs. Two models, two nodes:
 
 ```mermaid
 flowchart LR
-  client["clients / (v1) LiteLLM"] --> GPU & CPU
+  client["clients / (v1) agentgateway"] --> GPU & CPU
   subgraph GPU["wk-gpu"]
     L1["llama-server (CUDA)<br/>qwen3.5:9b · alias default<br/>-ngl 99 · flash-attn · 16k ctx"]
   end
@@ -103,7 +103,7 @@ flowchart LR
 - **CPU (wk-cpu):** `qwen3-coder-next`, mlock'd into 64GB RAM, 24 threads.
 - Weights persist on a `tns-fast-nfs` PVC (no re-download on restart). Both
   expose Prometheus `/metrics`.
-- In **v1**, **LiteLLM** fronts both behind stable aliases (`default`, `coder`,
+- In **v1**, **agentgateway** fronts both behind stable aliases (`default`, `coder`,
   `embeddings`) so consumers never reference a concrete model. Future: the
   dual-P100 `ai-host` for `qwen3.6:35b` + optional LMCache.
 
@@ -193,8 +193,8 @@ openspec/                the phased plan (v0–v3)
 ```mermaid
 flowchart LR
   v0["v0 — MVP foundation<br/>home cluster (4 VMs)<br/>Cilium · storage · VM-stack<br/>llama.cpp GPU + CPU"]
-  v1["v1 — platform<br/>cloud cluster + Cluster Mesh<br/>ingress · backup(S3) · Authentik<br/>CNPG · Valkey · LiteLLM"]
-  v2["v2 — agents<br/>n8n · kagent · agentgateway · mem0<br/>all via LiteLLM → llama.cpp"]
+  v1["v1 — platform<br/>cloud cluster + Cluster Mesh<br/>ingress · backup(S3) · Authentik<br/>CNPG · Valkey · agentgateway"]
+  v2["v2 — agents<br/>n8n · kagent · agentgateway · mem0<br/>all via agentgateway → llama.cpp"]
   v3["v3 — offsite<br/>TrueNAS VM cluster<br/>joins mesh for DR"]
   v0 --> v1 --> v2 --> v3
 ```
@@ -202,10 +202,10 @@ flowchart LR
 | Phase | Adds |
 |---|---|
 | **v0** | home cluster (cp/wk/wk-gpu/wk-cpu); Cilium; 4 storage tiers; VictoriaMetrics+Logs+Traces+Grafana; llama.cpp (GPU `qwen3.5:9b` + CPU `qwen3-coder-next`). Cilium is built **mesh-ready**. |
-| **v1** | the **cloud** cluster (Hetzner VPS) + **Cilium Cluster Mesh**; public ingress; backups → Hetzner S3; Authentik (SSO); CloudNativePG + Valkey operators; **LiteLLM** in front of llama.cpp. |
-| **v2** | n8n, kagent, agentgateway, mem0 — wired **LiteLLM → llama.cpp** (no model redeploy). |
+| **v1** | the **cloud** cluster (Hetzner VPS) + **Cilium Cluster Mesh**; public ingress; backups → Hetzner S3; Authentik (SSO); CloudNativePG + Valkey operators; **agentgateway** in front of llama.cpp. |
+| **v2** | n8n, kagent, agentgateway, mem0 — wired **agentgateway → llama.cpp** (no model redeploy). |
 | **v3** | the **offsite** cluster (TrueNAS Scale VM) joined to the mesh for disaster recovery / remote presence. |
 
 Synergy is deliberate: each phase reuses the prior layers — `n8n / kagent →
-agentgateway → LiteLLM → llama.cpp`; embeddings and memory ride the same model
+agentgateway → llama.cpp`; embeddings and memory ride the same model
 layer; nothing re-deploys a model server.

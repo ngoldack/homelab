@@ -4,7 +4,7 @@ context: |
   PROJECT: Homelab AI platform. Talos Kubernetes + Flux GitOps + Cilium, serving
   self-hosted LLMs via llama.cpp on NVIDIA Tesla P100 (Pascal). Goal is a lean MVP
   delivered in phases (v0 -> v1 -> v2); each phase adds the minimum set of apps and
-  reuses earlier components (synergy: n8n/kagent -> LiteLLM -> llama.cpp).
+  reuses earlier components (synergy: n8n/kagent -> agentgateway -> llama.cpp).
 
   CLUSTERS (3 SEPARATE Talos/Cilium clusters joined by Cilium Cluster Mesh; tag
   every node/resource with its cluster):
@@ -41,7 +41,7 @@ context: |
     Hubble, encryption, LB-IPAM, and Cluster Mesh to join the 3 clusters).
   - LLM serving: llama.cpp (llama-server) tuned for Pascal/P100. NOT vLLM (dropped
     Pascal) and not Ollama. Models exposed OpenAI-compatible; consumers reach them
-    only via LiteLLM aliases (from v1).
+    only via agentgateway aliases (from v1).
   - Observability: the VictoriaMetrics stack END TO END - VictoriaMetrics (metrics)
     + VictoriaLogs (logs) + VictoriaTraces (traces) + Grafana (dashboards). Prefer
     VM-ecosystem components; do NOT use Loki or Tempo. One OTel collector ships
@@ -65,8 +65,8 @@ context: |
   - v1 (platform): ADD the cloud cluster (single Hetzner VPS, cp+workloads) +
     Cilium Cluster Mesh joining home(id 1)+cloud(id 2); public ingress routes
     on the cloud cluster; backup to Hetzner S3; Authentik; CloudNativePG operator
-    + backups; Valkey operator; LiteLLM (in front of llama.cpp).
-  - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through LiteLLM -> llama.cpp.
+    + backups; Valkey operator; agentgateway (in front of llama.cpp).
+  - v2 (agents): n8n; kagent; agentgateway; mem0 - all wired through agentgateway -> llama.cpp.
   - v3 (offsite): the offsite cluster (single TrueNAS Scale VM, 6GB, cp+workloads)
     provisioned by hand and joined to the Cluster Mesh for DR / remote presence.
 

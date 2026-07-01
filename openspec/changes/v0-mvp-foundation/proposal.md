@@ -10,7 +10,7 @@ The repository has grown to 30+ applications across overlapping concerns, most o
 - **ADD** a storage CSI driver (TrueNAS) for persistent volumes.
 - **ADD** a minimal monitoring suite: VictoriaMetrics (metrics), Loki (logs), Grafana (dashboards), an OTel collector for node/pod log + host-metric collection.
 - **ADD** `llama.cpp` (`llama-server`) serving `qwen3.5:9b` on the single P100, tuned with all Pascal/P100-appropriate optimizations, exposing an OpenAI-compatible API in-cluster.
-- **BREAKING — reduce to MVP.** Every app not in the v0/v1/v2 plan is removed: vLLM, Ollama, Whisper, SeaweedFS, EMQX/MQTT, Zigbee2MQTT, Home Assistant, the research stack (SearXNG, gpt-researcher, mcp-searxng), Phoenix, knowledge/Open WebUI, document services (gotenberg/docling/pandoc), SPIRE, Tetragon, Trivy, Kyverno, CrowdSec, Technitium, NetBird, Agent Substrate, khook, Headlamp. (LiteLLM, Authentik, CNPG, Valkey, backups, ingress return in v1; n8n/kagent/agentgateway/mem0 in v2.)
+- **BREAKING — reduce to MVP.** Every app not in the v0/v1/v2 plan is removed: vLLM, Ollama, Whisper, SeaweedFS, EMQX/MQTT, Zigbee2MQTT, Home Assistant, the research stack (SearXNG, gpt-researcher, mcp-searxng), Phoenix, knowledge/Open WebUI, document services (gotenberg/docling/pandoc), SPIRE, Tetragon, Trivy, Kyverno, CrowdSec, Technitium, NetBird, Agent Substrate, khook, Headlamp. (agentgateway, Authentik, CNPG, Valkey, backups, ingress return in v1; n8n/kagent/agentgateway/mem0 in v2.)
 - **Simplify the repo:** rename `clusters/production` → `clusters/home`; keep the Flux 3-tier layout (`infrastructure/{controllers,configs}`, flat `apps/`); tag tofu resources by site.
 
 ## Capabilities

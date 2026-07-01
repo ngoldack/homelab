@@ -5,7 +5,7 @@
 This repo manages **Talos OS** Kubernetes clusters using **OpenTofu** for VM provisioning and **Flux CD** for GitOps delivery. It is built in phases, planned and tracked in OpenSpec (`openspec/changes/`) — read the relevant change before making architectural edits:
 
 - **v0 (current): `home`** — a single Proxmox-hosted cluster (4 VMs on `pmx-main`): one control-plane, a general worker, a GPU worker (P100) and a CPU-inference worker. Cilium (kube-proxy replacement) is installed mesh-**ready** but not yet meshed. This is the only cluster that exists today.
-- **v1: `cloud`** — a Hetzner edge cluster joined to `home` via Cilium Cluster Mesh; adds ingress, in-cluster S3, Authentik, CloudNativePG, Valkey, LiteLLM.
+- **v1: `cloud`** — a Hetzner edge cluster joined to `home` via Cilium Cluster Mesh; adds ingress, in-cluster S3, Authentik, CloudNativePG, Valkey, agentgateway.
 - **v3: `offsite`** — a TrueNAS-hosted cluster for offsite/DR.
 
 Anything beyond v0 (cloud, cluster mesh, S3, databases, Authentik, ingress) is **not deployed yet** — treat it as the design in OpenSpec, not as live config.

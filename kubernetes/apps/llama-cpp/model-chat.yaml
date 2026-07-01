@@ -1,0 +1,64 @@
+# GPU chat model, declared via LLMKube (Model + InferenceService) instead of a
+# hand-rolled Deployment. The operator downloads the GGUF into the shared model
+# cache (tns-fast-nfs), schedules the llama.cpp server on the P100 node, and
+# exposes an OpenAI-compatible API. Metrics (/metrics) are scraped by the OTel
+# collector via the prometheus.io podAnnotations below.
+#
+# MODEL: target is the future `qwen3.5:9b`. Until that GGUF exists, point at a
+# current ~7-9B GGUF (Qwen2.5-7B-Instruct) to bring the MVP up.
+# VERIFY-BEFORE-DEPLOY: set the real GGUF source URL (incl. any split parts) +
+# quant; confirm the server-cuda image includes the sm_60 (Pascal) build.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: chat
+  namespace: llama-cpp
+spec:
+  source: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q5_k_m.gguf
+  format: gguf
+  quantization: Q5_K_M
+  hardware:
+    accelerator: cuda
+    gpu:
+      enabled: true
+      count: 1
+      vendor: nvidia
+      layers: -1 # full offload (replaces -ngl 99)
+---
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: chat
+  namespace: llama-cpp
+spec:
+  modelRef: chat
+  runtime: llamacpp
+  replicas: 1
+  # Pascal/P100 CUDA build of llama.cpp.
+  image: ghcr.io/ggml-org/llama.cpp:server-cuda
+  runtimeClassName: nvidia
+  nodeSelector:
+    site: home
+  contextSize: 16384
+  parallelSlots: 4
+  resources:
+    gpu: 1
+    cpu: "2"
+    memory: 8Gi
+  endpoint:
+    port: 8080
+    path: /v1/chat/completions
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+  # LLMKube gates its typed flashAttention field on Ampere (CC 8.0+); the P100 is
+  # Pascal (CC 6.0) but llama.cpp's --flash-attn runs on it, so pass it (plus the
+  # remaining llama.cpp tuning) through extraArgs.
+  extraArgs:
+    - "--flash-attn"
+    - "--cont-batching"
+    - "--mlock"
+    - "--metrics"
+    - "--alias"
+    - "default"

@@ -61,3 +61,12 @@ spec:
   interval: 2h
   type: oci
   url: oci://registry-1.docker.io/bfenski
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: llmkube
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://defilantech.github.io/LLMKube

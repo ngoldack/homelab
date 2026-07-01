@@ -3,5 +3,5 @@ kind: Kustomization
 namespace: llama-cpp
 resources:
   - namespace.yaml
-  - deployment.yaml
-  - deployment-cpu.yaml
+  - model-chat.yaml
+  - model-coder.yaml

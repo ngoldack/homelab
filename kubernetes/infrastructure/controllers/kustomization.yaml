@@ -11,5 +11,7 @@ resources:
   - storage/tns-csi
   # GPU enablement (NVIDIA device plugin + nvidia RuntimeClass for the P100)
   - nvidia-device-plugin
+  # LLM serving operator — Model + InferenceService CRDs (llama.cpp) for apps/llama-cpp
+  - llmkube
   # Observability — VictoriaMetrics stack (metrics + logs + traces) + Grafana
   - observability

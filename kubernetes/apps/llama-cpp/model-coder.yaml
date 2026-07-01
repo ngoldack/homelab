@@ -1,0 +1,57 @@
+# CPU coder model, declared via LLMKube. Pinned to the tainted cpu-inference
+# node (64GB); no GPU — the whole (MoE) model runs on CPU. OpenAI-compatible API
+# aliased "coder". Metrics scraped by the OTel collector via podAnnotations.
+#
+# MODEL: target is the future `qwen3-coder-next`. Until that GGUF exists, point
+# at a current Qwen3-Coder GGUF (30B-A3B, MoE).
+# VERIFY-BEFORE-DEPLOY: set the real GGUF source URL (incl. split parts) + quant;
+# tune --threads to the node's allocated cores (24) + the memory to the quant.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: coder
+  namespace: llama-cpp
+spec:
+  source: https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF/resolve/main/qwen3-coder-30b-a3b-instruct-q8_0.gguf
+  format: gguf
+  quantization: Q8_0
+  hardware:
+    accelerator: cpu
+---
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: coder
+  namespace: llama-cpp
+spec:
+  modelRef: coder
+  runtime: llamacpp
+  replicas: 1
+  # CPU build (no -cuda).
+  image: ghcr.io/ggml-org/llama.cpp:server
+  nodeSelector:
+    workload: cpu-inference
+  tolerations:
+    - key: workload
+      value: cpu-inference
+      effect: NoSchedule
+  contextSize: 16384
+  parallelSlots: 2
+  resources:
+    cpu: "20"
+    memory: 40Gi
+  endpoint:
+    port: 8080
+    path: /v1/chat/completions
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+  extraArgs:
+    - "--threads"
+    - "24"
+    - "--cont-batching"
+    - "--mlock"
+    - "--metrics"
+    - "--alias"
+    - "coder"

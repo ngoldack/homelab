@@ -15,7 +15,7 @@ metadata:
   name: emqx
   namespace: mqtt
 spec:
-  image: emqx/emqx:5
+  image: emqx/emqx:6
   config:
     data: |
       authentication = [

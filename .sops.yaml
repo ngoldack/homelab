@@ -1,6 +1,6 @@
 creation_rules:
   # Encrypt all SOPS secret files in the tofu directory
-  - path_regex: tofu/secret\.sops\.yaml$
+  - path_regex: tofu/locations/.*/secret\.sops\.yaml$
     # Recipients: workstation key (homelab) + CI key (stored as the
     # SOPS_AGE_KEY GitHub Actions secret) so pipelines can decrypt.
     age: &age_recipients >-

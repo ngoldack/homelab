@@ -1,399 +1,211 @@
 # Homelab Architecture
 
-End-to-end documentation of every moving part: from Proxmox VMs up through the
-GitOps delivery chain, the platform operators, the security stack, and the AI
-agent / deep-research system.
+A lean, **phased** self-hosted AI platform: Talos Kubernetes + Flux GitOps +
+Cilium, serving LLMs via **llama.cpp** on a Tesla P100 (GPU) and a dedicated CPU
+node. Delivered as a multi-cluster system joined by Cilium Cluster Mesh.
 
-> Conventions: this repo is GitOps-first (Flux), secrets are SOPS/age encrypted,
-> CI lints only, and all live operations run from the workstation via `Taskfile`.
-> See [AGENTS.md](../AGENTS.md) for the engineering rules and
-> [apps/kagent/README.md](../kubernetes/apps/kagent/README.md) for the agent
-> subsystem deep-dive.
+> **Source of truth:** the plan lives in [`openspec/`](../openspec/) — each phase
+> (v0–v3) is an OpenSpec change with proposal / design / specs / tasks. This
+> document is the human-readable overview; the specs are authoritative.
+>
+> **Conventions:** GitOps-first (one Flux per cluster), secrets are SOPS/age
+> encrypted (`*.sops.yaml`), all live ops run from the workstation. See
+> [AGENTS.md](../AGENTS.md).
 
 ---
 
-## 1. Physical → logical stack
+## 1. Clusters & Cluster Mesh
+
+Three **independent** Talos/Cilium clusters joined by **Cilium Cluster Mesh**
+(unique `cluster.id`/`name`, shared CA, `clustermesh-apiserver`). Separate
+clusters — not one stretched cluster — because the links are WAN/untrusted and
+the cloud/offsite boxes are tiny; a stretched control plane over the internet is
+fragile, meshed independent clusters are not.
+
+```mermaid
+flowchart LR
+  subgraph HL["home (id 1) — Proxmox, all heavy compute"]
+    direction TB
+    HLk["4 Talos VMs<br/>cp · wk · wk-gpu · wk-cpu"]
+  end
+  subgraph CL["cloud (id 2) — Hetzner VPS — v1"]
+    CLk["1 node (cp+workloads)<br/>public ingress edge"]
+  end
+  subgraph OS["offsite (id 3) — TrueNAS Scale VM — v3"]
+    OSk["1 node (cp+workloads)<br/>DR / remote presence"]
+  end
+  Internet(("Internet")) --> CL
+  CL <-->|Cluster Mesh| HL
+  OS <-->|Cluster Mesh| HL
+```
+
+| Cluster | Phase | Host | Role |
+|---|---|---|---|
+| **home** (id 1) | v0 | Minisforum AR900i (Proxmox) | all heavy compute (LLMs, observability) |
+| **cloud** (id 2) | v1 | 1 Hetzner VPS | public ingress edge + Hetzner S3 backups |
+| **offsite** (id 3) | v3 | 1 TrueNAS Scale VM (6GB) | DR / remote presence |
+
+Cross-cluster traffic uses **global services** (`service.cilium.io/global: "true"`):
+e.g. a cloud ingress route targets a home Service over the mesh. home is
+built **mesh-ready** in v0; cloud + the actual mesh land in v1.
+
+---
+
+## 2. home cluster — node topology
+
+Four Talos VMs on the single Proxmox host `pmx-main` (Minisforum AR900i, 96GB /
+32 threads, 1× Tesla P100). Talos is always a Proxmox VM (never bare-metal); the
+P100 is PCIe-passed-through to `wk-gpu`.
 
 ```mermaid
 flowchart TD
-  subgraph HW["Hardware"]
-    PVE["Proxmox VE host"]
-    TNS["TrueNAS<br/>NVMe pool + HDD pool<br/>10GbE"]
-    HZ["Hetzner Object Storage<br/>(offsite DR)"]
+  subgraph PMX["pmx-main — Proxmox VE (96GB / 32t / P100)"]
+    CP["cp<br/>controlplane<br/>4GB / 2c<br/>(dedicated, NoSchedule)"]
+    WK["wk<br/>worker · 12GB / 4c<br/>cluster services + observability"]
+    WG["wk-gpu<br/>worker · 12GB / 4c<br/>+ P100 passthrough<br/>llama.cpp GPU"]
+    WC["wk-cpu<br/>worker · 64GB / 20c<br/>taint workload=cpu-inference<br/>llama.cpp CPU"]
   end
-
-  subgraph VM["Talos VMs — provisioned by OpenTofu"]
-    CP["control plane<br/>4 vCPU / 4 GB"]
-    WD["worker-default<br/>8 vCPU / 24 GB<br/>gVisor"]
-    WAI["worker-ai<br/>12 vCPU / 84 GB<br/>gVisor + ai taint"]
-  end
-
-  PVE --> VM
-  VM --> K8S["Kubernetes (Talos OS)"]
-  K8S --> FLUX["Flux CD — GitOps reconciler"]
-  FLUX --> WL["Controllers + Configs + Apps"]
-
-  TNS -. "CSI: NFS + NVMe-oF" .-> K8S
-  HZ -. "Talos etcd / Velero / CNPG backups" .-> K8S
+  P100["Tesla P100 16GB"] -.passthrough.-> WG
 ```
 
-OpenTofu (`tofu/`) provisions the VMs via `bpg/proxmox`, renders Talos machine
-configs via `siderolabs/talos`, and stores its state **encrypted in Git**
-(native AES-GCM, passphrase in `tofu/secret.sops.yaml`). Node pools are a single
-`map(object)` in `tofu/variables.tf` (counts are configurable; the gVisor system
-extension + `user.max_user_namespaces` sysctl are baked into the worker pools).
+- **cp** — dedicated control plane, not schedulable.
+- **wk** — general worker; runs the VictoriaMetrics stack, Grafana, Cilium
+  operator, etc.
+- **wk-gpu** — has the P100 (NVIDIA driver/toolkit Talos extensions + kernel
+  modules ship **per-pool on this node only**). Runs the GPU chat model.
+- **wk-cpu** — dedicated, tainted; runs the large CPU coder model in 64GB RAM.
+
+All networking is **Cilium** (kube-proxy replacement, Gateway API, Hubble,
+WireGuard node encryption, LB-IPAM). Talos CNI = `none`, kube-proxy disabled.
 
 ---
 
-## 2. GitOps delivery (Flux dependency order)
+## 3. Model serving — llama.cpp
+
+llama.cpp (chosen over vLLM, which dropped Pascal, and Ollama) serves
+OpenAI-compatible APIs. Two models, two nodes:
 
 ```mermaid
 flowchart LR
-  GIT["Git repo<br/>kubernetes/clusters/production"] --> FS["flux-system"]
-  FS --> IC["infra-controllers<br/>operators, CNI, CSI, CRDs"]
-  IC --> ICFG["infra-configs<br/>policies, issuers, S3, runtimeclasses"]
-  ICFG --> APPS["apps<br/>(toggle list)"]
-
-  SOPS["SOPS age key<br/>(sops-age secret)"]
-  SOPS -. decrypt .-> IC
-  SOPS -. decrypt .-> ICFG
-  SOPS -. decrypt .-> APPS
-  CS["cluster-secrets<br/>DOMAIN, DR_S3_*"]
-  CS -. "postBuild substituteFrom" .-> ICFG
-  CS -. "postBuild substituteFrom" .-> APPS
-```
-
-Three Flux `Kustomization`s chain by `dependsOn`: **infra-controllers →
-infra-configs → apps**. All three decrypt SOPS; `infra-configs` and `apps` also
-substitute `${DOMAIN}` / `${DR_S3_*}` from the `cluster-secrets` secret.
-
----
-
-## 3. Repository layout
-
-```text
-homelab/
-├── tofu/                      # OpenTofu: Proxmox VMs, Talos config, encrypted state
-│   ├── variables.tf           # node_pools map(object); Hetzner DR; extensions
-│   ├── talos.tf               # machine config patches (CNI=none, gVisor sysctl…)
-│   └── secret.sops.yaml       # proxmox pw + state passphrase (SOPS)
-├── kubernetes/
-│   ├── clusters/production/   # Flux entrypoints (infra-controllers/configs/apps)
-│   ├── infrastructure/
-│   │   ├── controllers/       # operators + central sources.yaml (HelmRepositories)
-│   │   └── configs/           # cluster-wide config that depends on controllers
-│   └── apps/                  # one dir per app; kustomization.yaml is the toggle
-│       └── _components/       # shared kustomize components (cnpg-barman-backup)
-├── docs/                      # this file, roadmap, disaster-recovery
-└── .github/workflows/ci.yaml  # lint-only CI
-```
-
----
-
-## 4. Infrastructure controllers (operators)
-
-```mermaid
-flowchart TB
-  subgraph net["Networking"]
-    gapi["gateway-api (CRDs)"]
-    cil["cilium<br/>eBPF CNI, kube-proxy replacement,<br/>Gateway API, Hubble"]
-    nb["netbird<br/>(mesh overlay)"]
+  client["clients / (v1) agentgateway"] --> GPU & CPU
+  subgraph GPU["wk-gpu"]
+    L1["llama-server (CUDA)<br/>qwen3.5:9b · alias default<br/>-ngl 99 · flash-attn · 16k ctx"]
   end
-  subgraph sto["Storage"]
-    tns["tns-csi<br/>TrueNAS NFS + NVMe-oF"]
-    lp["local-path"]
-    sw["seaweedfs-operator<br/>(in-cluster S3)"]
+  subgraph CPU["wk-cpu"]
+    L2["llama-server (CPU)<br/>qwen3-coder-next · alias coder<br/>-ngl 0 · 24 threads · mlock"]
   end
-  subgraph dat["Data operators"]
-    cnpg["cnpg-operator<br/>+ barman-plugin (DR)"]
-    vk["valkey-operator"]
-  end
-  subgraph secg["Security + policy"]
-    cm["cert-manager"]
-    kyv["security: kyverno + trivy-operator"]
-    tet["tetragon (runtime eBPF)"]
-    spi["spire (SPIFFE identity)"]
-  end
-  subgraph obs["Observability"]
-    o["observability:<br/>VictoriaMetrics, Loki, Tempo,<br/>OTel Collector, Grafana"]
-  end
-  subgraph aip["AI platform"]
-    ka["kagent + khook"]
-    agw["agentgateway (MCP proxy)"]
-    sub["agent-substrate<br/>(gVisor sandbox runtime)"]
-  end
-  subgraph etc["Other"]
-    keda["keda (autoscaling)"]
-    emqx["emqx-operator (MQTT)"]
-    bk["backup (Velero + Talos etcd)"]
-    hl["headlamp (dashboard)"]
-  end
+  L1 --> P["Tesla P100 (VRAM)"]
+  L2 --> R["64GB RAM"]
 ```
 
-HelmRepositories are centralised in
-`infrastructure/controllers/sources.yaml`; every `HelmRelease` references one by
-name (no inline chart URLs).
+- **GPU (wk-gpu):** `qwen3.5:9b` fully offloaded to the P100, Pascal-tuned
+  (flash-attention, FP16, continuous batching).
+- **CPU (wk-cpu):** `qwen3-coder-next`, mlock'd into 64GB RAM, 24 threads.
+- Weights persist on a `tns-fast-nfs` PVC (no re-download on restart). Both
+  expose Prometheus `/metrics`.
+- In **v1**, **agentgateway** fronts both behind stable aliases (`default`, `coder`,
+  `embeddings`) so consumers never reference a concrete model. Future: the
+  dual-P100 `ai-host` for `qwen3.6:35b` + optional LMCache.
+
+> Model names `qwen3.5:9b` / `qwen3-coder-next` are placeholders for the intended
+> models; current Qwen GGUFs stand in until they exist.
 
 ---
 
-## 5. Storage tiers
+## 4. Storage tiers (home — TrueNAS CSI)
 
-```mermaid
-flowchart LR
-  subgraph TrueNAS["TrueNAS (10GbE)"]
-    nvme["NVMe pool"]
-    hdd["HDD pool"]
-  end
-  nvme --> tfnvme["tns-fast-nvmeof<br/>(block, NVMe-oF)"]
-  nvme --> tfnfs["tns-fast-nfs<br/>(NFS, DEFAULT)"]
-  hdd  --> ttnfs["tns-tank-nfs<br/>(NFS, bulk)"]
+Pick the tier per workload:
 
-  tfnvme --> dbs["Databases (CNPG), Valkey,<br/>SeaweedFS volumes, EMQX"]
-  tfnfs  --> gen["Config, caches, model weights,<br/>HA config, general PVCs"]
-  ttnfs  --> media["Media / huge files"]
-
-  local["local-storage<br/>(node-local, disposable)"] --> scratch["small scratch only"]
-  seaweed["SeaweedFS S3<br/>seaweedfs-s3.svc:8333"] --> s3["per-app buckets via CRDs"]
-  hetzner["Hetzner DR bucket"] --> dr["offsite: etcd, Velero, CNPG WAL"]
-```
-
-Per-app Postgres (CloudNativePG) and Valkey instances are **never shared** — each
-app gets its own + credentials. S3 buckets/users are provisioned per-app via
-SeaweedFS CRDs (`S3Identity` + `S3Credentials` + `Bucket`).
-
----
-
-## 6. Observability & audit pipeline
-
-```mermaid
-flowchart LR
-  pods["Workloads (stdout + OTLP)"] --> otel["OTel Collector (DaemonSet)"]
-  tet["Tetragon (eBPF events, JSON stdout)"] --> otel
-  otel --> loki["Loki (logs)"]
-  otel --> vm["VictoriaMetrics (metrics)"]
-  otel --> tempo["Tempo (traces)"]
-  kagent["kagent agents (OTLP)"] --> phoenix["Arize Phoenix<br/>(LLM traces)"]
-  loki --> graf["Grafana"]
-  vm --> graf
-  tempo --> graf
-  graf -. "alerts (webhook)" .-> n8n["n8n"]
-```
-
-Tetragon runtime-security events flow stdout → OTel filelog → Loki (alertable in
-Grafana → n8n). LLM agent traces go to Phoenix via OTLP gRPC `:4317`.
-
----
-
-## 7. Security — defense in depth
-
-```mermaid
-flowchart TB
-  L1["L1 Admission — Kyverno<br/>3 baseline (Audit) + agent-restricted (Enforce, label-scoped)"]
-  L2["L2 Pod Security Admission<br/>Talos baseline cluster-wide; restricted on kagent ns"]
-  L3["L3 RBAC<br/>per-agent SAs (deny-all); tool-server scoped off cluster-admin"]
-  L4["L4 Network — Cilium<br/>default-deny ingress+egress for agent pods, allowlists"]
-  L5["L5 Workload identity — SPIRE<br/>per-agent SPIFFE SVIDs (k8s_psat)"]
-  L6["L6 Runtime — Tetragon<br/>TracingPolicies: shell exec, SA-token read, public egress"]
-  L7["L7 Sandbox — gVisor<br/>RuntimeClass (docling, pandoc) + Agent Substrate (guarded agents)"]
-  L8["L8 MCP enforcement — agentgateway<br/>per-agent JWT (Authentik) + CEL tool authz"]
-  L9["L9 LLM guardrails<br/>requireApproval (HITL), Spotlighting, guarded SandboxAgents"]
-  L10["L10 Supply chain — Trivy + image scanning"]
-
-  L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8 --> L9 --> L10
-```
-
-Secrets are SOPS/age throughout. The full hardening table + accepted gaps live in
-[apps/kagent/README.md](../kubernetes/apps/kagent/README.md).
-
----
-
-## 8. Identity & external exposure
-
-```mermaid
-flowchart LR
-  user["Operator"] --> nbm["NetBird mesh<br/>(netbird.DOMAIN)"]
-  nbm --> ak["Authentik<br/>forward-auth (embedded outpost)"]
-  ak --> apps["n8n, SearXNG, Phoenix,<br/>Home Assistant, Grafana…"]
-
-  cil["Cilium Gateway API"] --> ak
-  ak -. "OIDC provider" .-> gw["agentgateway (JWT issuer)"]
-  cm["cert-manager + Let's Encrypt"] -. TLS .-> cil
-```
-
-Apps are reached over the **NetBird mesh** (not the public internet) behind
-**Authentik** forward-auth. Authentik is also the **OIDC issuer** for
-agentgateway's MCP JWTs.
-
----
-
-## 9. AI agent system (kagent)
-
-```mermaid
-flowchart TD
-  MO["main-orchestrator<br/>(Tier 0 — all inbound events)"]
-  SEC["security-orchestrator<br/>(Tier 0 — advisory + audit)"]
-
-  MO --> RC["research-chief (T1)"]
-  MO --> PC["platform-chief (T1)"]
-  MO --> HC["homelab-chief (T1)"]
-
-  RC --> WS["web-search-agent"]
-  RC --> DI["document-ingest-agent"]
-  RC --> SY["synthesis-agent"]
-  RC --> CI["citation-agent"]
-  RC --> DA["document-author-agent"]
-  DA --> PDF["pdf-converter-specialist"]
-  DA --> XL["spreadsheet-specialist"]
-
-  PC --> SRE["k8s-sre-agent"]
-  PC --> GF["gitops-flux-agent"]
-  PC --> OBS["observability-agent"]
-  PC --> DB["database-specialist"]
-  PC --> IDN["identity-network-agent"]
-  PC --> CU["cluster-update-specialist"]
-
-  HC --> HA["homeassistant-expert-agent"]
-  HC --> ZB["zigbee-mqtt-agent"]
-
-  FIN["finance-agent<br/>(GUARDED SandboxAgent)"]
-  MAIL["mail-agent<br/>(GUARDED SandboxAgent)"]
-
-  SEC -. "cross-cutting policy" .-> MO
-  MO -. "guarded path only" .-> FIN
-  MO -. "guarded path only" .-> MAIL
-```
-
-22 agents (20 `Agent` + 2 `SandboxAgent`). `main-orchestrator` delegates only to
-the three chiefs; guarded agents are kept out of every toolset (unreachable).
-Triggers (`khook`) fire `main-orchestrator` on cluster events
-(CrashLoopBackOff/OOMKill/Flux failures).
-
----
-
-## 10. MCP tool topology
-
-```mermaid
-flowchart LR
-  agents["kagent agents<br/>(restricted ns)"]
-
-  agents -->|"Bearer JWT"| agw["agentgateway<br/>JWT (Strict) + CEL authz"]
-  agw --> mem0["mem0 MCP (memory)"]
-  agw --> n8n["n8n MCP (notify/workflows)"]
-
-  agents -->|"direct (pre-token)"| sx["searxng-mcp<br/>search + fetch (research ns)"]
-  agents --> tools["kagent-tool-server<br/>(built-in k8s/helm, scoped RBAC)"]
-  sx --> searxng["SearXNG"]
-
-  subgraph scaffold["Scaffolded (unwired)"]
-    direction LR
-    s1["flux-git, ha-api, z2m-api,<br/>mqtt-admin, mail-*, scalable-portfolio,<br/>policy-evaluator, audit-log"]
-  end
-  agents -. TODO .-> scaffold
-```
-
-Only **mem0**, **n8n**, **searxng-mcp**, and the built-in **kagent-tool-server**
-are wired. mem0/n8n route through agentgateway (JWT — inert until the Authentik
-token is minted); `searxng-mcp` is direct so the research pipeline works now. The
-rest are flagged `RemoteMCPServer` scaffolds, referenced by no agent.
-
----
-
-## 11. Deep-research pipeline (Perplexity-style)
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant U as User / n8n / khook
-  participant MO as main-orchestrator
-  participant RC as research-chief
-  participant WS as web-search-agent
-  participant SX as searxng-mcp
-  participant DI as document-ingest
-  participant SY as synthesis-agent
-  participant CT as citation-agent
-  participant DA as document-author
-  U->>MO: research question
-  MO->>RC: delegate
-  RC->>RC: expand into 3-7 sub-questions
-  par parallel sub-searches
-    RC->>WS: sub-question
-    WS->>SX: searxng_web_search + web_url_read
-    SX-->>WS: results + page content
-    WS-->>RC: structured sources
-  end
-  RC->>DI: ingest URLs/docs (web_url_read; docling later)
-  RC->>SY: synthesize (context/evidence/analysis/conclusion)
-  RC->>CT: verify claims + add citations
-  RC->>DA: author deliverable (Pandoc/Gotenberg)
-  DA-->>U: cited report (DOCX/PPTX/PDF)
-```
-
-A turnkey alternative — **gpt-researcher** (`apps/research`, Apache-2.0) — runs
-the same plan→search→synthesize→report loop autonomously over our SearXNG + Ollama,
-exposed as a REST engine (wiring it into `research-chief` needs the `gptr-mcp`
-wrapper — TODO).
-
----
-
-## 12. agentgateway MCP enforcement (status)
-
-```mermaid
-sequenceDiagram
-  participant A as agent pod
-  participant G as agentgateway
-  participant AK as Authentik (JWKS)
-  participant M as mem0 / n8n MCP
-  A->>G: POST /mcp/mem0 + Authorization Bearer <JWT>
-  G->>AK: fetch JWKS, validate signature/issuer/aud
-  Note over G: mode Strict — reject if invalid
-  G->>G: CEL authz — has(jwt.sub)
-  G->>M: proxied MCP call
-  M-->>A: tool result
-```
-
-**Integration status:** structurally complete and Flux-ordered correctly
-(CRDs in `infra-controllers` before the CRs in `apps`), but **not yet functional**
-— JWT `mode: Strict` + a placeholder bearer means MCP-through-gateway is rejected
-until a real Authentik client-credentials token is minted into
-`mcp-gateway-token` (or set `mode: Permissive` for staged rollout). Field shapes
-(`AgentgatewayPolicy`, tool-name passthrough, the cross-ns `ReferenceGrant`) carry
-`VERIFY-BEFORE-DEPLOY` notes.
-
----
-
-## 13. Applications (the `apps/` toggle)
-
-| App | Purpose | Notable backing services |
+| Tier | StorageClass | Use |
 |---|---|---|
-| `authentik` | Identity / SSO / OIDC | CNPG, Valkey, SeaweedFS (media) |
-| `ollama` | LLM serving (GPU, OpenAI-compatible) | 3x P100, LiteLLM, PVC (models) |
-| `litellm` | Central model-alias layer | ollama |
-| `whisper` | Speech-to-text (Whisper/Speaches) | CPU, OpenAI-compatible |
-| `searxng` | Meta-search (JSON enabled) | — |
-| `n8n` | Workflow automation / Signal notify | CNPG, Valkey |
-| `mem0` | Agent long-term memory (pgvector) | CNPG |
-| `phoenix` | LLM trace observability | CNPG |
-| `kagent` | AI agent fleet (22 agents + MCP) | LiteLLM, mem0, n8n, searxng-mcp |
-| `agentgateway` | MCP JWT + CEL enforcement | Authentik (OIDC) |
-| `research` | Deep-research backend | mcp-searxng + gpt-researcher |
-| `mqtt` | EMQX broker (3-node) | — |
-| `homeassistant` | Home automation | EMQX |
-| `zigbee2mqtt` | Zigbee bridge | EMQX, coordinator |
-| `gotenberg` / `docling` / `pandoc` | Document convert / parse / generate | gVisor (docling, pandoc) |
+| `fast` | `tns-fast-nvmeof` | NVMe-oF block — **only** where it materially helps (databases) |
+| `standard` | `tns-fast-nfs` | fast pool over NFS — **default** for everything (weights, monitoring) |
+| `storage` | `tns-tank-nfs` | HDD pool over NFS — huge media libraries only |
+| `local` | `local-path` | node-local — tmp/scratch only |
 
-Enable/disable an app by adding/removing its line in
-`kubernetes/apps/kustomization.yaml`.
+The cloud/offsite single-node clusters use `local-path` (the TrueNAS tiers are
+LAN-only).
 
 ---
 
-## Validation
+## 5. Observability — the VictoriaMetrics stack
 
-```bash
-kustomize build kubernetes/infrastructure/controllers
-kustomize build kubernetes/infrastructure/configs
-kustomize build kubernetes/apps
-kustomize build kubernetes/clusters/production
-yamllint -c .yamllint kubernetes/
-task sops:check
-cd tofu && tofu init -backend=false && tofu validate
+One ecosystem end-to-end (no Loki/Tempo): metrics, logs, and traces all on
+VictoriaMetrics-family stores, viewed in Grafana.
+
+```mermaid
+flowchart LR
+  subgraph nodes["every node (DaemonSet)"]
+    OC["OTel collector<br/>filelog + hostmetrics + OTLP<br/>(tolerates all taints)"]
+  end
+  OC -->|metrics| VM["VictoriaMetrics"]
+  OC -->|logs| VL["VictoriaLogs"]
+  OC -->|traces| VT["VictoriaTraces"]
+  VM & VL & VT --> GF["Grafana<br/>dashboards + Explore"]
 ```
+
+- A single **OTel collector** DaemonSet (tolerates every taint, so cp/gpu/cpu
+  nodes are covered) ships metrics → **VictoriaMetrics**, logs → **VictoriaLogs**
+  (LogsQL), traces → **VictoriaTraces** (OTLP).
+- **Grafana** has all three as datasources + cluster-overview dashboards;
+  aggregated logs via Explore / LogsQL.
+
+---
+
+## 6. GitOps & secrets
+
+```mermaid
+flowchart LR
+  Dev["workstation"] -->|git push| Repo["Git repo"]
+  Repo --> FHL["Flux @ home<br/>clusters/home"]
+  Repo --> FCL["Flux @ cloud (v1)<br/>clusters/cloud"]
+  Repo --> FOS["Flux @ offsite (v3)<br/>clusters/offsite"]
+  FHL --> KHL["infrastructure/ + apps/"]
+  SOPS["SOPS + age<br/>(.sops.yaml)"] -.decrypt.-> FHL
+```
+
+- **One Flux per cluster** — each cluster bootstraps its own Flux pointing at its
+  `clusters/<name>/` entrypoint and reconciles a subset.
+- **Secrets:** SOPS + age; every secret is a `*.sops.yaml` encrypted in place
+  (key anchored in `.sops.yaml`). Flux decrypts at apply time.
+- **tofu/** provisions the Proxmox VMs (home) and the Hetzner cluster (v1);
+  the offsite TrueNAS VM is created by hand (no provider).
+- **Validation (workstation/CI):** `kustomize build` + `kubeconform -strict`,
+  `yamllint`, `tofu validate`, `task sops:check`. Conventional Commits.
+
+### Repo layout
+
+```
+clusters/<name>/         Flux entrypoints (home; cloud=v1; offsite=v3)
+infrastructure/
+  controllers/           operators, CNI/CSI, observability (home)
+  configs/               cluster-wide config
+  cloud/   (v1)          minimal cloud-cluster infra (Cilium id 2 + mesh + Gateway)
+apps/<app>/              flat, one dir per app (v0: llama-cpp)
+tofu/locations/<loc>/    OpenTofu per location (home=Proxmox; cloud=v1; offsite=v3)
+openspec/                the phased plan (v0–v3)
+```
+
+---
+
+## 7. Phase roadmap
+
+```mermaid
+flowchart LR
+  v0["v0 — MVP foundation<br/>home cluster (4 VMs)<br/>Cilium · storage · VM-stack<br/>llama.cpp GPU + CPU"]
+  v1["v1 — platform<br/>cloud cluster + Cluster Mesh<br/>ingress · backup(S3) · Authentik<br/>CNPG · Valkey · agentgateway"]
+  v2["v2 — agents<br/>n8n · kagent · agentgateway · mem0<br/>all via agentgateway → llama.cpp"]
+  v3["v3 — offsite<br/>TrueNAS VM cluster<br/>joins mesh for DR"]
+  v0 --> v1 --> v2 --> v3
+```
+
+| Phase | Adds |
+|---|---|
+| **v0** | home cluster (cp/wk/wk-gpu/wk-cpu); Cilium; 4 storage tiers; VictoriaMetrics+Logs+Traces+Grafana; llama.cpp (GPU `qwen3.5:9b` + CPU `qwen3-coder-next`). Cilium is built **mesh-ready**. |
+| **v1** | the **cloud** cluster (Hetzner VPS) + **Cilium Cluster Mesh**; public ingress; backups → Hetzner S3; Authentik (SSO); CloudNativePG + Valkey operators; **agentgateway** in front of llama.cpp. |
+| **v2** | n8n, kagent, agentgateway, mem0 — wired **agentgateway → llama.cpp** (no model redeploy). |
+| **v3** | the **offsite** cluster (TrueNAS Scale VM) joined to the mesh for disaster recovery / remote presence. |
+
+Synergy is deliberate: each phase reuses the prior layers — `n8n / kagent →
+agentgateway → llama.cpp`; embeddings and memory ride the same model
+layer; nothing re-deploys a model server.

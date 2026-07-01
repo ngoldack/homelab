@@ -2,21 +2,31 @@
 
 ## Architecture
 
-This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu for VM provisioning and Flux CD for GitOps delivery. Two main directories:
+This repo manages **Talos OS** Kubernetes clusters using **OpenTofu** for VM provisioning and **Flux CD** for GitOps delivery. It is built in phases, planned and tracked in OpenSpec (`openspec/changes/`) — read the relevant change before making architectural edits:
 
-- `tofu/` — OpenTofu infrastructure code (Proxmox VMs, Talos machine configs, secrets). Uses `bpg/proxmox` and `siderolabs/talos` providers.
-- `kubernetes/` — Kubernetes manifests reconciled by Flux, following the canonical Flux layout:
-  - `kubernetes/clusters/production/` — Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`).
-  - `kubernetes/infrastructure/controllers/` — operators, agents, CNI/CSI, and the central Helm `sources.yaml` (e.g. `cilium`, `cert-manager`).
-  - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers (`cluster-issuers`, `kyverno-policies`).
-  - `kubernetes/apps/<app>/` — one directory per application (its own `kustomization.yaml`). A single flat layout (no base/overlay split) since this is a single cluster. `kubernetes/apps/kustomization.yaml` is the toggle list: add/remove an `<app>` entry to enable/disable it. Shared building blocks live in `kubernetes/apps/_components/`.
+- **v0 (current): `home`** — a single Proxmox-hosted cluster (4 VMs on `pmx-main`): one control-plane, a general worker, a GPU worker (P100) and a CPU-inference worker. Cilium (kube-proxy replacement) is installed mesh-**ready** but not yet meshed. This is the only cluster that exists today.
+- **v1: `cloud`** — a Hetzner edge cluster joined to `home` via Cilium Cluster Mesh; adds ingress, in-cluster S3, Authentik, CloudNativePG, Valkey, agentgateway.
+- **v3: `offsite`** — a TrueNAS-hosted cluster for offsite/DR.
+
+Anything beyond v0 (cloud, cluster mesh, S3, databases, Authentik, ingress) is **not deployed yet** — treat it as the design in OpenSpec, not as live config.
+
+Two main directories:
+
+- `tofu/` — OpenTofu infrastructure code (Proxmox VMs, Talos machine configs, secrets). Uses `bpg/proxmox` and `siderolabs/talos` providers. Node pools are a single `map(object)` in `variables.tf`.
+- `kubernetes/` — manifests reconciled by Flux, following the canonical Flux layout:
+  - `kubernetes/clusters/<name>/` — per-cluster Flux `Kustomization` entrypoints (`infra-controllers`, `infra-configs`, `apps`). v0 has `clusters/home/`.
+  - `kubernetes/infrastructure/controllers/` — operators, CNI/CSI, and the central Helm `sources.yaml` (v0: `cilium`, the VictoriaMetrics/Grafana stack, the NVIDIA device plugin, `local-path`, the TrueNAS CSI driver).
+  - `kubernetes/infrastructure/configs/` — cluster-wide config that depends on controllers.
+  - `kubernetes/apps/<app>/` — one directory per application (its own `kustomization.yaml`); flat layout, no base/overlay split. `kubernetes/apps/kustomization.yaml` is the toggle list: add/remove an `<app>` entry to enable/disable it (v0 ships just `llama-cpp`). Shared building blocks live in `kubernetes/apps/_components/`.
 
 ## Conventions
 
 ### OpenTofu (`tofu/`)
-- Sensitive values (API passwords, passphrases) are **never** declared as `variable` blocks. They are read exclusively from `tofu/secret.sops.yaml` via the `carlpett/sops` provider (`data "sops_file" "secrets"`).
+- Tofu is **separated by location**: `tofu/locations/<home|cloud|offsite>/` is a self-contained root module per location (its own state + its own `secret.sops.yaml`). v0 ships `tofu/locations/home/` (Proxmox); `cloud` (Hetzner, v1) and `offsite` (TrueNAS, v3) are placeholders. Run against a location, e.g. `tofu -chdir=tofu/locations/home ...` or the `task tofu:*` runners.
+- Sensitive values (API tokens, passphrases) are **never** declared as `variable` blocks. They are read exclusively from the location's `secret.sops.yaml` via the `carlpett/sops` provider (`data "sops_file" "secrets"`).
+- **Per-host naming**: the home location runs on Proxmox hosts `pmx-main` (v0), and later `pmx-ai`, `pmx-core` (Dell R210ii), `pmx-test`, plus `pbs` (Proxmox Backup Server). Per-host secrets/references are keyed by host — the API token is `proxmox_<host>_api_token` (e.g. `proxmox_pmx-main_api_token`). Proxmox uses **API-token** auth (`api_token = "<user>@<realm>!<tokenid>=<uuid>"`), not username/password.
 - All Talos machine configs must disable the default CNI (`cni.name = none`) and kube-proxy (`proxy.disabled = true`) — Cilium replaces both.
-- `tofu/terraform.tfstate` is committed to Git — it is encrypted at rest via OpenTofu native AES-GCM state encryption. Do not move it to a remote backend.
+- Each location's `terraform.tfstate` is committed to Git — encrypted at rest via OpenTofu native AES-GCM state encryption. Do not move it to a remote backend.
 - Node pools are defined as a single `map(object)` variable in `variables.tf`. Do not add individual variables per node type.
 
 ### Kubernetes (`kubernetes/`)
@@ -26,7 +36,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 - All three Flux `Kustomization` objects (`infra-controllers`, `infra-configs`, `apps`) include a `decryption.provider: sops` block. Preserve this on edits.
 
 ### Secrets & Encryption
-- Encryption uses **age** via **SOPS**. The public key anchor is `homelab_age_key` in `.sops.yaml`. Do not add a second key provider without updating both path rules.
+- Encryption uses **age** via **SOPS**. Recipients are defined once via the `&age_recipients` YAML anchor in `.sops.yaml` (the workstation key + a CI key) and shared across both `path_regex` rules (`tofu/secret.sops.yaml` and `kubernetes/**/*.sops.yaml`). Keep recipients in sync across both rules; the workstation private key lives in `age.key` (gitignored, exported as `SOPS_AGE_KEY` for sops/tofu).
 - The state file passphrase is stored as `state_encryption_passphrase` inside `tofu/secret.sops.yaml`.
 - Continuous Integration (`.github/workflows/ci.yaml`) lints only: it enforces secure encryption on all metadata (files matching raw `.sops.yaml` without proper `sops:` block structural indicators fail the run), plus YAML/workflow lint, OpenTofu validate, and kustomize/kubeconform. It never deploys or mutates infrastructure.
 
@@ -42,7 +52,7 @@ This repo manages a Proxmox-hosted Talos OS Kubernetes cluster using OpenTofu fo
 
 ## Integration Matrix Task For AI Agents
 
-When installing or modifying any application in this cluster context, AI agents **MUST** respect and implement the following cross-system integration guidelines:
+When installing or modifying any application, AI agents **MUST** respect these cross-system integration guidelines. Items marked **(v1+)** describe subsystems that are designed in OpenSpec but **not deployed in v0** — do not wire an app to them until that phase lands.
 
 ### 1. Storage Considerations
 - **No node-local Storage for state**: Do not use `hostPath`. The `local-storage` class (local-path provisioner) is only for non-persistent, small scratch data.
@@ -51,14 +61,16 @@ When installing or modifying any application in this cluster context, AI agents 
   - `tns-fast-nvmeof` — fast pool over NVMe-oF (block). Use for databases / high-performance, latency-sensitive workloads (CloudNativePG Postgres, Valkey).
   - `tns-tank-nfs` — tank (HDD) pool over NFS. Use only for huge files / media libraries (e.g. Emby).
   - `local-storage` — node-local, disposable. Small scratch only.
-- **Stateless/Stateful Separation**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`. Each app that needs a database gets its **own** instance + credentials (never shared).
-- **Object storage (S3)**: the in-cluster S3 is **SeaweedFS** (operator-managed, volume data on `tns-fast-nvmeof`), reachable at `seaweedfs-s3.seaweedfs.svc.cluster.local:8333`. Provision per-app buckets/users/credentials by colocating namespaced CRDs in the app (`S3Identity` + `S3Credentials` → a generated `AWS_*` Secret + `Bucket` with `owner`), referencing the `seaweedfs` cluster (permitted by the `ResourceReferenceGrant` in the `seaweedfs` namespace). Do **not** reintroduce MinIO or Crossplane.
+- **Never delete TrueNAS volumes**: every `tns-*` StorageClass uses `reclaimPolicy: Retain`. Deleting a PVC/PV MUST NOT delete the underlying TrueNAS (`nas-main`) dataset — volumes are reclaimed **manually** on the NAS. When tearing down an app, keep its volume. Only `local-storage` is safe to discard.
+- **Backups (v1+)**: split by target. **External** S3 (Hetzner) is used **only** for etcd / Talos snapshots, with **one folder per cluster**. **Internal** S3 (in-cluster SeaweedFS) backs up everything else that needs a backup (app data, databases). Do not send app/DB backups to the external bucket.
+- **Stateless/Stateful Separation (v1+)**: Whenever possible, avoid deploying databases (like Postgres, Redis, Valkey) as Helm sub-charts. Instead, deploy external cloud-native operator clusters (e.g., using `CloudNativePG` or `Valkey-Operator`) alongside the application namespaces, and inject host references. Put their volumes on `tns-fast-nvmeof`. Each app that needs a database gets its **own** instance + credentials (never shared).
+- **Object storage (S3) (v1+)**: the in-cluster S3 is **SeaweedFS** (operator-managed, volume data on `tns-fast-nvmeof`), reachable at `seaweedfs-s3.seaweedfs.svc.cluster.local:8333`. Provision per-app buckets/users/credentials by colocating namespaced CRDs in the app (`S3Identity` + `S3Credentials` → a generated `AWS_*` Secret + `Bucket` with `owner`), referencing the `seaweedfs` cluster (permitted by the `ResourceReferenceGrant` in the `seaweedfs` namespace). Do **not** reintroduce MinIO or Crossplane.
 
 ### 2. Security & Policy (Cilium)
-- **Cilium Ingress Engine Linkages**: Ensure that custom application routing maps to Cilium's eBPF components. When possible, deploy Cilium-specific annotations to integrate and capture traffic drops.
+- **Cilium Ingress Engine Linkages (v1+)**: Ensure that custom application routing maps to Cilium's eBPF components. When possible, deploy Cilium-specific annotations to integrate and capture traffic drops.
 
 ### 3. Identity Provider (Authentik) Checks
-- **Environment API Integration**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `secrets.sops.yaml`.
+- **Environment API Integration (v1+)**: All application outposts or bouncers must reference unified environment variables mapping back to encrypted `.sops.yaml` secrets.
 
 ### 4. Code compliance & Validation
 - **Dry-run Validations**: All configurations must build cleanly using Kustomize overlays: `kustomize build kubernetes/apps` and `kustomize build kubernetes/infrastructure/controllers` (and `.../configs`).
@@ -69,16 +81,20 @@ When installing or modifying any application in this cluster context, AI agents 
 
 ```bash
 # Validate OpenTofu config (no credentials needed)
-cd tofu && tofu init -backend=false && tofu validate
+tofu -chdir=tofu/locations/home init -backend=false && tofu -chdir=tofu/locations/home validate
 
-# Validate Kubernetes manifests
-kustomize build kubernetes/clusters/production
+# Build every Flux Kustomize entrypoint (v0)
+kustomize build kubernetes/clusters/home
 kustomize build kubernetes/infrastructure/controllers
 kustomize build kubernetes/infrastructure/configs
 kustomize build kubernetes/apps
 
-# Lint YAML
+# Schema-validate the built manifests
+kustomize build kubernetes/apps | kubeconform -strict -ignore-missing-schemas
+
+# Lint YAML + assert every *.sops.yaml is still encrypted
 yamllint -c .yamllint kubernetes/
+task sops:check
 ```
 
 ## CI/CD

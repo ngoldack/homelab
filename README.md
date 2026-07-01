@@ -2,65 +2,62 @@
 
 GitOps-driven homelab running a [Talos OS](https://www.talos.dev/) Kubernetes cluster on [Proxmox](https://www.proxmox.com/), provisioned with [OpenTofu](https://opentofu.org/) and managed by [Flux CD](https://fluxcd.io/).
 
-> **Full architecture with mermaid diagrams: [docs/architecture.md](docs/architecture.md)** — every
-> moving part (GitOps flow, operators, storage tiers, observability, the defense-in-depth security
-> stack, the AI agent fleet, the MCP topology, and the deep-research pipeline).
+> **Full architecture with diagrams: [docs/architecture.md](docs/architecture.md).**
+> A lean, **phased** self-hosted AI platform (v0–v3): three Talos/Cilium clusters
+> joined by Cilium Cluster Mesh, serving LLMs via **llama.cpp**. The plan lives in
+> [`openspec/`](openspec/) — each phase is an OpenSpec change.
 
 ## Stack
 
-| Layer | Tool |
-|---|---|
-| Hypervisor | Proxmox VE |
-| OS | Talos Linux (gVisor system extension on workers) |
-| Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`) |
-| CNI | Cilium (eBPF, kube-proxy replacement, Gateway API, Hubble) |
-| Storage | TrueNAS CSI (`tns-csi`, NFS + NVMe-oF) + local-path |
-| Object Storage | SeaweedFS (in-cluster S3, embedded IAM, CRD-driven buckets/users) |
-| Databases | CloudNativePG (per-app Postgres, Barman DR) + Valkey operator |
-| VPN Overlay | NetBird (mesh) |
-| Identity / SSO | Authentik (forward-auth + OIDC issuer) |
-| TLS | cert-manager + Let's Encrypt |
-| Observability | VictoriaMetrics + Loki + Tempo + OTel Collector + Grafana |
-| LLM Serving | Ollama (GPU, 3x Tesla P100) behind LiteLLM aliases; Whisper (CPU) for STT |
-| AI Agents | kagent + khook (22-agent fleet), Mem0 memory, Arize Phoenix traces |
-| MCP Enforcement | agentgateway (per-agent JWT + CEL tool authz) |
-| Agent Sandbox | gVisor RuntimeClass + Agent Substrate (guarded agents) |
-| Deep Research | SearXNG + mcp-searxng + gpt-researcher |
-| Home Automation | EMQX (MQTT) + Home Assistant + Zigbee2MQTT |
-| Document Tooling | Gotenberg (PDF) + Docling (parse) + Pandoc (generate) |
-| Workload Identity | SPIRE / SPIFFE (per-agent SVIDs) |
-| Runtime Security | Tetragon (eBPF) |
-| Policy / Supply chain | Kyverno + Trivy |
-| Autoscaling | KEDA |
-| GitOps | Flux CD |
-| Secrets | SOPS + age |
-| State Encryption | OpenTofu native AES-GCM |
+Built **per phase** (see [`openspec/`](openspec/)). v0 is deliberately minimal;
+v1–v3 add the cloud cluster + mesh, platform, agents, and offsite.
+
+| Layer | Tool | Phase |
+|---|---|---|
+| Hypervisor | Proxmox VE (home); Hetzner (cloud); TrueNAS Scale (offsite) | — |
+| OS | Talos Linux | v0 |
+| Provisioning | OpenTofu (`bpg/proxmox` + `siderolabs/talos`; `hcloud` in v1) | v0 |
+| CNI / mesh | Cilium (eBPF, kube-proxy replacement, Gateway API, Hubble, WireGuard, **Cluster Mesh**) | v0 / mesh v1 |
+| Storage | TrueNAS CSI — 4 tiers (`tns-fast-nvmeof`, `tns-fast-nfs` default, `tns-tank-nfs`, `local-path`) | v0 |
+| Observability | VictoriaMetrics + VictoriaLogs + VictoriaTraces + OTel Collector + Grafana | v0 |
+| LLM Serving | **llama.cpp** — `qwen3.5:9b` on the P100 (GPU) + `qwen3-coder-next` on a dedicated CPU node | v0 |
+| Model gateway | agentgateway (stable aliases in front of llama.cpp) | v1 |
+| Identity / SSO | Authentik (OIDC + forward-auth) | v1 |
+| Databases | CloudNativePG (per-app Postgres, S3 backups) + Valkey operator | v1 |
+| Backups | → Hetzner S3 (offsite) | v1 |
+| Agents | n8n, kagent, agentgateway, mem0 — all via agentgateway → llama.cpp | v2 |
+| GitOps | Flux CD (one per cluster) | v0 |
+| Secrets | SOPS + age (`*.sops.yaml`) | v0 |
+| State Encryption | OpenTofu native AES-GCM | v0 |
 
 ## Cluster Layout
 
-Node pools are a `map(object)` in `tofu/variables.tf` (counts configurable):
+Three independent clusters joined by Cilium Cluster Mesh (`openspec/` for the plan):
 
-| Pool | Role | vCPU | RAM | Notes |
-|---|---|---|---|---|
-| `master` | controlplane | 4 | 4 GB | |
-| `worker-default` | worker | 8 | 24 GB | gVisor |
-| `worker-ai` | worker | 12 | 84 GB | gVisor, `ai=true:NoSchedule` taint |
+| Cluster | Phase | Nodes |
+|---|---|---|
+| **home** (id 1) | v0 | 4 Talos VMs on `pmx-main`: `cp` (control plane), `wk` (general), `wk-gpu` (P100 → GPU model), `wk-cpu` (64GB → CPU model) |
+| **cloud** (id 2) | v1 | 1 Hetzner VPS (cp+workloads) — public ingress edge |
+| **offsite** (id 3) | v3 | 1 TrueNAS Scale VM (cp+workloads) — DR |
+
+Node pools are a `map(object)` in `tofu/locations/home/variables.tf`.
 
 ## Repository Structure
 
 ```
 .
-├── tofu/                   # OpenTofu — VM provisioning & Talos bootstrap
+├── openspec/               # the phased plan (v0–v3): proposals, specs, tasks
+├── tofu/
+│   └── locations/          # OpenTofu per location: home (Proxmox); cloud=v1; offsite=v3
 └── kubernetes/
     ├── clusters/
-    │   └── production/     # Flux entrypoints (infra-controllers → infra-configs → apps)
+    │   └── home/        # Flux entrypoints (infra-controllers → infra-configs → apps)
     ├── infrastructure/
-    │   ├── controllers/    # operators (Cilium, CNPG, kagent, agentgateway, SPIRE, …)
-    │   │                   # + central sources.yaml (HelmRepositories)
-    │   └── configs/        # cluster-wide config (Kyverno + Tetragon policies,
-    │   │                   # cluster-issuers, object-storage, runtime-classes)
+    │   ├── controllers/    # Cilium, gateway-api, NVIDIA device plugin, storage CSI,
+    │   │                   # observability + central sources.yaml (HelmRepositories)
+    │   └── configs/        # cluster-wide config
     └── apps/               # one dir per app; kustomization.yaml is the toggle list
-        └── _components/    # shared kustomize components (cnpg-barman-backup)
+        └── llama-cpp/      # v0: the GPU + CPU model servers
 ```
 
 See **[docs/architecture.md](docs/architecture.md)** for the full diagrammed breakdown.
@@ -85,14 +82,14 @@ age-keygen -o age.key
 
 ```bash
 # Fill in proxmox_api_password and state_encryption_passphrase, then encrypt:
-SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/secret.sops.yaml
+SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/locations/home/secret.sops.yaml
 ```
 
 ### 3. Provision Infrastructure
 
 ```bash
 export SOPS_AGE_KEY_FILE=age.key
-export TOFU_ENCRYPTION_PASSPHRASE_statekey=$(sops -d tofu/secret.sops.yaml | yq .state_encryption_passphrase)
+export TOFU_ENCRYPTION_PASSPHRASE_statekey=$(sops -d tofu/locations/home/secret.sops.yaml | yq .state_encryption_passphrase)
 
 cd tofu
 tofu init && tofu apply
@@ -110,7 +107,7 @@ flux bootstrap github \
   --owner=<your-github-username> \
   --repository=homelab \
   --branch=main \
-  --path=kubernetes/clusters/production \
+  --path=kubernetes/clusters/home \
   --personal
 ```
 
@@ -127,7 +124,7 @@ This repo keeps automation deliberately simple:
 - **Everything else runs on your workstation** via the [`Taskfile`](Taskfile.yaml)
   with host-installed tools (no containers). Provisioning and reconciliation
   (`tofu apply`, `flux reconcile`) are run manually while your host is connected
-  to the private mesh (`netbird up`).
+  to the LAN.
 
 ### Tasks
 
@@ -144,7 +141,7 @@ Run `task --list` for the full set. Common ones:
 | `task secrets:edit -- <file>` | Open a SOPS file in your editor |
 
 Live tasks read the OpenTofu state-encryption passphrase from
-`tofu/secret.sops.yaml` on demand; put `SOPS_AGE_KEY` in a gitignored `.env`.
+`tofu/locations/home/secret.sops.yaml` on demand; put `SOPS_AGE_KEY` in a gitignored `.env`.
 
 ---
 

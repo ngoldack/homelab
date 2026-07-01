@@ -3,54 +3,15 @@ kind: Kustomization
 resources:
   # Helm chart sources (HelmRepository definitions) consumed by the controllers below
   - sources.yaml
-  # Networking & CRDs
+  # Networking & CRDs — Cilium is the sole CNI and provides all networking
   - gateway-api
   - cilium
-  # Certificates
-  - cert-manager
-  - cert-manager-webhook-hetzner
-  # Edge ingress (Traefik on the Hetzner edge node; routes/Gateway in configs)
-  - traefik
-  # Edge WAF/IDS (CrowdSec: parses Traefik logs, community blocklist)
-  - crowdsec
-  # DNS automation: ExternalDNS public (Hetzner) + internal (rfc2136 -> Technitium)
-  - external-dns
-  # Storage
+  # Storage — TrueNAS CSI (4 tiers) + node-local-path (local/scratch tier)
   - storage/local-path
   - storage/tns-csi
-  # Edge-node-local storage (CrowdSec/Technitium PVCs; no TrueNAS over WAN)
-  - storage/local-path-edge
-  # Observability
-  - observability
-  # Security & runtime enforcement
-  - security
-  # Runtime security: Tetragon (eBPF; same Cilium vendor as the CNI). Detection
-  # policies live in infrastructure/configs/tetragon-policies. (Falco was
-  # evaluated and dropped to avoid a second, redundant eBPF stack.)
-  - tetragon
-  # Workload identity (SPIRE/SPIFFE: per-agent SVIDs)
-  - spire
-  # Networking overlay
-  - netbird
-  # Data operators
-  - cnpg-operator
-  - cnpg-barman-plugin
-  - valkey-operator
-  # GPU enablement (NVIDIA device plugin + nvidia RuntimeClass for the P100 node)
+  # GPU enablement (NVIDIA device plugin + nvidia RuntimeClass for the P100)
   - nvidia-device-plugin
-  # AI/ML autoscaling (KEDA; Ollama manages its own model load/unload natively)
-  - keda
-  # Object storage (SeaweedFS: S3-compatible, embedded IAM, CRD-driven buckets/users)
-  - seaweedfs-operator
-  # MQTT broker (EMQX operator; cluster CR lives in apps/mqtt)
-  - emqx-operator
-  # AI agent control plane (kagent + khook event triggers)
-  - kagent
-  - khook
-  # AI MCP gateway (agentgateway: per-agent JWT auth + CEL tool authz on MCP)
-  - agentgateway
-  # SandboxAgent runtime (gVisor/runsc via Agent Substrate) — EXPERIMENTAL
-  - agent-substrate
-  # Platform services
-  - backup
-  - headlamp
+  # LLM serving operator — Model + InferenceService CRDs (llama.cpp) for apps/llama-cpp
+  - llmkube
+  # Observability — VictoriaMetrics stack (metrics + logs + traces) + Grafana
+  - observability

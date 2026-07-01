@@ -23,31 +23,7 @@ spec:
       existingSecret: "grafana-admin-credentials"
       passwordKey: "admin-password"
 
-    # ── Authentik SSO (OpenID Connect via generic_oauth) ───────────────────
-    # NOTE: this HelmRelease lives in the infra-controllers layer, which has no
-    # Flux postBuild var substitution (enabling it would clobber the
-    # ${datasource}/${DS_VICTORIAMETRICS} tokens in the dashboard JSON). The
-    # public domain is therefore written literally here; only the client secret
-    # is sourced from SOPS via envValueFrom.
-    grafana.ini:
-      server:
-        root_url: https://grafana.netbird.ngoldack.xyz
-      auth.generic_oauth:
-        enabled: true
-        name: Authentik
-        client_id: grafana
-        scopes: "openid email profile"
-        auth_url: https://auth.ngoldack.xyz/application/o/authorize/
-        token_url: https://auth.ngoldack.xyz/application/o/token/
-        api_url: https://auth.ngoldack.xyz/application/o/userinfo/
-        # Authentik returns groups; map the akadmin group to Grafana admin.
-        role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
-        use_pkce: true
-    envValueFrom:
-      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
-        secretKeyRef:
-          name: grafana-admin-credentials
-          key: oauth-client-secret
+    # v0: local admin login only. Authentik SSO (generic_oauth) returns in v1.
     sidecar:
       dashboards:
         enabled: true
@@ -70,28 +46,28 @@ spec:
         jsonData:
           prometheusType: Prometheus
           timeInterval: 15s
-      - name: Loki
-        type: loki
-        uid: loki
+      - name: VictoriaLogs
+        # Requires the victoriametrics-logs-datasource plugin (installed below).
+        type: victoriametrics-logs-datasource
+        uid: victorialogs
         access: proxy
-        url: http://loki.monitoring.svc.cluster.local:3100
-        jsonData:
-          maxLines: 1000
-      - name: Tempo
-        type: tempo
+        url: http://victoria-logs-single-server.monitoring.svc.cluster.local:9428
+      - name: VictoriaTraces
+        # VictoriaTraces exposes a Jaeger-compatible query API.
+        # VERIFY-BEFORE-DEPLOY: confirm the datasource type/URL for your release.
+        type: jaeger
+        uid: victoriatraces
         access: proxy
-        url: http://tempo.monitoring.svc.cluster.local:3200
+        url: http://victoria-traces.monitoring.svc.cluster.local:10428
         jsonData:
-          # Correlate spans with logs (Loki) and exemplar metrics (VictoriaMetrics).
           tracesToLogsV2:
-            datasourceUid: loki
-            filterByTraceID: true
+            datasourceUid: victorialogs
           tracesToMetrics:
             datasourceUid: victoriametrics
-          serviceMap:
-            datasourceUid: victoriametrics
-          nodeGraph:
-            enabled: true
+
+    # VictoriaLogs Grafana datasource plugin.
+    plugins:
+      - victoriametrics-logs-datasource
 
     resources:
       requests:

@@ -2,22 +2,22 @@
 age.key
 *.age.key
 
-# OpenTofu state and lock files
-tofu/.terraform/
+# OpenTofu state and lock files (per-location: tofu/locations/<home|cloud|offsite>/)
+tofu/locations/*/.terraform/
 # The provider lock file IS committed so CI validates against pinned versions.
-!tofu/.terraform.lock.hcl
+!tofu/locations/*/.terraform.lock.hcl
 # Track encrypted state in Git while ignoring plaintext backups
-!tofu/terraform.tfstate
-tofu/terraform.tfstate.backup
+!tofu/locations/*/terraform.tfstate
+tofu/locations/*/terraform.tfstate.backup
 
 # OpenTofu plan files may contain secrets (even though plan encryption is enabled,
 # avoid committing them by accident)
-tofu/*.tfplan
+tofu/locations/*/*.tfplan
 *.tfplan
 
 # tfvars files may contain plaintext secrets
-tofu/*.tfvars
-tofu/*.tfvars.json
+tofu/locations/*/*.tfvars
+tofu/locations/*/*.tfvars.json
 
 # Environment files used for SOPS/encryption passphrases
 .env

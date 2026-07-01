@@ -8,7 +8,7 @@ version: '3'
 # your host is already connected to the private mesh (e.g. `netbird up`).
 #
 # Secrets: put SOPS_AGE_KEY in .env (gitignored). The OpenTofu state-encryption
-# passphrase is read on demand from tofu/secret.sops.yaml via SOPS.
+# passphrase is read on demand from tofu/locations/home/secret.sops.yaml via SOPS.
 #
 # Required tools: sops, age, tofu, kustomize, kubeconform, yamllint, actionlint,
 # trivy, flux, kubectl. Install any that are missing before running.
@@ -18,14 +18,14 @@ dotenv:
 
 vars:
   OVERLAYS: >-
-    kubernetes/clusters/production
+    kubernetes/clusters/home
     kubernetes/infrastructure/controllers
     kubernetes/infrastructure/configs
     kubernetes/apps
   # Decrypt the state-encryption passphrase and emit the TF_ENCRYPTION expression
   # OpenTofu expects. Used by every live tofu task.
   TF_ENCRYPTION_EXPR: >-
-    key_provider "pbkdf2" "statekey" { passphrase = "$(sops -d tofu/secret.sops.yaml
+    key_provider "pbkdf2" "statekey" { passphrase = "$(sops -d {{.ROOT_DIR}}/tofu/locations/home/secret.sops.yaml
     | sed -n 's/^state_encryption_passphrase:[[:space:]]*//p' | tr -d '"')" }
 
 tasks:
@@ -77,7 +77,7 @@ tasks:
 
   tofu:validate:
     desc: OpenTofu fmt + init (no backend) + validate
-    dir: tofu
+    dir: tofu/locations/home
     env:
       # Throwaway passphrase; no real state is touched during validate.
       TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "ci-offline-validate-dummy-passphrase" }'
@@ -107,52 +107,52 @@ tasks:
 
   tofu:init:
     desc: tofu init with the state-encryption passphrase
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
 
   tofu:plan:
     desc: Plan against live infrastructure (read-only)
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu plan -input=false
 
   tofu:apply:
     desc: Apply against live infrastructure
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu apply -input=false
 
   tofu:destroy:
     desc: Destroy all managed infrastructure (prompts for confirmation)
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu destroy -input=false
 
   tofu:output:
     desc: Print all OpenTofu outputs
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output
 
   tofu:kubeconfig:
     desc: Extract kubeconfig from state to kubeconfig.yaml
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw kubeconfig > ../kubeconfig.yaml
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw kubeconfig > {{.ROOT_DIR}}/kubeconfig.yaml
       - 'echo "wrote kubeconfig.yaml"'
 
   tofu:talosconfig:
     desc: Extract talosconfig from state to talosconfig.yaml
-    dir: tofu
+    dir: tofu/locations/home
     cmds:
       - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw talosconfig > ../talosconfig.yaml
+      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw talosconfig > {{.ROOT_DIR}}/talosconfig.yaml
       - 'echo "wrote talosconfig.yaml"'
 
   flux:reconcile:
@@ -168,11 +168,11 @@ tasks:
   # -------------------------
 
   secrets:edit:
-    desc: 'Open a SOPS file in your editor (e.g. task secrets:edit -- tofu/secret.sops.yaml)'
+    desc: 'Open a SOPS file in your editor (e.g. task secrets:edit -- tofu/locations/home/secret.sops.yaml)'
     cmds:
       - sops {{.CLI_ARGS}}
 
   secrets:decrypt:
-    desc: 'Decrypt a SOPS file to stdout (e.g. task secrets:decrypt -- tofu/secret.sops.yaml)'
+    desc: 'Decrypt a SOPS file to stdout (e.g. task secrets:decrypt -- tofu/locations/home/secret.sops.yaml)'
     cmds:
       - sops -d {{.CLI_ARGS}}

@@ -1,0 +1,54 @@
+# LLMKube — Kubernetes operator for self-hosted LLM inference (llama.cpp/GGUF).
+# Provides the Model + InferenceService CRDs used by apps/llama-cpp; ships
+# Prometheus metrics + OpenTelemetry tracing that flow into the observability
+# stack. https://github.com/defilantech/LLMKube
+#
+# VERIFY-BEFORE-DEPLOY: pin an exact chart version (young, fast-moving project);
+# confirm the CUDA runtime image serves the Pascal/sm_60 P100.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: llmkube
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: llmkube-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  chart:
+    spec:
+      chart: llmkube
+      version: "0.8.x"
+      sourceRef:
+        kind: HelmRepository
+        name: llmkube
+        namespace: flux-system
+  values:
+    crds:
+      install: true
+      keep: true
+    # Shared, operator-managed model cache. tns-fast-nfs is RWX (NFS) so the
+    # single shared cache is reachable from any node (GPU chat + CPU coder).
+    # reclaimPolicy on the class is Retain — the cache dataset survives teardown.
+    modelCache:
+      enabled: true
+      mode: shared
+      storageClass: tns-fast-nfs
+      accessMode: ReadWriteMany
+      size: 150Gi
+      mountPath: /models
+    priorityClasses:
+      enabled: true
+    # Controller metrics on. Inference-pod (llama.cpp) metrics are scraped by the
+    # OTel collector via prometheus.io annotations (see InferenceService
+    # podAnnotations) — no Prometheus Operator PodMonitor is used in v0.
+    metrics:
+      enabled: true
+    prometheus:
+      serviceMonitor:
+        enabled: false
+      inferencePodMonitor:
+        enabled: false

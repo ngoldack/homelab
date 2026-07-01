@@ -11,7 +11,7 @@ version: '3'
 # passphrase is read on demand from tofu/locations/home/secret.sops.yaml via SOPS.
 #
 # Required tools: sops, age, tofu, kustomize, kubeconform, yamllint, actionlint,
-# trivy, flux, kubectl. Install any that are missing before running.
+# trivy, flux, kubectl. Or use `devbox shell` to get all tools in one shot.
 
 dotenv:
   - .env

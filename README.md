@@ -68,7 +68,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full diagrammed bre
 
 - `age`, `sops`, `tofu`, `talosctl`, `flux`, `kubectl`, `kustomize`,
   `kubeconform`, `yamllint`, `actionlint`, `trivy`, and [`task`](https://taskfile.dev)
-  installed locally
+  installed locally — or simply run `devbox shell` (see `devbox.json`)
 - Proxmox VE host reachable on the network
 
 ### 1. Generate Age Key

@@ -78,6 +78,13 @@ flowchart TD
 All networking is **Cilium** (kube-proxy replacement, Gateway API, Hubble,
 WireGuard node encryption, LB-IPAM). Talos CNI = `none`, kube-proxy disabled.
 
+The nodes sit on a **dedicated VLAN-tagged subnet** (`10.30.0.0/24`, VLAN 3000 on
+`vmbr0`), isolated from the management LAN, with **static IPs** (`cp` `.10`, `wk`
+`.11`, `wk-gpu` `.12`, `wk-cpu` `.13`; gateway `.1`). The router owns the VLAN
+gateway + a maintenance-DHCP scope for the Talos install-ISO boot; the installed
+nodes use the static addresses. Subnet, VLAN, gateway, DNS and per-node IPs are
+tofu variables (`k8s_*` + `node_pools[*].ip_addresses`).
+
 ---
 
 ## 3. Model serving — llama.cpp

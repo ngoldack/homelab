@@ -12,6 +12,14 @@ The system SHALL provision four Talos VMs on the Proxmox VE host `pmx-main` (hom
 - **WHEN** the machine config is generated
 - **THEN** the built-in CNI is set to `none` and kube-proxy is disabled
 
+### Requirement: Dedicated Kubernetes node subnet
+The Talos nodes SHALL live on a dedicated VLAN-tagged subnet with static IP addresses, isolated from the management LAN. The nodes' primary NIC is tagged with the k8s VLAN; the router owns the VLAN gateway and a maintenance DHCP scope (for the install-ISO boot before the static config applies).
+
+#### Scenario: Nodes on the dedicated subnet with static IPs
+- **WHEN** the VMs are provisioned and the Talos config is applied
+- **THEN** each node's primary NIC is tagged with the k8s VLAN and carries its assigned static IP
+- **AND** the control-plane endpoint resolves to the control plane's static IP on that subnet
+
 ### Requirement: GPU enablement for the Tesla P100
 The system SHALL pass the host's NVIDIA Tesla P100 through to the Talos VM (Proxmox PCIe passthrough) and expose it to Kubernetes as a schedulable `nvidia.com/gpu` resource using a Pascal-supporting driver matching `580.159.04`.
 

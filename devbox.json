@@ -4,7 +4,7 @@
     "sops@latest",
     "age@1.2.1",
     "opentofu@latest",
-    "kustomize@latest",
+    "kustomize@3.10.0",
     "kubeconform@0.6.7",
     "yamllint@latest",
     "actionlint@1.7.11",

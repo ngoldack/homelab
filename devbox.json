@@ -3,7 +3,7 @@
   "packages": [
     "sops@latest",
     "age@1.2.1",
-    "opentofu@latest",
+    "opentofu@1.12.1",
     "kustomize@3.10.0",
     "kubeconform@0.6.7",
     "yamllint@latest",

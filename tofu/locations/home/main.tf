@@ -14,6 +14,7 @@ locals {
         gpu               = pool.gpu
         hostpci           = pool.hostpci
         taints            = pool.taints
+        ip                = length(pool.ip_addresses) > idx ? pool.ip_addresses[idx] : null
       }
     }
   ]...)
@@ -24,8 +25,8 @@ resource "proxmox_download_file" "talos_iso" {
   node_name    = var.proxmox_node
   content_type = "iso"
   datastore_id = "local"
-  file_name    = "talos-${var.talos_version}-amd64.iso"
-  url          = "https://github.com/siderolabs/talos/releases/download/${var.talos_version}/talos-amd64.iso"
+  file_name    = "metal-${var.talos_version}-amd64.iso"
+  url          = "https://github.com/siderolabs/talos/releases/download/${var.talos_version}/metal-amd64.iso"
 }
 
 # Create Proxmox VMs for each node in the cluster
@@ -49,9 +50,10 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     enabled = true
   }
 
-  # Default (primary) NIC — general cluster traffic
+  # Default (primary) NIC — on the dedicated Kubernetes VLAN (tagged on vmbr0)
   network_device {
-    bridge = var.network_default_bridge
+    bridge  = var.network_default_bridge
+    vlan_id = var.k8s_vlan_id
   }
 
   # Secure (secondary) NIC — VLAN-isolated network; only attached when enabled for the pool
@@ -82,10 +84,11 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   dynamic "hostpci" {
     for_each = { for h in each.value.hostpci : h.device => h }
     content {
-      device = hostpci.value.device
-      id     = hostpci.value.id
-      pcie   = hostpci.value.pcie
-      rombar = hostpci.value.rombar
+      device  = hostpci.value.device
+      id      = hostpci.value.id
+      mapping = hostpci.value.mapping
+      pcie    = hostpci.value.pcie
+      rombar  = hostpci.value.rombar
     }
   }
 
@@ -96,5 +99,5 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # Define VM boot order. Disk (scsi0) is preferred so that after Talos installs to
   # disk on first boot and reboots, the VM boots the installed system rather than the
   # live ISO again. The CDROM remains as a fallback for the initial install boot.
-  boot_order = ["scsi0", "cdrom"]
+  boot_order = ["scsi0", "ide3"]
 }

@@ -49,24 +49,28 @@ data "talos_machine_configuration" "controlplane" {
           kubelet = {
             extraMounts = [
               {
-                hostPath  = "/sys/kernel/tracing"
-                mountPath = "/sys/kernel/tracing"
-                readOnly  = false
+                destination = "/sys/kernel/tracing"
+                type        = "bind"
+                source      = "/sys/kernel/tracing"
+                options     = ["bind", "rshared", "rw"]
               },
               {
-                hostPath  = "/sys/kernel/btf"
-                mountPath = "/sys/kernel/btf"
-                readOnly  = true
+                destination = "/sys/kernel/btf"
+                type        = "bind"
+                source      = "/sys/kernel/btf"
+                options     = ["bind", "rshared", "ro"]
               },
               {
-                hostPath  = "/sys/fs/bpf"
-                mountPath = "/sys/fs/bpf"
-                readOnly  = false
+                destination = "/sys/fs/bpf"
+                type        = "bind"
+                source      = "/sys/fs/bpf"
+                options     = ["bind", "rshared", "rw"]
               },
               {
-                hostPath  = "/run/containerd/containerd.sock"
-                mountPath = "/run/containerd/containerd.sock"
-                readOnly  = true
+                destination = "/run/containerd/containerd.sock"
+                type        = "bind"
+                source      = "/run/containerd/containerd.sock"
+                options     = ["bind", "rshared", "ro"]
               }
             ]
           }
@@ -154,24 +158,28 @@ data "talos_machine_configuration" "worker" {
           kubelet = {
             extraMounts = [
               {
-                hostPath  = "/sys/kernel/tracing"
-                mountPath = "/sys/kernel/tracing"
-                readOnly  = false
+                destination = "/sys/kernel/tracing"
+                type        = "bind"
+                source      = "/sys/kernel/tracing"
+                options     = ["bind", "rshared", "rw"]
               },
               {
-                hostPath  = "/sys/kernel/btf"
-                mountPath = "/sys/kernel/btf"
-                readOnly  = true
+                destination = "/sys/kernel/btf"
+                type        = "bind"
+                source      = "/sys/kernel/btf"
+                options     = ["bind", "rshared", "ro"]
               },
               {
-                hostPath  = "/sys/fs/bpf"
-                mountPath = "/sys/fs/bpf"
-                readOnly  = false
+                destination = "/sys/fs/bpf"
+                type        = "bind"
+                source      = "/sys/fs/bpf"
+                options     = ["bind", "rshared", "rw"]
               },
               {
-                hostPath  = "/run/containerd/containerd.sock"
-                mountPath = "/run/containerd/containerd.sock"
-                readOnly  = true
+                destination = "/run/containerd/containerd.sock"
+                type        = "bind"
+                source      = "/run/containerd/containerd.sock"
+                options     = ["bind", "rshared", "ro"]
               }
             ]
           }
@@ -261,7 +269,29 @@ resource "talos_machine_configuration_apply" "controlplane" {
   for_each                    = { for k, v in local.vm_instances : k => v if v.talos_role == "controlplane" }
   client_configuration        = talos_machine_secrets.this.client_configuration
   machine_configuration_input = data.talos_machine_configuration.controlplane.machine_configuration
-  node                        = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
+  # Applied over the maintenance-mode (DHCP) address on the k8s VLAN; the patch
+  # below pins the node to its static IP for the installed system.
+  node = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
+
+  # Per-node static networking on the dedicated k8s subnet.
+  # VERIFY-BEFORE-DEPLOY: confirm the primary NIC matches deviceSelector.driver
+  # (virtio_net for Proxmox virtio NICs).
+  config_patches = each.value.ip != null ? [
+    yamlencode({
+      machine = {
+        network = {
+          interfaces = [
+            {
+              deviceSelector = { driver = "virtio_net" }
+              addresses      = ["${each.value.ip}/${var.k8s_subnet_prefix}"]
+              routes         = [{ network = "0.0.0.0/0", gateway = var.k8s_gateway }]
+            }
+          ]
+          nameservers = var.k8s_nameservers
+        }
+      }
+    })
+  ] : []
 }
 
 # Config apply logic for worker nodes — selects the per-pool config by pool_name
@@ -269,26 +299,44 @@ resource "talos_machine_configuration_apply" "worker" {
   for_each                    = { for k, v in local.vm_instances : k => v if v.talos_role == "worker" }
   client_configuration        = talos_machine_secrets.this.client_configuration
   machine_configuration_input = data.talos_machine_configuration.worker[each.value.pool_name].machine_configuration
-  node                        = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
+  # Applied over the maintenance-mode (DHCP) address; patch pins the static IP.
+  node = proxmox_virtual_environment_vm.talos_nodes[each.key].ipv4_addresses[1][0]
+
+  config_patches = each.value.ip != null ? [
+    yamlencode({
+      machine = {
+        network = {
+          interfaces = [
+            {
+              deviceSelector = { driver = "virtio_net" }
+              addresses      = ["${each.value.ip}/${var.k8s_subnet_prefix}"]
+              routes         = [{ network = "0.0.0.0/0", gateway = var.k8s_gateway }]
+            }
+          ]
+          nameservers = var.k8s_nameservers
+        }
+      }
+    })
+  ] : []
 }
 
 # Talos client configuration (used to construct talosconfig)
 data "talos_client_configuration" "this" {
   cluster_name         = var.cluster_name
   client_configuration = talos_machine_secrets.this.client_configuration
-  endpoints            = [for k, v in local.vm_instances : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"]
+  endpoints            = [for k, v in local.vm_instances : v.ip != null ? v.ip : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"]
 }
 
 # Bootstrap the cluster on the first master node
 resource "talos_machine_bootstrap" "this" {
   depends_on           = [talos_machine_configuration_apply.controlplane]
   client_configuration = talos_machine_secrets.this.client_configuration
-  node                 = [for k, v in local.vm_instances : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
+  node                 = [for k, v in local.vm_instances : v.ip != null ? v.ip : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
 }
 
 # Retrieve kubeconfig from the bootstrapped cluster
 resource "talos_cluster_kubeconfig" "this" {
   depends_on           = [talos_machine_bootstrap.this]
   client_configuration = talos_machine_secrets.this.client_configuration
-  node                 = [for k, v in local.vm_instances : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
+  node                 = [for k, v in local.vm_instances : v.ip != null ? v.ip : proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses[1][0] if v.talos_role == "controlplane"][0]
 }

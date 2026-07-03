@@ -26,7 +26,7 @@ Two main directories:
 - Sensitive values (API tokens, passphrases) are **never** declared as `variable` blocks. They are read exclusively from the location's `secret.sops.yaml` via the `carlpett/sops` provider (`data "sops_file" "secrets"`).
 - **Per-host naming**: the home location runs on Proxmox hosts `pmx-main` (v0), and later `pmx-ai`, `pmx-core` (Dell R210ii), `pmx-test`, plus `pbs` (Proxmox Backup Server). Per-host secrets/references are keyed by host — the API token is `proxmox_<host>_api_token` (e.g. `proxmox_pmx-main_api_token`). Proxmox uses **API-token** auth (`api_token = "<user>@<realm>!<tokenid>=<uuid>"`), not username/password.
 - All Talos machine configs must disable the default CNI (`cni.name = none`) and kube-proxy (`proxy.disabled = true`) — Cilium replaces both.
-- Each location's `terraform.tfstate` is committed to Git — encrypted at rest via OpenTofu native AES-GCM state encryption. Do not move it to a remote backend.
+- Each location's state lives remotely in a **Hetzner Object Storage** bucket (`backend "s3"` in `providers.tf`, one bucket keyed by `locations/<name>/terraform.tfstate` per location) — never committed to Git. It is still encrypted at rest via OpenTofu native AES-GCM state encryption (backend-agnostic), layered on top of the bucket. Bucket + S3 credentials are a manual, one-time Hetzner Console step (no Terraform-manageable resource exists); credentials live in the location's `secret.sops.yaml` and are exported as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` by `task tofu:*`.
 - Node pools are defined as a single `map(object)` variable in `variables.tf`. Do not add individual variables per node type.
 
 ### Kubernetes (`kubernetes/`)
@@ -36,8 +36,8 @@ Two main directories:
 - All three Flux `Kustomization` objects (`infra-controllers`, `infra-configs`, `apps`) include a `decryption.provider: sops` block. Preserve this on edits.
 
 ### Secrets & Encryption
-- Encryption uses **age** via **SOPS**. Recipients are defined once via the `&age_recipients` YAML anchor in `.sops.yaml` (the workstation key + a CI key) and shared across both `path_regex` rules (`tofu/secret.sops.yaml` and `kubernetes/**/*.sops.yaml`). Keep recipients in sync across both rules; the workstation private key lives in `age.key` (gitignored, exported as `SOPS_AGE_KEY` for sops/tofu).
-- The state file passphrase is stored as `state_encryption_passphrase` inside `tofu/secret.sops.yaml`.
+- Encryption uses **age** via **SOPS**. Recipients are defined once via the `&age_recipients` YAML anchor in `.sops.yaml` (the workstation key + a CI key) and shared across both `path_regex` rules (`tofu/locations/*/secret.sops.yaml` and `kubernetes/**/*.sops.yaml`). Keep recipients in sync across both rules; the workstation private key lives in `age.key` (gitignored, exported as `SOPS_AGE_KEY` for sops/tofu).
+- The state file passphrase is stored as `state_encryption_passphrase` inside each location's `secret.sops.yaml` (e.g. `tofu/locations/home/secret.sops.yaml`).
 - Continuous Integration (`.github/workflows/ci.yaml`) lints only: it enforces secure encryption on all metadata (files matching raw `.sops.yaml` without proper `sops:` block structural indicators fail the run), plus YAML/workflow lint, OpenTofu validate, and kustomize/kubeconform. It never deploys or mutates infrastructure.
 
 ### Commit Messages

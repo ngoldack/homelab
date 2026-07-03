@@ -22,11 +22,17 @@ vars:
     kubernetes/infrastructure/controllers
     kubernetes/infrastructure/configs
     kubernetes/apps
-  # Decrypt the state-encryption passphrase and emit the TF_ENCRYPTION expression
-  # OpenTofu expects. Used by every live tofu task.
-  TF_ENCRYPTION_EXPR: >-
-    key_provider "pbkdf2" "statekey" { passphrase = "$(sops -d {{.ROOT_DIR}}/tofu/locations/home/secret.sops.yaml
-    | sed -n 's/^state_encryption_passphrase:[[:space:]]*//p' | tr -d '"')" }
+  # Decrypt the state-encryption passphrase for live tofu tasks.
+  # Resolved once via shell; injected as TF_ENCRYPTION env var in each live task.
+  TOFU_PASSPHRASE:
+    sh: set -a && . {{.ROOT_DIR}}/.env && set +a && sops -d {{.ROOT_DIR}}/tofu/locations/home/secret.sops.yaml | grep 'state_encryption_passphrase' | awk '{print $2}' | tr -d '"'
+  # Hetzner Object Storage credentials for the tofu state backend (S3-compatible).
+  # Injected as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — the S3 backend and the
+  # underlying AWS SDK read those env vars the same way they would for real AWS.
+  HETZNER_S3_ACCESS_KEY:
+    sh: set -a && . {{.ROOT_DIR}}/.env && set +a && sops -d {{.ROOT_DIR}}/tofu/locations/home/secret.sops.yaml | grep 'hetzner_s3_access_key' | awk '{print $2}' | tr -d '"'
+  HETZNER_S3_SECRET_KEY:
+    sh: set -a && . {{.ROOT_DIR}}/.env && set +a && sops -d {{.ROOT_DIR}}/tofu/locations/home/secret.sops.yaml | grep 'hetzner_s3_secret_key' | awk '{print $2}' | tr -d '"'
 
 tasks:
   default:
@@ -108,51 +114,81 @@ tasks:
   tofu:init:
     desc: tofu init with the state-encryption passphrase
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
+      - tofu init -lockfile=readonly
 
   tofu:plan:
     desc: Plan against live infrastructure (read-only)
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu plan -input=false
+      - tofu init -lockfile=readonly
+      - tofu plan -input=false
 
   tofu:apply:
     desc: Apply against live infrastructure
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu apply -input=false
+      - tofu init -lockfile=readonly
+      - tofu apply -input=false
 
   tofu:destroy:
     desc: Destroy all managed infrastructure (prompts for confirmation)
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu destroy -input=false
+      - tofu init -lockfile=readonly
+      - tofu destroy -input=false
 
   tofu:output:
     desc: Print all OpenTofu outputs
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output
+      # Real backend init (NOT -backend=false): outputs are read from the
+      # remote state in the Hetzner bucket, so the S3 backend must be loaded.
+      - tofu init -lockfile=readonly
+      - tofu output
 
   tofu:kubeconfig:
     desc: Extract kubeconfig from state to kubeconfig.yaml
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw kubeconfig > {{.ROOT_DIR}}/kubeconfig.yaml
+      - tofu init -lockfile=readonly
+      - tofu output -raw kubeconfig > {{.ROOT_DIR}}/kubeconfig.yaml
       - 'echo "wrote kubeconfig.yaml"'
 
   tofu:talosconfig:
     desc: Extract talosconfig from state to talosconfig.yaml
     dir: tofu/locations/home
+    env:
+      TF_ENCRYPTION: 'key_provider "pbkdf2" "statekey" { passphrase = "{{.TOFU_PASSPHRASE}}" }'
+      AWS_ACCESS_KEY_ID: "{{.HETZNER_S3_ACCESS_KEY}}"
+      AWS_SECRET_ACCESS_KEY: "{{.HETZNER_S3_SECRET_KEY}}"
     cmds:
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu init -backend=false -lockfile=readonly
-      - TF_ENCRYPTION='{{.TF_ENCRYPTION_EXPR}}' tofu output -raw talosconfig > {{.ROOT_DIR}}/talosconfig.yaml
+      - tofu init -lockfile=readonly
+      - tofu output -raw talosconfig > {{.ROOT_DIR}}/talosconfig.yaml
       - 'echo "wrote talosconfig.yaml"'
 
   flux:reconcile:

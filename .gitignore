@@ -3,12 +3,14 @@ age.key
 *.age.key
 
 # OpenTofu state and lock files (per-location: tofu/locations/<home|cloud|offsite>/)
+# State itself is NOT tracked in Git — it lives remotely in a Hetzner Object
+# Storage bucket (backend "s3" in providers.tf), client-side encrypted via
+# OpenTofu's native state encryption. Only the provider lock file is committed.
 tofu/locations/*/.terraform/
+tofu/locations/*/terraform.tfstate
+tofu/locations/*/terraform.tfstate.backup
 # The provider lock file IS committed so CI validates against pinned versions.
 !tofu/locations/*/.terraform.lock.hcl
-# Track encrypted state in Git while ignoring plaintext backups
-!tofu/locations/*/terraform.tfstate
-tofu/locations/*/terraform.tfstate.backup
 
 # OpenTofu plan files may contain secrets (even though plan encryption is enabled,
 # avoid committing them by accident)

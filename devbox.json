@@ -10,7 +10,7 @@
     "actionlint@1.7.11",
     "trivy@latest",
     "fluxcd@0.41.2",
-    "kubectl@latest",
+    "kubectl@1.36.1",
     "go-task@latest"
   ],
   "shell": {

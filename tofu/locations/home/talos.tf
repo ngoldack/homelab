@@ -13,7 +13,7 @@ resource "talos_machine_secrets" "this" {
 # Generate control plane machine configuration
 data "talos_machine_configuration" "controlplane" {
   cluster_name       = var.cluster_name
-  cluster_endpoint   = var.cluster_endpoint
+  cluster_endpoint   = local.cluster_endpoint
   machine_type       = "controlplane"
   machine_secrets    = talos_machine_secrets.this.machine_secrets
   talos_version      = var.talos_version
@@ -136,7 +136,7 @@ data "talos_machine_configuration" "worker" {
   for_each = { for k, v in var.node_pools : k => v if v.talos_role == "worker" }
 
   cluster_name       = var.cluster_name
-  cluster_endpoint   = var.cluster_endpoint
+  cluster_endpoint   = local.cluster_endpoint
   machine_type       = "worker"
   machine_secrets    = talos_machine_secrets.this.machine_secrets
   talos_version      = var.talos_version
@@ -283,11 +283,11 @@ resource "talos_machine_configuration_apply" "controlplane" {
           interfaces = [
             {
               deviceSelector = { driver = "virtio_net" }
-              addresses      = ["${each.value.ip}/${var.k8s_subnet_prefix}"]
-              routes         = [{ network = "0.0.0.0/0", gateway = var.k8s_gateway }]
+              addresses      = ["${each.value.ip}/${local.network.subnet_prefix}"]
+              routes         = [{ network = "0.0.0.0/0", gateway = local.network.gateway }]
             }
           ]
-          nameservers = var.k8s_nameservers
+          nameservers = local.network.nameservers
         }
       }
     })
@@ -309,11 +309,11 @@ resource "talos_machine_configuration_apply" "worker" {
           interfaces = [
             {
               deviceSelector = { driver = "virtio_net" }
-              addresses      = ["${each.value.ip}/${var.k8s_subnet_prefix}"]
-              routes         = [{ network = "0.0.0.0/0", gateway = var.k8s_gateway }]
+              addresses      = ["${each.value.ip}/${local.network.subnet_prefix}"]
+              routes         = [{ network = "0.0.0.0/0", gateway = local.network.gateway }]
             }
           ]
-          nameservers = var.k8s_nameservers
+          nameservers = local.network.nameservers
         }
       }
     })

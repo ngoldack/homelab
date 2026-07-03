@@ -38,6 +38,7 @@ Two main directories:
 ### Secrets & Encryption
 - Encryption uses **age** via **SOPS**. Recipients are defined once via the `&age_recipients` YAML anchor in `.sops.yaml` (the workstation key + a CI key) and shared across both `path_regex` rules (`tofu/locations/*/secret.sops.yaml` and `kubernetes/**/*.sops.yaml`). Keep recipients in sync across both rules; the workstation private key lives in `age.key` (gitignored, exported as `SOPS_AGE_KEY` for sops/tofu).
 - The state file passphrase is stored as `state_encryption_passphrase` inside each location's `secret.sops.yaml` (e.g. `tofu/locations/home/secret.sops.yaml`).
+- **IPs and network topology are treated as secrets** — VLAN tags, subnets, gateways, nameservers, and any host's static IP/hostname (Proxmox, TrueNAS, node addresses, etc.) are never committed as plaintext literals, even as example/default values in `.tf` or plaintext YAML. They live in the relevant `*.sops.yaml` (tofu: `secret.sops.yaml`'s `network` block, read via `local.network`; Kubernetes: alongside the app's other credentials, injected via HelmRelease `valuesFrom`). Docs may describe the mechanism but must not state real values.
 - Continuous Integration (`.github/workflows/ci.yaml`) lints only: it enforces secure encryption on all metadata (files matching raw `.sops.yaml` without proper `sops:` block structural indicators fail the run), plus YAML/workflow lint, OpenTofu validate, and kustomize/kubeconform. It never deploys or mutates infrastructure.
 
 ### Commit Messages

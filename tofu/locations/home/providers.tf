@@ -81,7 +81,7 @@ provider "proxmox" {
   # embedded in the token, so no separate username/password is needed. SSH (below)
   # still handles the operations the Proxmox API token cannot perform on its own.
   # Per-host key convention: proxmox_<host>_api_token (host = Proxmox node name).
-  api_token = local.proxmox_secrets["proxmox_pmx-main_api_token"]
+  api_token = local.secrets["proxmox_pmx-main_api_token"]
   insecure  = true
 
   ssh {

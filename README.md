@@ -72,11 +72,13 @@ This walks through a **first deploy from scratch** — no cluster exists yet.
   `kubeconform`, `yamllint`, `actionlint`, `trivy`, and [`task`](https://taskfile.dev)
   installed locally — or simply run `devbox shell` (see `devbox.json`)
 - Proxmox VE host reachable on the network
-- **Networking**: a dedicated VLAN trunked to the Proxmox host (default VLAN
-  3000 / `10.30.0.0/24`, see `tofu/locations/home/variables.tf`) with a
+- **Networking**: a dedicated VLAN trunked to the Proxmox host, with a
   maintenance DHCP scope on that VLAN (Talos boots the install ISO in
   maintenance mode before its static IP is applied), and your workstation able
-  to route to that subnet (tofu/talosctl/kubectl all talk to the nodes there)
+  to route to that subnet (tofu/talosctl/kubectl all talk to the nodes there).
+  The VLAN tag, subnet, and node IPs are treated as sensitive — set in
+  `tofu/locations/home/secret.sops.yaml`'s `network` block, never committed
+  in plaintext.
 - A **Hetzner Cloud** account, for the OpenTofu remote-state bucket (Object
   Storage) — no VMs are provisioned there in v0, only state storage
 
@@ -106,6 +108,9 @@ step in the [Hetzner Cloud Console](https://console.hetzner.com/):
 
 ### 3. Configure secrets
 
+IPs and subnet layout are treated as sensitive throughout this repo — they're
+never committed in plaintext, only inside `*.sops.yaml`.
+
 ```bash
 sops tofu/locations/home/secret.sops.yaml
 ```
@@ -116,23 +121,19 @@ Fill in:
 - `proxmox_pmx-main_api_token` — a Proxmox API token (`<user>@<realm>!<tokenid>=<uuid>`)
 - `state_encryption_passphrase` — pre-filled with a strong random value; leave
   it or roll your own
+- `network` — your dedicated k8s VLAN tag, subnet prefix, gateway,
+  nameservers, and a static IP per node (keyed by `node_pools` pool name; see
+  the in-file comments). Omit a pool here to fall back to DHCP for it.
 
-`sops` re-encrypts automatically on save. Also set the TrueNAS CSI credential:
+`sops` re-encrypts automatically on save. Also set the TrueNAS CSI credential
+(API key **and** the TrueNAS API endpoint — its IP/hostname is sensitive too):
 
 ```bash
 sops kubernetes/infrastructure/controllers/storage/tns-csi/secret.sops.yaml
+# fill in: apiKey, url (wss://<truenas-ip-or-host>:443/api/current)
 ```
 
-### 4. Point the TrueNAS CSI driver at your NAS
-
-This one isn't a secret — edit it directly:
-
-```bash
-# kubernetes/infrastructure/controllers/storage/tns-csi/helmrelease.yaml
-# replace: url: wss://YOUR-TRUENAS-IP:443/api/current
-```
-
-### 5. Review the VERIFY-BEFORE-DEPLOY notes
+### 4. Review the VERIFY-BEFORE-DEPLOY notes
 
 A handful of values in this repo are deliberately unverified placeholders
 (scan for `VERIFY-BEFORE-DEPLOY`), most importantly:
@@ -146,7 +147,7 @@ A handful of values in this repo are deliberately unverified placeholders
 - `tofu/locations/home/providers.tf` — the Hetzner S3 backend's `use_path_style`
   / `use_lockfile` settings haven't been exercised against a real bucket yet
 
-### 6. Provision infrastructure
+### 5. Provision infrastructure
 
 ```bash
 task tofu:plan   # review the plan
@@ -165,10 +166,11 @@ tofu -chdir=tofu/locations/home init
 tofu -chdir=tofu/locations/home apply
 ```
 
-The nodes come up on the dedicated subnet with static IPs: `cp` `10.30.0.10`
-(the API endpoint), `wk` `.11`, `wk-gpu` `.12`, `wk-cpu` `.13`.
+The nodes come up on your dedicated subnet with the static IPs you configured
+in `secret.sops.yaml`'s `network.node_ips` (the control-plane one becomes the
+API endpoint).
 
-### 7. Bootstrap Flux
+### 6. Bootstrap Flux
 
 ```bash
 task tofu:kubeconfig  # writes kubeconfig.yaml from the new state
@@ -186,7 +188,7 @@ KUBECONFIG=kubeconfig.yaml flux bootstrap github \
   --personal
 ```
 
-### 8. Verify
+### 7. Verify
 
 ```bash
 KUBECONFIG=kubeconfig.yaml kubectl get nodes                    # 4 nodes, Ready

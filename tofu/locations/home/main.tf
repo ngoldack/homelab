@@ -14,10 +14,33 @@ locals {
         gpu               = pool.gpu
         hostpci           = pool.hostpci
         taints            = pool.taints
-        ip                = length(pool.ip_addresses) > idx ? pool.ip_addresses[idx] : null
+        # Static IP sourced from the secret network.node_ips[<pool>] (index-
+        # aligned with count); missing pool/index falls back to DHCP (null).
+        ip = try(local.network.node_ips[pool_name][idx], null)
       }
     }
   ]...)
+
+  # The (first) controlplane pool's name, used to derive the cluster endpoint
+  # from its static IP without hardcoding a pool name.
+  controlplane_pool_name = [for k, v in var.node_pools : k if v.talos_role == "controlplane"][0]
+
+  # Control Plane Endpoint, derived from the secret network.node_ips — never a
+  # committed literal. Baked into the API server certs.
+  cluster_endpoint = "https://${local.network.node_ips[local.controlplane_pool_name][0]}:${var.cluster_api_port}"
+}
+
+# Guard the shape of the secret-sourced network.node_ips against the (public)
+# node_pools structure: any pool it lists must supply exactly one IP per
+# instance. Pools it omits simply fall back to DHCP.
+check "network_node_ips_shape" {
+  assert {
+    condition = alltrue([
+      for pool_name, pool in var.node_pools :
+      !contains(keys(local.network.node_ips), pool_name) || length(local.network.node_ips[pool_name]) == pool.count
+    ])
+    error_message = "secret.sops.yaml's network.node_ips must have exactly one IP per instance for any pool it lists (length == node_pools[pool].count)."
+  }
 }
 
 # Download the Talos OS ISO directly onto the Proxmox node
@@ -53,7 +76,7 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # Default (primary) NIC — on the dedicated Kubernetes VLAN (tagged on vmbr0)
   network_device {
     bridge  = var.network_default_bridge
-    vlan_id = var.k8s_vlan_id
+    vlan_id = local.network.vlan_id
   }
 
   # Secure (secondary) NIC — VLAN-isolated network; only attached when enabled for the pool

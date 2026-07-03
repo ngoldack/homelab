@@ -28,7 +28,7 @@ v1–v3 add the cloud cluster + mesh, platform, agents, and offsite.
 | Agents | n8n, kagent, agentgateway, mem0 — all via agentgateway → llama.cpp | v2 |
 | GitOps | Flux CD (one per cluster) | v0 |
 | Secrets | SOPS + age (`*.sops.yaml`) | v0 |
-| State Encryption | OpenTofu native AES-GCM | v0 |
+| State | OpenTofu native encryption; remote in Hetzner Object Storage (S3-compatible) | v0 |
 
 ## Cluster Layout
 
@@ -64,52 +64,139 @@ See **[docs/architecture.md](docs/architecture.md)** for the full diagrammed bre
 
 ## Getting Started
 
+This walks through a **first deploy from scratch** — no cluster exists yet.
+
 ### Prerequisites
 
 - `age`, `sops`, `tofu`, `talosctl`, `flux`, `kubectl`, `kustomize`,
   `kubeconform`, `yamllint`, `actionlint`, `trivy`, and [`task`](https://taskfile.dev)
   installed locally — or simply run `devbox shell` (see `devbox.json`)
 - Proxmox VE host reachable on the network
+- **Networking**: a dedicated VLAN trunked to the Proxmox host, with a
+  maintenance DHCP scope on that VLAN (Talos boots the install ISO in
+  maintenance mode before its static IP is applied), and your workstation able
+  to route to that subnet (tofu/talosctl/kubectl all talk to the nodes there).
+  The VLAN tag, subnet, and node IPs are treated as sensitive — set in
+  `tofu/locations/home/secret.sops.yaml`'s `network` block, never committed
+  in plaintext.
+- A **Hetzner Cloud** account, for the OpenTofu remote-state bucket (Object
+  Storage) — no VMs are provisioned there in v0, only state storage
 
-### 1. Generate Age Key
+### 1. Generate the age key
 
 ```bash
 age-keygen -o age.key
-# Copy the printed public key into .sops.yaml
+# Copy the printed public key into .sops.yaml (both age recipients must match)
+echo "SOPS_AGE_KEY=$(tail -1 age.key)" > .env
 ```
 
-### 2. Configure Secrets
+### 2. Create the Hetzner Object Storage bucket + credentials
+
+OpenTofu state for this location lives remotely in a Hetzner bucket (see
+`backend "s3"` in `tofu/locations/home/providers.tf`). Hetzner has no
+Terraform-manageable resource for Object Storage — this is a manual, one-time
+step in the [Hetzner Cloud Console](https://console.hetzner.com/):
+
+1. **Object Storage → Create Bucket** — name `ngoldack-tofu-state`, location
+   `fsn1` (Falkenstein). Using a different name/location? Update `bucket` /
+   `endpoints.s3` in `providers.tf` to match, or override at init time with
+   `-backend-config="bucket=..."` (backend blocks can't use variables).
+2. **Enable Versioning** on the bucket — a safety net for accidental state
+   corruption.
+3. **Object Storage → Credentials → Generate** — note the access key and
+   secret key (the secret is shown only once).
+
+### 3. Configure secrets
+
+IPs and subnet layout are treated as sensitive throughout this repo — they're
+never committed in plaintext, only inside `*.sops.yaml`.
 
 ```bash
-# Fill in proxmox_api_password and state_encryption_passphrase, then encrypt:
-SOPS_AGE_KEY_FILE=age.key sops --encrypt --in-place tofu/locations/home/secret.sops.yaml
+sops tofu/locations/home/secret.sops.yaml
 ```
 
-### 3. Provision Infrastructure
+Fill in:
+
+- `hetzner_s3_access_key` / `hetzner_s3_secret_key` — from step 2
+- `proxmox_pmx-main_api_token` — a Proxmox API token (`<user>@<realm>!<tokenid>=<uuid>`)
+- `state_encryption_passphrase` — pre-filled with a strong random value; leave
+  it or roll your own
+- `network` — your dedicated k8s VLAN tag, subnet prefix, gateway,
+  nameservers, and a static IP per node (keyed by `node_pools` pool name; see
+  the in-file comments). Omit a pool here to fall back to DHCP for it.
+
+`sops` re-encrypts automatically on save. Also set the TrueNAS CSI credential
+(API key **and** the TrueNAS API endpoint — its IP/hostname is sensitive too):
+
+```bash
+sops kubernetes/infrastructure/controllers/storage/tns-csi/secret.sops.yaml
+# fill in: apiKey, url (wss://<truenas-ip-or-host>:443/api/current)
+```
+
+### 4. Review the VERIFY-BEFORE-DEPLOY notes
+
+A handful of values in this repo are deliberately unverified placeholders
+(scan for `VERIFY-BEFORE-DEPLOY`), most importantly:
+
+- `tofu/locations/home/variables.tf` — the real P100 host PCI id
+  (`lspci -nn | grep -i nvidia`; needs IOMMU/vfio-pci on the Proxmox host) and
+  the NVIDIA Talos extension tags (must match your Talos version + the
+  Pascal-supporting host driver)
+- `kubernetes/apps/llama-cpp/model-{chat,coder}.yaml` — the real GGUF source
+  URLs/quants (the checked-in ones are placeholders until the target models exist)
+- `tofu/locations/home/providers.tf` — the Hetzner S3 backend's `use_path_style`
+  / `use_lockfile` settings haven't been exercised against a real bucket yet
+
+### 5. Provision infrastructure
+
+```bash
+task tofu:plan   # review the plan
+task tofu:apply  # provision the 4 VMs + bootstrap Talos/Kubernetes
+```
+
+Without `task`, the equivalent is:
 
 ```bash
 export SOPS_AGE_KEY_FILE=age.key
-export TOFU_ENCRYPTION_PASSPHRASE_statekey=$(sops -d tofu/locations/home/secret.sops.yaml | yq .state_encryption_passphrase)
+export TF_ENCRYPTION="key_provider \"pbkdf2\" \"statekey\" { passphrase = \"$(sops -d tofu/locations/home/secret.sops.yaml | yq .state_encryption_passphrase)\" }"
+export AWS_ACCESS_KEY_ID=$(sops -d tofu/locations/home/secret.sops.yaml | yq .hetzner_s3_access_key)
+export AWS_SECRET_ACCESS_KEY=$(sops -d tofu/locations/home/secret.sops.yaml | yq .hetzner_s3_secret_key)
 
-cd tofu
-tofu init && tofu apply
+tofu -chdir=tofu/locations/home init
+tofu -chdir=tofu/locations/home apply
 ```
 
-### 4. Bootstrap Flux
+The nodes come up on your dedicated subnet with the static IPs you configured
+in `secret.sops.yaml`'s `network.node_ips` (the control-plane one becomes the
+API endpoint).
+
+### 6. Bootstrap Flux
 
 ```bash
+task tofu:kubeconfig  # writes kubeconfig.yaml from the new state
+
 # Register the age key with the cluster so Flux can decrypt secrets
-kubectl create secret generic sops-age \
+KUBECONFIG=kubeconfig.yaml kubectl create secret generic sops-age \
   --namespace=flux-system \
   --from-file=age.agekey=age.key
 
-flux bootstrap github \
+KUBECONFIG=kubeconfig.yaml flux bootstrap github \
   --owner=<your-github-username> \
   --repository=homelab \
   --branch=main \
   --path=kubernetes/clusters/home \
   --personal
 ```
+
+### 7. Verify
+
+```bash
+KUBECONFIG=kubeconfig.yaml kubectl get nodes                    # 4 nodes, Ready
+KUBECONFIG=kubeconfig.yaml kubectl get pods -A                   # everything Running
+KUBECONFIG=kubeconfig.yaml kubectl describe node <wk-gpu node>   # nvidia.com/gpu: 1
+KUBECONFIG=kubeconfig.yaml kubectl get inferenceservice -n llama-cpp
+```
+
 
 ## CI / CD
 

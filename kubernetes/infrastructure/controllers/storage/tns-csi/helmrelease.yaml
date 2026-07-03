@@ -23,10 +23,13 @@ spec:
       name: tns-csi-credentials
       valuesKey: apiKey
       targetPath: truenas.apiKey
+    # TrueNAS IP/hostname is treated as sensitive (network topology) — injected
+    # from the same Secret rather than a plaintext value below.
+    - kind: Secret
+      name: tns-csi-credentials
+      valuesKey: url
+      targetPath: truenas.url
   values:
-    truenas:
-      url: wss://YOUR-TRUENAS-IP:443/api/current  # TODO: set to your TrueNAS API websocket endpoint
-
     # Storage tiers managed by the CSI driver. Nodes are interconnected at 10GbE.
     # - tns-tank-nfs:    tank (HDD) over NFS — huge files / media libraries (Emby)
     # - tns-fast-nfs:    fast (NVMe) over NFS — default tier for config/general PVCs

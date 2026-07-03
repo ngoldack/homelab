@@ -18,10 +18,14 @@ TrueNAS (e.g. a password manager + a second offline location):
 1. **The workstation age private key** (`age.key`, public key recorded in
    `.sops.yaml`). It decrypts every SOPS secret in Git. Without it, no secret —
    and therefore no cluster bootstrap — can be reconstructed.
-2. **`tofu/terraform.tfstate`** — holds `talos_machine_secrets` (etcd CA,
-   Kubernetes CA, cluster identity). It is committed to Git **encrypted** via
-   OpenTofu native AES-GCM state encryption. Ensure both the Git remote **and**
-   the `state_encryption_passphrase` (in `tofu/secret.sops.yaml`) are recoverable.
+2. **The Hetzner Object Storage bucket + its S3 credentials, and the state
+   encryption passphrase.** OpenTofu state (holding `talos_machine_secrets`:
+   etcd CA, Kubernetes CA, cluster identity) lives remotely in a Hetzner bucket
+   (`backend "s3"` in `providers.tf`), client-side encrypted with
+   `state_encryption_passphrase`. All three of the bucket itself, the
+   `hetzner_s3_access_key`/`hetzner_s3_secret_key` credentials, and the
+   passphrase (all in `tofu/locations/home/secret.sops.yaml`) must survive, or
+   the state — and the matching PKI — cannot be read back.
 3. **The Git repository** itself — it is the single source of desired state that
    Flux reconciles.
 
@@ -32,7 +36,7 @@ If all three survive, the cluster can be rebuilt from scratch.
 | State | Where it lives | Survives cluster loss? |
 |-------|----------------|------------------------|
 | Kubernetes/Flux desired state | Git repository | Yes (in Git) |
-| Cluster PKI / machine secrets | `tofu/terraform.tfstate` (encrypted, in Git) | Yes (in Git) |
+| Cluster PKI / machine secrets | OpenTofu state, Hetzner Object Storage (encrypted) | Yes — if the Hetzner bucket + credentials + passphrase survive |
 | Application PVCs (e.g. llama.cpp model weights) | TrueNAS, via the `tns-*` CSI StorageClasses | Yes (on TrueNAS) |
 | Scratch volumes | `local-storage` (node-local) | No — disposable by design |
 | etcd contents not derived from Git | in-cluster etcd | **No backup in v0** |
@@ -44,8 +48,8 @@ re-derives from Git.
 ## Recovery: total cluster loss
 
 1. Reprovision the VMs and Talos config with OpenTofu. Because the **same**
-   `talos_machine_secrets` are read from the encrypted state, the rebuilt nodes
-   keep the original cluster identity:
+   `talos_machine_secrets` are read from state in the Hetzner bucket, the
+   rebuilt nodes keep the original cluster identity:
    ```bash
    task tofu:apply
    ```
@@ -72,6 +76,10 @@ re-derives from Git.
 - **No automated backups in v0.** etcd snapshots, database PITR, and offsite S3
   replication are deferred to v1/v3 (see OpenSpec changes above). Until then,
   treat etcd as disposable and keep the three off-cluster artifacts above safe.
+- **The Hetzner state bucket is a new single point of failure.** Enable bucket
+  versioning (Hetzner Console) so an accidental `tofu apply`/state corruption is
+  recoverable, and treat the bucket + its credentials with the same care as the
+  Git remote — losing it loses the cluster's PKI, not just convenience.
 - **No backup-failure alerting.** The VictoriaMetrics stack is deployed, but no
   backup jobs exist yet to alert on. Alerting lands with the v1 backup work.
 - **Single control-plane node.** No HA / failover; the rebuild procedure above is

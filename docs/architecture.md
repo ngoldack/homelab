@@ -78,12 +78,13 @@ flowchart TD
 All networking is **Cilium** (kube-proxy replacement, Gateway API, Hubble,
 WireGuard node encryption, LB-IPAM). Talos CNI = `none`, kube-proxy disabled.
 
-The nodes sit on a **dedicated VLAN-tagged subnet** (`10.30.0.0/24`, VLAN 3000 on
-`vmbr0`), isolated from the management LAN, with **static IPs** (`cp` `.10`, `wk`
-`.11`, `wk-gpu` `.12`, `wk-cpu` `.13`; gateway `.1`). The router owns the VLAN
-gateway + a maintenance-DHCP scope for the Talos install-ISO boot; the installed
-nodes use the static addresses. Subnet, VLAN, gateway, DNS and per-node IPs are
-tofu variables (`k8s_*` + `node_pools[*].ip_addresses`).
+The nodes sit on a **dedicated VLAN-tagged subnet** on `vmbr0`, isolated from
+the management LAN, with **static IPs** per node. The router owns the VLAN
+gateway + a maintenance-DHCP scope for the Talos install-ISO boot; the
+installed nodes use the static addresses. VLAN tag, subnet, gateway, DNS and
+per-node IPs are treated as sensitive — they live only in
+`tofu/locations/home/secret.sops.yaml`'s `network` block (read via
+`local.network` in `secrets.tf`), never as a committed literal.
 
 ---
 

@@ -7,7 +7,7 @@
     "kustomize@latest",
     "kubeconform@latest",
     "yamllint@latest",
-    "actionlint@latest",
+    "actionlint@1.7.11",
     "trivy@latest",
     "fluxcd@latest",
     "kubectl@latest",

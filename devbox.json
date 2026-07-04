@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.5/.schema/devbox.schema.json",
   "packages": [
-    "sops@3.13.0",
+    "sops@3.13.1",
     "age@1.2.1",
     "opentofu@1.12.3",
     "kustomize@3.10.0",

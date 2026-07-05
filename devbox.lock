@@ -49,51 +49,51 @@
         }
       }
     },
-    "age@1.2.1": {
-      "last_modified": "2025-11-23T21:50:36Z",
-      "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#age",
+    "age@1.3.1": {
+      "last_modified": "2026-06-27T07:37:20Z",
+      "resolved": "github:NixOS/nixpkgs/3d46470bb3030020f7e1361f33514854f5bfa86d#age",
       "source": "devbox-search",
-      "version": "1.2.1",
+      "version": "1.3.1",
       "systems": {
         "aarch64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/gfbrwpq3gz8pimv8jnnnf9n81pgdkqy6-age-1.2.1",
+              "path": "/nix/store/9w3kxarsk2dyx51348bnpcc12r34pb0j-age-1.3.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/gfbrwpq3gz8pimv8jnnnf9n81pgdkqy6-age-1.2.1"
+          "store_path": "/nix/store/9w3kxarsk2dyx51348bnpcc12r34pb0j-age-1.3.1"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/dp4cnyb1hcxqmk3jmj42h8vwiy6qyzx9-age-1.2.1",
+              "path": "/nix/store/scmmn2j95r09yn4awzyz83jw0xikcvdr-age-1.3.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/dp4cnyb1hcxqmk3jmj42h8vwiy6qyzx9-age-1.2.1"
+          "store_path": "/nix/store/scmmn2j95r09yn4awzyz83jw0xikcvdr-age-1.3.1"
         },
         "x86_64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/w58dc399xn7idm5y8g2q2j1bf2q6sbgx-age-1.2.1",
+              "path": "/nix/store/xb1bm4jymz2paaw31vrymqvsi5b2rf9s-age-1.3.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/w58dc399xn7idm5y8g2q2j1bf2q6sbgx-age-1.2.1"
+          "store_path": "/nix/store/xb1bm4jymz2paaw31vrymqvsi5b2rf9s-age-1.3.1"
         },
         "x86_64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/vzjkjvfy1y6g7jjqfxnma6mkvf1qsn51-age-1.2.1",
+              "path": "/nix/store/05mz78cn3v2qjwx6d41finlv21m7ysyf-age-1.3.1",
               "default": true
             }
           ],
-          "store_path": "/nix/store/vzjkjvfy1y6g7jjqfxnma6mkvf1qsn51-age-1.2.1"
+          "store_path": "/nix/store/05mz78cn3v2qjwx6d41finlv21m7ysyf-age-1.3.1"
         }
       }
     },

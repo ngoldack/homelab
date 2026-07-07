@@ -6,7 +6,7 @@
     "opentofu@1.12.3",
     "kustomize@3.10.0",
     "kubeconform@0.7.0",
-    "yamllint@latest",
+    "yamllint@1.37.1",
     "actionlint@1.7.12",
     "trivy@0.71.2",
     "fluxcd@0.41.2",

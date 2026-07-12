@@ -21,7 +21,7 @@ spec:
   chart:
     spec:
       chart: llmkube
-      version: "0.8.x"
+      version: "0.9.x"
       sourceRef:
         kind: HelmRepository
         name: llmkube

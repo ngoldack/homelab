@@ -5,7 +5,7 @@
     "age@1.3.1",
     "opentofu@1.12.5",
     "kustomize@3.10.0",
-    "kubeconform@0.7.0",
+    "kubeconform@0.8.0",
     "yamllint@1.37.1",
     "actionlint@1.7.12",
     "trivy@0.72.0",

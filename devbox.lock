@@ -197,51 +197,41 @@
         }
       }
     },
-    "kubeconform@0.7.0": {
-      "last_modified": "2026-06-27T07:37:20Z",
-      "resolved": "github:NixOS/nixpkgs/3d46470bb3030020f7e1361f33514854f5bfa86d#kubeconform",
+    "kubeconform@0.8.0": {
+      "last_modified": "2026-08-01T16:34:20Z",
+      "resolved": "github:NixOS/nixpkgs/a5cbcfe954791221bfffe2307f7d1a1bf61a871e#kubeconform",
       "source": "devbox-search",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "systems": {
         "aarch64-darwin": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/fc5ycw8v4mazlnssahw2bc02v6yy2hsg-kubeconform-0.7.0",
+              "path": "/nix/store/dwhnysjxngqh8811ri2lmz87j0wghmg6-kubeconform-0.8.0",
               "default": true
             }
           ],
-          "store_path": "/nix/store/fc5ycw8v4mazlnssahw2bc02v6yy2hsg-kubeconform-0.7.0"
+          "store_path": "/nix/store/dwhnysjxngqh8811ri2lmz87j0wghmg6-kubeconform-0.8.0"
         },
         "aarch64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/c851cl8sj2agr4l7g95z4sy75cly88m1-kubeconform-0.7.0",
+              "path": "/nix/store/845bavp34y13mjnbvpc51pcz5qmqq2aw-kubeconform-0.8.0",
               "default": true
             }
           ],
-          "store_path": "/nix/store/c851cl8sj2agr4l7g95z4sy75cly88m1-kubeconform-0.7.0"
-        },
-        "x86_64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/rl6h5bhmfn7jlj8hdqxsjy9527c6dl0n-kubeconform-0.7.0",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/rl6h5bhmfn7jlj8hdqxsjy9527c6dl0n-kubeconform-0.7.0"
+          "store_path": "/nix/store/845bavp34y13mjnbvpc51pcz5qmqq2aw-kubeconform-0.8.0"
         },
         "x86_64-linux": {
           "outputs": [
             {
               "name": "out",
-              "path": "/nix/store/77pm0r902wz86q6a072i6jrws4rgyyb2-kubeconform-0.7.0",
+              "path": "/nix/store/zd7qswhm94j5mr103132p1i8dmppfch4-kubeconform-0.8.0",
               "default": true
             }
           ],
-          "store_path": "/nix/store/77pm0r902wz86q6a072i6jrws4rgyyb2-kubeconform-0.7.0"
+          "store_path": "/nix/store/zd7qswhm94j5mr103132p1i8dmppfch4-kubeconform-0.8.0"
         }
       }
     },

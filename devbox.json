@@ -8,7 +8,7 @@
     "kubeconform@0.8.0",
     "yamllint@1.37.1",
     "actionlint@1.7.12",
-    "trivy@0.72.0",
+    "trivy@0.73.0",
     "fluxcd@0.41.2",
     "kubectl@1.36.3",
     "go-task@latest"

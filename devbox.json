@@ -9,7 +9,7 @@
     "yamllint@1.37.1",
     "actionlint@1.7.12",
     "trivy@0.74.0",
-    "fluxcd@0.41.2",
+    "fluxcd@2.9.4",
     "kubectl@1.36.3",
     "go-task@latest"
   ],

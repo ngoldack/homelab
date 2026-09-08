@@ -4,12 +4,10 @@ metadata:
   name: infra-controllers
   namespace: flux-system
 spec:
-  interval: 10m0s
-  path: ./kubernetes/infrastructure/home
+  interval: 10m
+  path: ./kubernetes/infrastructure/cloud
   prune: true
   wait: true
-  timeout: 15m
-  retryInterval: 1m
   dependsOn:
     - name: cluster-vars
   sourceRef:

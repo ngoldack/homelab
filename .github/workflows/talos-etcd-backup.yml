@@ -1,0 +1,70 @@
+name: Talos etcd backup
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup-home-etcd:
+    name: Backup Home etcd to Hetzner Object Storage
+    runs-on: [self-hosted, homelab]
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.HETZNER_OBJECT_STORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_OBJECT_STORAGE_SECRET_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      S3_ENDPOINT: https://${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}.your-objectstorage.com
+      S3_BUCKET: ${{ secrets.HOME_TALOS_BACKUP_BUCKET }}
+      TALOSCONFIG: ${{ secrets.HOME_TALOSCONFIG }}
+      TALOS_VERSION: v1.13.4
+    steps:
+      - name: Install talosctl
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /usr/local/bin/talosctl \
+            "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-amd64"
+          chmod 0755 /usr/local/bin/talosctl
+
+      - name: Create etcd snapshot
+        run: |
+          umask 077
+          trap 'rm -f talosconfig etcd.snapshot' EXIT HUP INT TERM
+          printf '%s' "$TALOSCONFIG" > talosconfig
+          talosctl --talosconfig=talosconfig etcd snapshot etcd.snapshot
+          timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
+          aws s3 cp etcd.snapshot "s3://${S3_BUCKET}/etcd-${timestamp}.snapshot" \
+            --endpoint-url "$S3_ENDPOINT"
+
+  backup-cloud-etcd:
+    name: Backup Cloud etcd to Hetzner Object Storage
+    runs-on: ubuntu-24.04
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.HETZNER_OBJECT_STORAGE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_OBJECT_STORAGE_SECRET_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      S3_ENDPOINT: https://${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}.your-objectstorage.com
+      S3_BUCKET: ${{ secrets.CLOUD_TALOS_BACKUP_BUCKET }}
+      TALOSCONFIG: ${{ secrets.CLOUD_TALOSCONFIG }}
+      TALOS_VERSION: v1.13.4
+    steps:
+      - name: Install talosctl
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /usr/local/bin/talosctl \
+            "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-amd64"
+          chmod 0755 /usr/local/bin/talosctl
+
+      - name: Create etcd snapshot
+        run: |
+          umask 077
+          trap 'rm -f talosconfig etcd.snapshot' EXIT HUP INT TERM
+          printf '%s' "$TALOSCONFIG" > talosconfig
+          talosctl --talosconfig=talosconfig etcd snapshot etcd.snapshot
+          timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
+          aws s3 cp etcd.snapshot "s3://${S3_BUCKET}/etcd-${timestamp}.snapshot" \
+            --endpoint-url "$S3_ENDPOINT"

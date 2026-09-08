@@ -1,0 +1,48 @@
+# NVIDIA device plugin + RuntimeClass for the GPU worker (wk-main-performance, Pascal P100).
+#
+# This is the in-cluster half of GPU support — it is NOT a Talos extension.
+# The Talos-side driver + container toolkit come from the node's extensions
+# (nonfree-kmod-nvidia-lts + nvidia-container-toolkit-lts); this chart exposes
+# the GPUs to Kubernetes as the `nvidia.com/gpu` allocatable resource.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nvidia-device-plugin
+---
+# Lets GPU pods opt into the nvidia container runtime (handler provided by the
+# nvidia-container-toolkit extension on the node).
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nvidia-device-plugin
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: nvidia-device-plugin
+      version: "0.17.1"
+      sourceRef:
+        kind: HelmRepository
+        name: nvidia
+      interval: 1h
+  targetNamespace: nvidia-device-plugin
+  values:
+    runtimeClassName: nvidia
+    # Run only on the GPU worker (it carries hardware/gpu.model = Tesla P100)
+    # and tolerate its dedicated=ai taint so the DaemonSet can schedule there.
+    nodeSelector:
+      "hardware/gpu.model": "Tesla P100"
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: ai
+        effect: NoSchedule
+    # Pascal P100: fail loudly if no GPU rather than silently scheduling none.
+    failOnInitError: true

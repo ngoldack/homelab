@@ -1,0 +1,52 @@
+# TrueNAS storage classes are intentionally non-destructive by default.
+# Dynamic provisioning may add or expand data, but it must never delete
+# PVC-backed shares or NVMe-oF volumes without explicit human action.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof"
+  compression: "LZ4"
+  volblocksize: "16K"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs"
+  compression: "LZ4"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-tank-nfs
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "tank"
+  datasetPath: "k8s/nfs"
+  compression: "LZ4"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

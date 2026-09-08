@@ -1,0 +1,39 @@
+# external-dns creates/updates Hetzner DNS A records for Gateway HTTPRoute
+# hostnames under svc.{domain}, so each app's route resolves to the cloud
+# ingress automatically. Scoped by domainFilters so it cannot touch records
+# outside this cluster's naming convention.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.15.2"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+      interval: 1h
+  targetNamespace: network
+  values:
+    provider: hetzner
+    sources:
+      - gateway-httproute
+      - service
+    # Only manage records under svc.{domain} — nothing else in the zone.
+    domainFilters:
+      - svc.${CLUSTER_DOMAIN}
+    txtOwnerId: ${CLUSTER_NAME:-home-talos}
+    policy: sync
+    interval: 1m
+    extraArgs:
+      - --default-provider-record-ttl=300
+    env:
+      - name: EXTERNAL_DNS_HETZNER_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: hetzner-dns-token
+            key: api-token

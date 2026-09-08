@@ -1,0 +1,16 @@
+# Single wildcard certificate for all services: {app}.{namespace}.svc.{domain}.
+# One cert serves every app, so no per-app issuance is needed. Stored in the
+# `network` namespace next to the Cilium Gateway that references it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-svc-tls
+  namespace: network
+spec:
+  secretName: wildcard-svc-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.svc.${CLUSTER_DOMAIN}"
+    - "svc.${CLUSTER_DOMAIN}"

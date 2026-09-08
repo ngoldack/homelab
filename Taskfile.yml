@@ -1,0 +1,329 @@
+version: '3'
+
+vars:
+  REPO_ROOT: .
+  AGE_KEY_FILE: age.key
+
+dotenv:
+  - .env
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  setup:
+    desc: Prepare the local age key and print the env needed for SOPS and OpenTofu
+    cmds:
+      - |
+        if [ ! -f "{{.AGE_KEY_FILE}}" ]; then
+          echo "Creating local age key at {{.AGE_KEY_FILE}}"
+          age-keygen -o {{.AGE_KEY_FILE}}
+        else
+          echo "Using existing age key at {{.AGE_KEY_FILE}}"
+        fi
+      - |
+        echo "export SOPS_AGE_KEY_FILE=$PWD/{{.AGE_KEY_FILE}}"
+        echo "Use: task sops:edit FILE=tofu/home/secret.sops.yaml"
+
+  sops:keys:local:public:
+    desc: Print the local age recipient
+    cmds:
+      - |
+        test -f "{{.AGE_KEY_FILE}}"
+        age-keygen -y "{{.AGE_KEY_FILE}}"
+
+  sops:keys:ci:public:
+    desc: Print the CI age recipient; add ci.age.key to CI as SOPS_AGE_KEY
+    cmds:
+      - |
+        test -f ci.age.key
+        age-keygen -y ci.age.key
+
+  sops:keys:home-flux:public:
+    desc: Print the Home Flux age recipient
+    cmds:
+      - |
+        test -f home-flux.age.key
+        age-keygen -y home-flux.age.key
+
+  sops:keys:cloud-flux:public:
+    desc: Print the Cloud Flux age recipient
+    cmds:
+      - |
+        test -f cloud-flux.age.key
+        age-keygen -y cloud-flux.age.key
+
+  sops:edit:
+    desc: Edit a SOPS-encrypted file
+    requires:
+      vars: [FILE]
+    env:
+      SOPS_AGE_KEY_FILE: '{{.AGE_KEY_FILE}}'
+    cmds:
+      - sops "{{.FILE}}"
+
+  sops:encrypt:
+    desc: Encrypt a .local.yaml working copy into a .sops.yaml file
+    requires:
+      vars: [SOURCE, FILE]
+    env:
+      SOPS_AGE_KEY_FILE: '{{.AGE_KEY_FILE}}'
+    cmds:
+      - |
+        sh -eu -c '
+          source=$1
+          target=$2
+          case "$source" in *.local.yaml|*.local.yml) ;; *) echo "SOURCE must end in .local.yaml or .local.yml" >&2; exit 1;; esac
+          case "$target" in *.sops.yaml|*.sops.yml) ;; *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1;; esac
+          test -f "$source"
+          temp_file=$(mktemp "${target}.tmp.XXXXXX")
+          trap "rm -f \"$temp_file\"" EXIT HUP INT TERM
+          sops --encrypt --filename-override "$target" "$source" > "$temp_file"
+          mv "$temp_file" "$target"
+        ' sh "{{.SOURCE}}" "{{.FILE}}"
+
+  sops:decrypt:
+    desc: Decrypt a .sops.yaml file into a new .local.yaml working copy
+    requires:
+      vars: [FILE, OUTPUT]
+    env:
+      SOPS_AGE_KEY_FILE: '{{.AGE_KEY_FILE}}'
+    cmds:
+      - |
+        sh -eu -c '
+          source=$1
+          output=$2
+          case "$source" in *.sops.yaml|*.sops.yml) ;; *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1;; esac
+          case "$output" in *.local.yaml|*.local.yml) ;; *) echo "OUTPUT must end in .local.yaml or .local.yml" >&2; exit 1;; esac
+          test -f "$source"
+          test ! -e "$output"
+          sops --decrypt "$source" > "$output"
+        ' sh "{{.FILE}}" "{{.OUTPUT}}"
+
+  sops:decrypt:all:
+    desc: Decrypt every .sops.yaml file into a new ignored .local.yaml working copy
+    cmds:
+      - |
+        sh -eu -c '
+          key_file=$(mktemp)
+          trap "rm -f \"$key_file\"" EXIT HUP INT TERM
+          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+            if [ -f "$identity" ]; then
+              cat "$identity" >> "$key_file"
+            fi
+          done
+          test -s "$key_file"
+          export SOPS_AGE_KEY_FILE="$key_file"
+          find tofu kubernetes -type f -name "*.sops.yaml" -exec sh -eu -c "
+            for source do
+              output=\${source%.sops.yaml}.local.yaml
+              test ! -e \"\$output\"
+              sops --decrypt \"\$source\" >/dev/null
+            done
+          " sh {} +
+          find tofu kubernetes -type f -name "*.sops.yaml" -exec sh -eu -c "
+            for source do
+              output=\${source%.sops.yaml}.local.yaml
+              temp_file=\$(mktemp \"\${output}.tmp.XXXXXX\")
+              if ! sops --decrypt \"\$source\" > \"\$temp_file\"; then
+                rm -f \"\$temp_file\"
+                exit 1
+              fi
+              mv \"\$temp_file\" \"\$output\"
+            done
+          " sh {} +
+        '
+
+  sops:check:all:
+    desc: Verify every SOPS-encrypted OpenTofu and Kubernetes file can decrypt
+    cmds:
+      - |
+        sh -eu -c '
+          key_file=$(mktemp)
+          trap "rm -f \"$key_file\"" EXIT HUP INT TERM
+          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+            if [ -f "$identity" ]; then
+              cat "$identity" >> "$key_file"
+            fi
+          done
+          test -s "$key_file"
+          export SOPS_AGE_KEY_FILE="$key_file"
+          find tofu kubernetes -type f -name "*.sops.yaml" -exec sh -c "for file do sops --decrypt \"\$file\" >/dev/null; done" sh {} +
+        '
+
+  sops:updatekeys:all:
+    desc: Rekey every SOPS-encrypted OpenTofu and Kubernetes file using .sops.yaml
+    cmds:
+      - |
+        sh -eu -c '
+          key_file=$(mktemp)
+          trap "rm -f \"$key_file\"" EXIT HUP INT TERM
+          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+            if [ -f "$identity" ]; then
+              cat "$identity" >> "$key_file"
+            fi
+          done
+          test -s "$key_file"
+          export SOPS_AGE_KEY_FILE="$key_file"
+          find tofu kubernetes -type f -name "*.sops.yaml" -exec sops updatekeys --yes {} \;
+        '
+
+  tofu:home:init:
+    desc: Initialize the Home OpenTofu root
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: init
+
+  tofu:home:validate:
+    desc: Validate the Home OpenTofu root
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: validate
+
+  tofu:run:
+    internal: true
+    desc: Run OpenTofu with state encryption configured from SOPS
+    requires:
+      vars: [TOFU_DIR, TOFU_ARGS]
+    cmds:
+      - |
+        set -eu
+        passphrase=$(sops --output-type json --decrypt {{.TOFU_DIR}}/secret.sops.yaml | jq -r '.state_encryption_passphrase')
+        test -n "$passphrase"
+        export TF_VAR_state_encryption_passphrase="$passphrase"
+        if [ -n "{{.TOFU_OUTPUT_FILE}}" ]; then
+          exec tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}} > "{{.TOFU_OUTPUT_FILE}}"
+        fi
+        exec tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}}
+
+  tofu:home:plan:
+    desc: Show the Home OpenTofu plan
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: plan
+
+  tofu:home:apply:
+    desc: Apply the Home OpenTofu configuration
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: apply
+
+  tofu:home:destroy:
+    desc: Destroy the Home OpenTofu-managed infrastructure
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: destroy
+
+  tofu:cloud:init:
+    desc: Initialize the Cloud OpenTofu root
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: init
+
+  tofu:cloud:validate:
+    desc: Validate the Cloud OpenTofu root
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: validate
+
+  tofu:cloud:plan:
+    desc: Show the complete Cloud OpenTofu plan
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: plan
+
+  tofu:cloud:apply:
+    desc: Apply the complete Cloud OpenTofu configuration
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: apply
+
+  tofu:cloud:destroy:
+    desc: Destroy the Cloud OpenTofu-managed infrastructure
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: destroy
+
+  tofu:cloud:handoff-cilium:
+    desc: Relinquish the seeded Cilium release after Flux has adopted it
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: state rm helm_release.cilium
+
+  kubeconfig:home:export:
+    desc: Export the Home kubeconfig to kubeconfig-home.yaml
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: output -raw kubeconfig
+          TOFU_OUTPUT_FILE: kubeconfig-home.yaml
+
+  talosconfig:home:export:
+    desc: Export the Home talosconfig to talosconfig-home.yaml
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/home
+          TOFU_ARGS: output -raw talosconfig
+          TOFU_OUTPUT_FILE: talosconfig-home.yaml
+
+  kubeconfig:cloud:export:
+    desc: Export the Cloud kubeconfig to kubeconfig-cloud.yaml
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: output -raw cloud_cluster_kubeconfig
+          TOFU_OUTPUT_FILE: kubeconfig-cloud.yaml
+
+  talosconfig:cloud:export:
+    desc: Export the Cloud talosconfig to talosconfig-cloud.yaml
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: output -raw cloud_cluster_talosconfig
+          TOFU_OUTPUT_FILE: talosconfig-cloud.yaml
+
+  talos-backup:home:bucket:
+    desc: Print the Home Talos etcd backup bucket name
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: output -raw home_talos_backup_bucket
+
+  talos-backup:cloud:bucket:
+    desc: Print the Cloud Talos etcd backup bucket name
+    cmds:
+      - task: tofu:run
+        vars:
+          TOFU_DIR: tofu/cloud
+          TOFU_ARGS: output -raw cloud_talos_backup_bucket
+
+

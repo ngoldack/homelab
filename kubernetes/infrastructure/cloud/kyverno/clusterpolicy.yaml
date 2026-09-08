@@ -1,0 +1,63 @@
+# Pin public-ingress workloads to cloud nodes only. This is the admission-level
+# safety net: even if a Helm chart or manifest omits its own nodeSelector, pods
+# labeled workload/public-ingress=true are forced onto site=cloud nodes and
+# given the matching toleration, and any such pod that somehow lacks the cloud
+# nodeSelector is rejected.
+#
+# Cilium's Gateway envoy pods carry `io.cilium/app/gateway` — we match both that
+# and our own `workload/public-ingress=true` label.
+
+# Mutate: add nodeSelector + toleration to gateway/envoy pods.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pin-public-ingress-to-cloud
+spec:
+  background: false
+  rules:
+    - name: add-cloud-nodeselector
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchExpressions:
+                  - key: io.cilium/app/gateway
+                    operator: Exists
+      mutate:
+        patchStrategicMerge:
+          spec:
+            nodeSelector:
+              site: cloud
+            tolerations:
+              - key: dedicated
+                operator: Equal
+                value: ingress
+                effect: NoSchedule
+---
+# Validate: reject gateway/envoy pods that would not schedule on cloud nodes.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validate-public-ingress-cloud-only
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-cloud-nodeselector
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchExpressions:
+                  - key: io.cilium/app/gateway
+                    operator: Exists
+      validate:
+        message: "Public-ingress (gateway) pods must be pinned to cloud nodes via nodeSelector site=cloud."
+        pattern:
+          spec:
+            nodeSelector:
+              site: cloud

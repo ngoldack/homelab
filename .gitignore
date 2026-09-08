@@ -1,25 +1,33 @@
-# Age private key — never commit this
+# Age private keys - never commit these
 age.key
 *.age.key
 
-# OpenTofu state and lock files (per-location: tofu/locations/<home|cloud|offsite>/)
-# State itself is NOT tracked in Git — it lives remotely in a Hetzner Object
-# Storage bucket (backend "s3" in providers.tf), client-side encrypted via
+# Explicit plaintext SOPS working copies. Encrypted sources always use the
+# .sops.yaml suffix and remain safe to commit.
+*.local.yaml
+*.local.yml
+
+# OpenTofu state and lock files
+# State itself is NOT tracked in Git. It is stored locally and encrypted with
 # OpenTofu's native state encryption. Only the provider lock file is committed.
-tofu/locations/*/.terraform/
-tofu/locations/*/terraform.tfstate
-tofu/locations/*/terraform.tfstate.backup
+tofu/.terraform/
+tofu/terraform.tfstate
+tofu/terraform.tfstate.backup
+tofu/*/.terraform/
+tofu/*/terraform.tfstate
+tofu/*/terraform.tfstate.backup
 # The provider lock file IS committed so CI validates against pinned versions.
-!tofu/locations/*/.terraform.lock.hcl
+!tofu/*/.terraform.lock.hcl
 
 # OpenTofu plan files may contain secrets (even though plan encryption is enabled,
 # avoid committing them by accident)
-tofu/locations/*/*.tfplan
+tofu/**/*.tfplan
 *.tfplan
 
 # tfvars files may contain plaintext secrets
-tofu/locations/*/*.tfvars
-tofu/locations/*/*.tfvars.json
+tofu/**/*.tfvars
+tofu/**/*.tfvars.json
+!tofu/*/terraform.tfvars
 
 # Environment files used for SOPS/encryption passphrases
 .env
@@ -30,6 +38,9 @@ kubeconfig
 talosconfig
 kubeconfig.yaml
 talosconfig.yaml
+kubeconfig-cloud.yaml
+talosconfig-cloud.yaml
+talosconfig-home.yaml
 *.kubeconfig
 *.talosconfig
 *.kubeconfig.yaml

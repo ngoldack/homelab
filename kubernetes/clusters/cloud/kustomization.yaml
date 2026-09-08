@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - cluster-vars.yaml
   - infrastructure.yaml
+  - network-config.yaml

@@ -14,6 +14,17 @@ locals {
     name       = "tailscale"
     environment = [
       "TS_AUTHKEY=${local.secrets["tailscale_auth_key"]}",
+      # ClusterMesh underlay (Phase 3): advertise this cluster's pod/service/
+      # node CIDRs into the tailnet so Cilium's own VXLAN traffic to home
+      # routes transparently over Tailscale, with no Cilium-side
+      # tailscale-awareness. Advertised from the worker (this patch), not
+      # the control plane, since the control plane's tailscale join is the
+      # hcloud-talos module's own built-in mechanism (enabled/auth_key only,
+      # no extra-args support) — this patch is the one place cloud's
+      # tailscale config is actually ours to extend. --accept-routes so this
+      # node can in turn reach home's advertised routes. Requires one-time
+      # manual approval in the Tailscale admin console.
+      "TS_EXTRA_ARGS=--advertise-routes=${local.pod_ipv4_cidr},${local.service_ipv4_cidr},${local.node_ipv4_cidr} --accept-routes",
     ]
   })
 }

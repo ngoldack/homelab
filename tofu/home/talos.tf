@@ -13,6 +13,15 @@ locals {
     name       = "tailscale"
     environment = [
       "TS_AUTHKEY=${local.secrets["tailscale_auth_key"]}",
+      # ClusterMesh underlay (Phase 3): advertise this cluster's pod/service/
+      # node CIDRs into the tailnet so Cilium's own VXLAN traffic to cloud
+      # routes transparently over Tailscale, with no Cilium-side
+      # tailscale-awareness. cp-main is home's only tailscale-joined node
+      # (see the extensions gate below), so it's the subnet router for all
+      # three. --accept-routes so this node can in turn reach cloud's
+      # advertised routes. Requires one-time manual approval in the
+      # Tailscale admin console (same category as device approval).
+      "TS_EXTRA_ARGS=--advertise-routes=${var.pod_cidr},${var.service_cidr},10.30.0.0/24 --accept-routes",
     ]
   })
 

@@ -26,6 +26,15 @@ spec:
   values:
     crds:
       enabled: true
+    # Without this, the chart's default "cert-manager.fullname" template
+    # doubles up (release name "cert-manager" + chart name "cert-manager" ->
+    # ServiceAccount "cert-manager-cert-manager"), which doesn't match
+    # cert-manager-webhook-hetzner's default certManager.serviceAccountName
+    # ("cert-manager") — its ClusterRoleBinding then grants the DNS01
+    # domain-solver role to a ServiceAccount that doesn't match the one
+    # actually running, so every Hetzner challenge is silently rejected as
+    # forbidden.
+    fullnameOverride: cert-manager
     # Gateway API integration is left off; the Gateway listener references the
     # wildcard Certificate's secret directly, so no shim is required.
     extraArgs:

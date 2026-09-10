@@ -4,6 +4,7 @@
 # anything — previously a manual, undocumented-outside-README `helm install`
 # step; now it comes up as part of `tofu apply` like everything else, no
 # adoption dance needed since there's nothing pre-existing to adopt.
+
 resource "helm_release" "cilium" {
   name             = "cilium"
   namespace        = "kube-system"
@@ -49,8 +50,20 @@ resource "helm_release" "cilium" {
     # encryption. tunnelProtocol=vxlan is just the overlay encapsulation,
     # not a VPN.
     #
-    # No gatewayAPI/clustermesh here: home has no Gateway/HTTPRoute of its
-    # own (ingress only ever enters via the cloud cluster's Gateway — see
-    # README's "Cloud ingress").
+    # No gatewayAPI here: home has no Gateway/HTTPRoute of its own (ingress
+    # only ever enters via the cloud cluster's Gateway — see README's "Cloud
+    # ingress").
+    #
+    # Shared ClusterMesh CA, identical on both clusters (see tofu/cloud/cloud.tf's
+    # cilium_values) — passed as a Helm value rather than a pre-created
+    # "cilium-ca" Kubernetes Secret, because cloud's Cilium is rendered
+    # client-side (`helm_template`, no live-cluster lookup) and could never
+    # detect/reuse a pre-existing secret there; a values-based CA works
+    # identically for both a real helm_release (here) and a client-side
+    # render (cloud), with no apply-ordering dependency either way.
+    ca = {
+      cert = base64encode(local.secrets["cilium_ca_crt"])
+      key  = base64encode(local.secrets["cilium_ca_key"])
+    }
   })]
 }

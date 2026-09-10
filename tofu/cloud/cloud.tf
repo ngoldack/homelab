@@ -231,6 +231,15 @@ module "talos" {
     hubble = {
       enabled = false
     }
+    # Shared ClusterMesh CA, identical on home (see tofu/home/cilium.tf) —
+    # passed as a Helm value (not a pre-created "cilium-ca" Secret): this
+    # module renders Cilium client-side via `helm_template` with no
+    # live-cluster lookup, so it could never detect/reuse a pre-existing
+    # secret — a values-based CA has no such ordering dependency.
+    ca = {
+      cert = base64encode(local.secrets["cilium_ca_crt"])
+      key  = base64encode(local.secrets["cilium_ca_key"])
+    }
   })]
   # Pinned rather than left null (which resolves to the chart's "latest" at
   # every apply, drifting silently). Bump deliberately, same as cilium_version.

@@ -5,4 +5,4 @@ metadata:
   namespace: flux-system
 data:
   CLUSTER_NAME: home
-  CLUSTER_DOMAIN: ngoldack.xyz
+  CLUSTER_DOMAIN: ngoldack.de

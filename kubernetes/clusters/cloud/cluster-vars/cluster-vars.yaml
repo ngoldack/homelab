@@ -5,4 +5,4 @@ metadata:
   namespace: flux-system
 data:
   CLUSTER_NAME: cloud
-  CLUSTER_DOMAIN: ngoldack.xyz
+  CLUSTER_DOMAIN: ngoldack.de

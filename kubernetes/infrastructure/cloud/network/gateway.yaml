@@ -31,8 +31,8 @@ spec:
           # Opt-in only: a namespace must carry this label before any
           # HTTPRoute in it can attach to the public Gateway. Label a
           # namespace to expose a workload publicly:
-          #   kubectl label namespace <ns> gateway.ngoldack.xyz/public-ingress=true
+          #   kubectl label namespace <ns> gateway.ngoldack.de/public-ingress=true
           from: Selector
           selector:
             matchLabels:
-              gateway.ngoldack.xyz/public-ingress: "true"
+              gateway.ngoldack.de/public-ingress: "true"

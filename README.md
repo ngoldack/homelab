@@ -603,10 +603,10 @@ client → Hetzner DNS → A record → Hetzner Load Balancer (auto-provisioned
   `svc.<domain>` so it cannot touch unrelated DNS. It runs the
   `external-dns-hetzner-webhook` sidecar (external-dns 0.15.x dropped the
   built-in Hetzner provider).
-- Only namespaces labeled `gateway.ngoldack.xyz/public-ingress=true` may
+- Only namespaces labeled `gateway.ngoldack.de/public-ingress=true` may
   attach an HTTPRoute to the public Gateway — nothing is labeled by default,
   so label a namespace explicitly to expose a workload:
-  `kubectl label namespace <ns> gateway.ngoldack.xyz/public-ingress=true`.
+  `kubectl label namespace <ns> gateway.ngoldack.de/public-ingress=true`.
 
 ### Cilium and the HCloud CCM are owned by tofu, permanently
 

@@ -31,12 +31,12 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: kubectl
-          image: bitnami/kubectl:1.34
+          image: rancher/kubectl:v1.36.2
           command:
-            - /bin/bash
+            - /bin/sh
             - -c
             - |
-              set -euo pipefail
+              set -eu
               kubectl taint nodes -l node.kubernetes.io/instance-type=gpu-worker \
                 dedicated=ai:NoSchedule --overwrite
               kubectl taint nodes -l node.kubernetes.io/instance-type=media-worker \

@@ -212,6 +212,30 @@ module "talos" {
         cleanCiliumState = ["NET_ADMIN", "SYS_ADMIN", "SYS_RESOURCE"]
       }
     }
+    envoy = {
+      securityContext = {
+        capabilities = {
+          # Both halves below are required, and neither works alone — the
+          # chart's own values.yaml says NET_BIND_SERVICE is passed to the
+          # Envoy process by keepCapNetBindService "in addition to granting
+          # the capability to the container".
+          #
+          # Needed because gatewayAPI.hostNetwork is enabled above and the
+          # `public` Gateway listens on 443. In host-network mode Envoy binds
+          # the listener port directly on the node, and without this it
+          # cannot take a privileged (<1024) port:
+          #   cannot bind '0.0.0.0:443': Permission denied
+          # leaving the Gateway stuck at "AddressNotAssigned: Gateway waiting
+          # for address" forever. Cilium's docs otherwise tell you to pick a
+          # port above 1023, which is not an option for public HTTPS.
+          #
+          # NET_ADMIN and SYS_ADMIN are the chart's own defaults, restated
+          # because Helm replaces lists wholesale rather than merging them.
+          envoy                 = ["NET_ADMIN", "SYS_ADMIN", "NET_BIND_SERVICE"]
+          keepCapNetBindService = true
+        }
+      }
+    }
     cgroup = {
       autoMount = {
         enabled = false
@@ -220,6 +244,38 @@ module "talos" {
     }
     gatewayAPI = {
       enabled = true
+      # Bind Envoy straight to the nodes' host network instead of letting the
+      # Gateway's Service sit at type=LoadBalancer forever. Without this the
+      # Gateway reaches Accepted=True but never Programmed: Cilium creates
+      # `cilium-gateway-public` as a LoadBalancer Service, and with no
+      # CiliumLoadBalancerIPPool and no Hetzner LB provisioned by the CCM its
+      # EXTERNAL-IP stays <pending>, so the listener is never programmed
+      # ("AddressNotAssigned: Gateway waiting for address").
+      #
+      # hostNetwork is what the rest of this root already assumes, not a
+      # workaround: extra_firewall_rules below open 80/443 directly on the
+      # nodes' own public interfaces (pointless if an LB fronted them — you'd
+      # scope those rules to the LB's source range instead), and
+      # output.cloud_ingress_ipv4 publishes a NODE's public IP as the ingress
+      # address. The alternative, a real hcloud Load Balancer, is a paid
+      # resource and would contradict both.
+      hostNetwork = {
+        enabled = true
+      }
+      gatewayClass = {
+        # MUST be an explicit "true" here, not the chart's "auto" default.
+        # "auto" gates the GatewayClass template on
+        #   .Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1/GatewayClass"
+        # — a CLUSTER capability lookup. This module renders Cilium
+        # client-side with `data "helm_template"`, which has no cluster
+        # connection at all, so .Capabilities is always empty and that check
+        # can never pass. Under "auto" the GatewayClass is therefore never
+        # rendered here no matter what state the Gateway API CRDs are in,
+        # and every Gateway stays "Waiting for controller" forever with
+        # cilium-operator logging `GatewayClass "cilium" not found`.
+        # Same client-side-rendering trap as the ca.cert/ca.key values.
+        create = "true"
+      }
     }
     # Explicitly off, matching the module's own default. Supplying cilium_values
     # at all replaces that default wholesale, and the chart's own default for

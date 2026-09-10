@@ -1,8 +1,12 @@
+# cilium is NOT here: tofu owns Cilium permanently for this cluster (see
+# tofu/cloud/cloud.tf) — a Flux HelmRelease over the same objects would fail
+# its own install (no Helm ownership metadata on tofu's apply_only manifests).
+# cert-manager and external-dns are applied by their own dedicated Flux
+# Kustomizations instead of from here (see kubernetes/clusters/cloud/) so
+# their CRD-dependency ordering (cert-manager's own CRDs, the Gateway API
+# CRDs) can be expressed at the Kustomization level.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - sources.yaml
-  - cilium
-  - cert-manager
-  - external-dns
   - headlamp

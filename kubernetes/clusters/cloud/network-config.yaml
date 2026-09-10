@@ -1,7 +1,12 @@
+# Contains the `network` Namespace, external-dns (moved here from
+# infra-controllers so it lands in the same apply pass as its Namespace and
+# Secret — see kubernetes/infrastructure/cloud/network/kustomization.yaml),
+# the ClusterIssuer/Certificate that need cert-manager's CRDs, and the
+# Gateway that needs the Gateway API CRDs.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: network-config
+  name: network
   namespace: flux-system
 spec:
   interval: 10m
@@ -9,7 +14,8 @@ spec:
   prune: true
   wait: true
   dependsOn:
-    - name: infra-controllers
+    - name: cert-manager
+    - name: gateway-api-crds
   sourceRef:
     kind: GitRepository
     name: flux-system

@@ -4,16 +4,27 @@ locals {
   pod_ipv4_cidr     = "172.30.16.0/20"
   service_ipv4_cidr = "172.30.8.0/21"
 
-  control_plane_name       = "${var.cluster_name}-control-plane-1"
-  worker_name              = "${var.cluster_name}-worker-1"
-  control_plane_private_ip = cidrhost(local.node_ipv4_cidr, 101)
-  worker_private_ip        = cidrhost(local.node_ipv4_cidr, 201)
-  cluster_endpoint         = "https://${hcloud_primary_ip.control_plane.ip_address}:6443"
+  # Tailscale is delivered as a Talos ExtensionServiceConfig patch. The module
+  # only auto-applies this patch to control planes (see its talos.tf); pass
+  # the same patch to workers explicitly so every node joins the tailnet, not
+  # just the control plane.
+  tailscale_config_patch = yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "ExtensionServiceConfig"
+    name       = "tailscale"
+    environment = [
+      "TS_AUTHKEY=${local.secrets["tailscale_auth_key"]}",
+    ]
+  })
 }
 
 resource "talos_image_factory_schematic" "arm64" {
   schematic = yamlencode({
-    customization = {}
+    customization = {
+      systemExtensions = {
+        officialExtensions = ["siderolabs/tailscale"]
+      }
+    }
   })
 }
 
@@ -36,395 +47,139 @@ resource "imager_image" "talos_arm" {
   }
 }
 
-resource "hcloud_network" "cluster" {
-  name     = var.cluster_name
-  ip_range = local.network_ipv4_cidr
+module "talos" {
+  source  = "hcloud-talos/talos/hcloud"
+  version = "3.4.15"
 
-  labels = {
-    "cluster" = var.cluster_name
-  }
-}
-
-resource "hcloud_network_subnet" "nodes" {
-  network_id   = hcloud_network.cluster.id
-  type         = "cloud"
-  network_zone = "eu-central"
-  ip_range     = local.node_ipv4_cidr
-}
-
-resource "hcloud_placement_group" "control_plane" {
-  name = "${var.cluster_name}-control-plane"
-  type = "spread"
-
-  labels = {
-    "cluster" = var.cluster_name
-  }
-}
-
-resource "hcloud_placement_group" "worker" {
-  name = "${var.cluster_name}-worker"
-  type = "spread"
-
-  labels = {
-    "cluster" = var.cluster_name
-  }
-}
-
-resource "hcloud_firewall" "cluster" {
-  name = var.cluster_name
-
-  rule {
-    description = "Allow Kubernetes API"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "6443"
-    source_ips  = ["0.0.0.0/0"]
-  }
-
-  rule {
-    description = "Allow Talos API"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "50000"
-    source_ips  = ["0.0.0.0/0"]
-  }
-
-  rule {
-    description = "Allow public HTTP"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "80"
-    source_ips  = ["0.0.0.0/0"]
-  }
-
-  rule {
-    description = "Allow public HTTPS"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "443"
-    source_ips  = ["0.0.0.0/0"]
-  }
-
-  rule {
-    description = "Allow cluster-internal TCP"
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "any"
-    source_ips  = [local.network_ipv4_cidr]
-  }
-
-  rule {
-    description = "Allow cluster-internal UDP"
-    direction   = "in"
-    protocol    = "udp"
-    port        = "any"
-    source_ips  = [local.network_ipv4_cidr]
-  }
-
-  rule {
-    description = "Allow cluster-internal ICMP"
-    direction   = "in"
-    protocol    = "icmp"
-    source_ips  = [local.network_ipv4_cidr]
-  }
-
-  labels = {
-    "cluster" = var.cluster_name
-  }
-}
-
-resource "hcloud_primary_ip" "control_plane" {
-  name              = "${local.control_plane_name}-ipv4"
-  location          = var.location
-  type              = "ipv4"
-  auto_delete       = false
-  delete_protection = false
-
-  labels = {
-    "cluster" = var.cluster_name
-    "role"    = "control-plane"
-  }
-}
-
-resource "hcloud_primary_ip" "worker" {
-  name              = "${local.worker_name}-ipv4"
-  location          = var.location
-  type              = "ipv4"
-  auto_delete       = false
-  delete_protection = false
-
-  labels = {
-    "cluster" = var.cluster_name
-    "role"    = "worker"
-  }
-}
-
-resource "talos_machine_secrets" "cluster" {
-  talos_version = var.talos_version
-}
-
-locals {
-  common_machine_patch = {
-    machine = {
-      install = {
-        image = "ghcr.io/siderolabs/installer:${var.talos_version}"
-      }
-      kubelet = {
-        extraArgs = {
-          "cloud-provider"             = "external"
-          "rotate-server-certificates" = true
-        }
-        nodeIP = {
-          validSubnets = [local.node_ipv4_cidr]
-        }
-      }
-      network = {
-        interfaces = [
-          {
-            interface = "eth0"
-            dhcp      = true
-          },
-          {
-            interface = "eth1"
-            dhcp      = true
-          },
-        ]
-      }
-      time = {
-        servers = ["ntp1.hetzner.de", "ntp2.hetzner.com", "ntp3.hetzner.net"]
-      }
-    }
-  }
-
-  cluster_patch = {
-    cluster = {
-      allowSchedulingOnControlPlanes = true
-      network = {
-        dnsDomain      = var.cluster_domain
-        podSubnets     = [local.pod_ipv4_cidr]
-        serviceSubnets = [local.service_ipv4_cidr]
-        cni            = { name = "none" }
-      }
-      proxy = { disabled = true }
-      apiServer = {
-        certSANs = [hcloud_primary_ip.control_plane.ip_address]
-      }
-      controllerManager = {
-        extraArgs = {
-          "bind-address"             = "0.0.0.0"
-          "cloud-provider"           = "external"
-          "node-cidr-mask-size-ipv4" = split("/", local.node_ipv4_cidr)[1]
-        }
-      }
-      externalCloudProvider = {
-        enabled = true
-        manifests = [
-          "https://raw.githubusercontent.com/siderolabs/talos-cloud-controller-manager/v1.6.0/docs/deploy/cloud-controller-manager-daemonset.yml",
-        ]
-      }
-      inlineManifests = [
-        {
-          name = "hcloud-credentials"
-          contents = yamlencode({
-            apiVersion = "v1"
-            kind       = "Secret"
-            type       = "Opaque"
-            metadata = {
-              name      = "hcloud"
-              namespace = "kube-system"
-            }
-            stringData = {
-              network = hcloud_network.cluster.id
-              token   = local.secrets["hcloud_api_token"]
-            }
-          })
-        },
-      ]
-    }
-  }
-}
-
-data "talos_machine_configuration" "control_plane" {
+  hcloud_token       = local.secrets["hcloud_api_token"]
   cluster_name       = var.cluster_name
-  cluster_endpoint   = local.cluster_endpoint
-  machine_type       = "controlplane"
-  machine_secrets    = talos_machine_secrets.cluster.machine_secrets
+  cluster_domain     = var.cluster_domain
+  cluster_prefix     = true
+  location_name      = var.location
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
-  docs               = false
-  examples           = false
-  config_patches = [
-    yamlencode(local.common_machine_patch),
-    yamlencode(merge(local.cluster_patch, {
-      machine = {
-        nodeLabels = {
-          "topology.kubernetes.io/zone" = "cloud"
-          "workload/public-ingress"     = "true"
-        }
+
+  # disable_arm looks redundant with talos_image_id_arm (both make the
+  # module skip its "os=talos" ARM image lookup, see server.tf) but is NOT:
+  # on a from-scratch apply, imager_image.talos_arm.id is unknown until
+  # apply, so `talos_image_id_arm != null` alone can't resolve
+  # data.hcloud_image.arm's `count` at plan time ("Invalid count argument" —
+  # confirmed by actually running a clean apply). disable_arm's plain
+  # boolean literal is what keeps that count statically known on a first
+  # apply; once imager_image.talos_arm exists, either one alone would do.
+  talos_image_id_arm = tostring(imager_image.talos_arm.id)
+  disable_arm        = true
+  disable_x86        = true
+
+  talos_worker_extra_config_patches = [local.tailscale_config_patch]
+
+  control_plane_nodes = [
+    {
+      id   = 1
+      type = var.server_type
+      labels = {
+        # Not topology.kubernetes.io/zone: hcloud-cloud-controller-manager
+        # owns that key and silently overwrites it with the Hetzner
+        # datacenter (e.g. "fsn1-dc8") — confirmed live via managedFields.
+        # The custom key matches what tofu/home now sets (topology.homelab/site
+        # = "home"), so "which site is this node in" resolves the same way on
+        # both clusters instead of at two different label keys.
+        "topology.homelab/site"   = "cloud"
+        "workload/public-ingress" = "true"
       }
-    })),
+    },
   ]
-}
+  control_plane_allow_schedule = true
 
-data "talos_machine_configuration" "worker" {
-  cluster_name       = var.cluster_name
-  cluster_endpoint   = local.cluster_endpoint
-  machine_type       = "worker"
-  machine_secrets    = talos_machine_secrets.cluster.machine_secrets
-  talos_version      = var.talos_version
-  kubernetes_version = var.kubernetes_version
-  docs               = false
-  examples           = false
-  config_patches = [
-    yamlencode(local.common_machine_patch),
-    yamlencode(merge(local.cluster_patch, {
-      machine = {
-        nodeLabels = {
-          "topology.kubernetes.io/zone" = "cloud"
-        }
+  worker_nodes = [
+    {
+      id   = 1
+      type = var.server_type
+      labels = {
+        # See control_plane_nodes above for why this isn't
+        # topology.kubernetes.io/zone.
+        "topology.homelab/site" = "cloud"
       }
-    })),
-  ]
-}
-
-resource "hcloud_server" "control_plane" {
-  name               = local.control_plane_name
-  location           = var.location
-  server_type        = var.server_type
-  image              = imager_image.talos_arm.id
-  user_data          = data.talos_machine_configuration.control_plane.machine_configuration
-  placement_group_id = hcloud_placement_group.control_plane.id
-  firewall_ids       = [hcloud_firewall.cluster.id]
-
-  public_net {
-    ipv4_enabled = true
-    ipv4         = hcloud_primary_ip.control_plane.id
-    ipv6_enabled = false
-  }
-
-  network {
-    network_id = hcloud_network.cluster.id
-    ip         = local.control_plane_private_ip
-    alias_ips  = []
-  }
-
-  labels = {
-    "cluster"     = var.cluster_name
-    "role"        = "control-plane"
-    "server_type" = var.server_type
-  }
-
-  depends_on = [hcloud_network_subnet.nodes]
-
-  lifecycle {
-    ignore_changes = [image, user_data]
-  }
-}
-
-resource "hcloud_server" "worker" {
-  name               = local.worker_name
-  location           = var.location
-  server_type        = var.server_type
-  image              = imager_image.talos_arm.id
-  user_data          = data.talos_machine_configuration.worker.machine_configuration
-  placement_group_id = hcloud_placement_group.worker.id
-  firewall_ids       = [hcloud_firewall.cluster.id]
-
-  public_net {
-    ipv4_enabled = true
-    ipv4         = hcloud_primary_ip.worker.id
-    ipv6_enabled = false
-  }
-
-  network {
-    network_id = hcloud_network.cluster.id
-    ip         = local.worker_private_ip
-    alias_ips  = []
-  }
-
-  labels = {
-    "cluster"     = var.cluster_name
-    "role"        = "worker"
-    "server_type" = var.server_type
-  }
-
-  depends_on = [hcloud_network_subnet.nodes]
-
-  lifecycle {
-    ignore_changes = [image, user_data]
-  }
-}
-
-resource "talos_machine_configuration_apply" "control_plane" {
-  client_configuration        = talos_machine_secrets.cluster.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.control_plane.machine_configuration
-  node                        = hcloud_primary_ip.control_plane.ip_address
-
-  depends_on = [hcloud_server.control_plane]
-}
-
-resource "talos_machine_configuration_apply" "worker" {
-  client_configuration        = talos_machine_secrets.cluster.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.worker.machine_configuration
-  node                        = hcloud_primary_ip.worker.ip_address
-
-  depends_on = [hcloud_server.worker]
-}
-
-resource "talos_machine_bootstrap" "cluster" {
-  client_configuration = talos_machine_secrets.cluster.client_configuration
-  endpoint             = hcloud_primary_ip.control_plane.ip_address
-  node                 = hcloud_primary_ip.control_plane.ip_address
-
-  depends_on = [talos_machine_configuration_apply.control_plane]
-}
-
-resource "talos_cluster_kubeconfig" "cluster" {
-  client_configuration = talos_machine_secrets.cluster.client_configuration
-  node                 = hcloud_primary_ip.control_plane.ip_address
-
-  depends_on = [talos_machine_bootstrap.cluster]
-}
-
-resource "terraform_data" "kubernetes_api_ready" {
-  triggers_replace = [
-    talos_cluster_kubeconfig.cluster.id,
-    hcloud_primary_ip.control_plane.ip_address,
+    },
   ]
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      for attempt in $(seq 1 60); do
-        if curl --silent --show-error --connect-timeout 3 --max-time 5 --insecure ${local.cluster_endpoint}/version >/dev/null; then
-          exit 0
-        fi
-        sleep 2
-      done
-      echo "Kubernetes API did not become ready within 120 seconds" >&2
-      exit 1
-    EOT
-  }
+  network_ipv4_cidr = local.network_ipv4_cidr
+  node_ipv4_cidr    = local.node_ipv4_cidr
+  pod_ipv4_cidr     = local.pod_ipv4_cidr
+  service_ipv4_cidr = local.service_ipv4_cidr
 
-  depends_on = [talos_cluster_kubeconfig.cluster]
-}
+  # Kube API stays reachable from anywhere (protected by TLS + client-cert
+  # auth, the normal posture for a public homelab edge). The Talos API
+  # (raw node control — no equivalent auth layering) is instead restricted to
+  # whichever machine runs `tofu apply`: firewall_talos_api_source is left
+  # unset so it falls back to firewall_use_current_ip's live lookup. Re-apply
+  # from a new location to update the allowed IP.
+  firewall_kube_api_source = ["0.0.0.0/0"]
+  firewall_use_current_ip  = true
+  extra_firewall_rules = [
+    {
+      description = "Allow public HTTP"
+      direction   = "in"
+      protocol    = "tcp"
+      port        = "80"
+      source_ips  = ["0.0.0.0/0"]
+    },
+    {
+      description = "Allow public HTTPS"
+      direction   = "in"
+      protocol    = "tcp"
+      port        = "443"
+      source_ips  = ["0.0.0.0/0"]
+    },
+    {
+      description = "Allow cluster-internal TCP"
+      direction   = "in"
+      protocol    = "tcp"
+      port        = "any"
+      source_ips  = [local.network_ipv4_cidr]
+    },
+    {
+      description = "Allow cluster-internal UDP"
+      direction   = "in"
+      protocol    = "udp"
+      port        = "any"
+      source_ips  = [local.network_ipv4_cidr]
+    },
+    {
+      # port = "" (empty string), not null and not omitted: extra_firewall_rules
+      # is list(any), so every element must share the same attribute set or
+      # OpenTofu's type unification fails at plan time (confirmed: omitting the
+      # key errors "all list elements must have the same type"). null instead
+      # of "" fails differently and later: the module's own firewall.tf builds
+      # a dedup key via format("%s-%s-%s", direction, protocol, port), and
+      # format()'s %s verb rejects an actual null outright ("unsupported value
+      # for %s: null value cannot be formatted") — confirmed at `tofu plan`,
+      # past what `validate` catches. "" satisfies both: a real string keeps
+      # format() happy, and empty is functionally "no port" same as null once
+      # it reaches the actual hcloud_firewall resource.
+      description = "Allow cluster-internal ICMP"
+      direction   = "in"
+      protocol    = "icmp"
+      port        = ""
+      source_ips  = [local.network_ipv4_cidr]
+    },
+  ]
 
-resource "helm_release" "cilium" {
-  name             = "cilium"
-  repository       = "https://helm.cilium.io/"
-  chart            = "cilium"
-  version          = "1.19.5"
-  namespace        = "kube-system"
-  create_namespace = false
-  take_ownership   = true
-  wait             = false
-
-  values = [yamlencode({
+  # The module owns Cilium and the HCloud CCM permanently — both stay
+  # deploy_*=true forever, applied as apply_only kubectl manifests (never
+  # deleted by tofu, never reconciled by Flux). This is deliberate, not a
+  # bootstrap-then-handoff step: the manifests carry no Helm ownership
+  # metadata, so a Flux HelmRelease over the same objects would fail its own
+  # install with an ownership conflict. To upgrade Cilium or the CCM, bump
+  # cilium_version/hcloud_ccm_version (or cilium_values) here and re-apply —
+  # same as any other tofu-managed resource. Flux still manages every other
+  # cloud workload; it never touches kube-system's CNI/CCM.
+  deploy_cilium  = true
+  cilium_version = "1.19.5"
+  cilium_values = [yamlencode({
     cluster = {
       name = "cloud"
       id   = 2
-    }
-    clustermesh = {
-      useAPIServer = true
     }
     ipam = {
       mode = "kubernetes"
@@ -434,6 +189,9 @@ resource "helm_release" "cilium" {
     k8sServicePort       = 7445
     bpf = {
       masquerade = true
+    }
+    loadBalancer = {
+      acceleration = "best-effort"
     }
     routingMode    = "tunnel"
     tunnelProtocol = "vxlan"
@@ -452,33 +210,76 @@ resource "helm_release" "cilium" {
     gatewayAPI = {
       enabled = true
     }
+    # Explicitly off, matching the module's own default. Supplying cilium_values
+    # at all replaces that default wholesale, and the chart's own default for
+    # hubble is ENABLED — so omitting this silently turns Hubble on. That
+    # matters because the module renders Cilium client-side with
+    # `data "helm_template"`, where hubble's genSelfSignedCert regenerates the
+    # CA and server certificate on every single render, so an untouched cluster
+    # still plans cert churn every time. Nothing here consumes Hubble — there is
+    # no relay and no UI deployed — so turning it off drops that noise and the
+    # three unused objects (cilium-ca, hubble-server-certs, hubble-peer).
+    #
+    # Note this does NOT make `tofu plan` clean for this root. The module
+    # declares alias_ips = [] on the control-plane server (server.tf, citing
+    # hetznercloud/terraform-provider-hcloud#650) while Talos claims the
+    # control-plane VIP 172.30.1.100 on that same interface at runtime via the
+    # Hetzner API. tofu therefore reports a permanent in-place diff wanting to
+    # strip the alias. Applying it removes the VIP until Talos re-claims it, so
+    # treat any cloud apply as briefly disrupting the internal control-plane
+    # endpoint — see "Known limitations" in the README.
+    hubble = {
+      enabled = false
+    }
   })]
-
-  depends_on = [terraform_data.kubernetes_api_ready]
-}
-
-resource "random_id" "home_talos_backup_bucket" {
-  byte_length = 4
+  # Pinned rather than left null (which resolves to the chart's "latest" at
+  # every apply, drifting silently). Bump deliberately, same as cilium_version.
+  deploy_hcloud_ccm  = true
+  hcloud_ccm_version = "1.36.0"
+  tailscale = {
+    enabled  = true
+    auth_key = local.secrets["tailscale_auth_key"]
+  }
 }
 
 resource "random_id" "cloud_talos_backup_bucket" {
   byte_length = 4
 }
 
-resource "aws_s3_bucket" "home_talos_backups" {
-  bucket        = "home-talos-etcd-${random_id.home_talos_backup_bucket.hex}"
-  force_destroy = false
-}
-
 resource "aws_s3_bucket" "cloud_talos_backups" {
   bucket        = "${var.cluster_name}-etcd-${random_id.cloud_talos_backup_bucket.hex}"
   force_destroy = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
-output "home_talos_backup_bucket" {
-  description = "Hetzner Object Storage bucket for Home Talos etcd snapshots"
-  value       = aws_s3_bucket.home_talos_backups.bucket
+resource "aws_s3_bucket_versioning" "cloud_talos_backups" {
+  bucket = aws_s3_bucket.cloud_talos_backups.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
+
+# NOT managed here: aws_s3_bucket_lifecycle_configuration against Hetzner
+# Object Storage never converges with the AWS provider (tested live —
+# every apply times out after 3m on the post-write verification GET,
+# "context deadline exceeded"). This is a confirmed, currently-unfixed
+# upstream bug: terraform-provider-aws#49019 / the still-open fix PR #49547
+# — the resource's read-back verification depends on an AWS-only response
+# header (x-amz-transition-default-minimum-object-size) that Hetzner's
+# S3-compatible API doesn't send, so the provider can never confirm success
+# even when the underlying write did go through.
+#
+# Snapshots WILL accumulate forever without a lifecycle policy (one object
+# per backup-workflow run, every day, indefinitely). Verify whether the
+# above attempt actually left a policy on the bucket
+# (aws s3api get-bucket-lifecycle-configuration --endpoint-url
+# https://fsn1.your-objectstorage.com --bucket <name>, or the Hetzner
+# Console), and if not, set one manually there, or via the Hetzner Console,
+# until the upstream fix ships:
+#   rule: expire objects after 90 days; expire noncurrent versions after 30 days
 
 output "cloud_talos_backup_bucket" {
   description = "Hetzner Object Storage bucket for Cloud Talos etcd snapshots"
@@ -492,7 +293,7 @@ output "talos_backup_s3_endpoint" {
 
 output "cloud_ingress_ipv4" {
   description = "Public IPv4 address of the cloud control plane"
-  value       = hcloud_primary_ip.control_plane.ip_address
+  value       = module.talos.public_ipv4_list[0]
 }
 
 output "cloud_ingress_ipv6" {
@@ -502,22 +303,12 @@ output "cloud_ingress_ipv6" {
 
 output "cloud_cluster_kubeconfig" {
   description = "Kubeconfig for the cloud cluster"
-  value       = talos_cluster_kubeconfig.cluster.kubeconfig_raw
+  value       = module.talos.kubeconfig
   sensitive   = true
 }
 
 output "cloud_cluster_talosconfig" {
   description = "Talosconfig for the cloud cluster"
-  value = yamlencode({
-    context = var.cluster_name
-    contexts = {
-      (var.cluster_name) = {
-        endpoints = [hcloud_primary_ip.control_plane.ip_address]
-        ca        = talos_machine_secrets.cluster.client_configuration.ca_certificate
-        crt       = talos_machine_secrets.cluster.client_configuration.client_certificate
-        key       = talos_machine_secrets.cluster.client_configuration.client_key
-      }
-    }
-  })
-  sensitive = true
+  value       = module.talos.talosconfig
+  sensitive   = true
 }

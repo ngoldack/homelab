@@ -15,7 +15,15 @@ output "node_ips" {
   value = {
     for k, v in local.vm_instances : k => {
       role = v.talos_role
-      ips  = proxmox_virtual_environment_vm.talos_nodes[k].ipv4_addresses
+      # The node's own address, not the raw per-interface dump from the guest
+      # agent. Once Cilium is running, that dump also enumerates cilium_host,
+      # cilium_vxlan and the per-pod lxc* veths, whose addresses churn as pods
+      # come and go — which made this output (and therefore `tofu plan`)
+      # permanently dirty even when no infrastructure had changed.
+      # local.talos_nodes already resolves the real address the same way the
+      # Talos provider is pointed at it: static IP if declared, else the first
+      # non-loopback address the agent reports.
+      ip = coalesce(local.talos_nodes[k].ip, local.talos_nodes[k].current_ip)
     }
   }
 }

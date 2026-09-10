@@ -10,6 +10,9 @@ spec:
   wait: true
   dependsOn:
     - name: cluster-vars
+    # headlamp's chart can create its own HTTPRoute (httpRoute.enabled) —
+    # depend on the CRDs existing even though that's currently disabled.
+    - name: gateway-api-crds
   sourceRef:
     kind: GitRepository
     name: flux-system

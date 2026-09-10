@@ -1,3 +1,9 @@
+variable "object_storage_location" {
+  type        = string
+  default     = "fsn1"
+  description = "Hetzner Object Storage location for this cluster's own etcd backup bucket and state bucket."
+}
+
 variable "state_encryption_passphrase" {
   description = "Passphrase used to encrypt local OpenTofu state. Supplied by Taskfile from SOPS."
   type        = string
@@ -83,24 +89,6 @@ variable "proxmox_nodes" {
         }
       ]
     }
-    pmx-infra = {
-      endpoint      = "https://pmx-infra:8006/"
-      storage_pool  = "local-zfs"
-      max_memory_gb = 32
-      max_cpu_cores = 4
-      cpu_threads   = 8
-      cpu_model     = "Xeon E5-2430 v2"
-      # Minimal host reserve (headless, ARC capped on-host).
-      reserved = {
-        memory = 2
-        cpu    = { class = "efficiency", count = 2 }
-      }
-      # Uniform CPU (no big.LITTLE): one class covering all threads.
-      cpu_classes = {
-        efficiency = "0-7"
-      }
-      gpu = []
-    }
   }
 
   # The reserved.cpu.class must be a class the host actually declares.
@@ -179,11 +167,12 @@ variable "cluster_api_port" {
 }
 
 variable "talos_default_extensions" {
-  description = "Talos system extensions installed on every node. Defaults include the TrueNAS-CSI storage clients: nfs-utils (rpcbind/rpc.statd for NFS mounts) and nvme-cli (NVMe-oF userspace tooling; the nvme_tcp/nvme_fabrics kernel modules ship in the Talos kernel)."
+  description = "Talos system extensions installed on every node. Defaults include the TrueNAS-CSI storage clients: nfs-utils (rpcbind/rpc.statd for NFS mounts) and nvme-cli (NVMe-oF userspace tooling; the nvme_tcp/nvme_fabrics kernel modules ship in the Talos kernel), and qemu-guest-agent — required for every VM resource below, which sets agent.enabled = true: the bpg/proxmox provider's own docs say not to enable that flag unless the guest actually runs qemu-guest-agent (confirmed live: without this extension, the agent never reports network interfaces and every apply hangs on \"waiting for the QEMU agent\" until timeout)."
   type        = list(string)
   default = [
     "siderolabs/nfs-utils",
     "siderolabs/nvme-cli",
+    "siderolabs/qemu-guest-agent",
   ]
 }
 
@@ -205,7 +194,14 @@ variable "service_cidr" {
 variable "nodes" {
   description = "Talos nodes for the home cluster, keyed by node name (VMs are named \"<cluster>-<name>\"). Each node declares its vCPU count (cpu_cores) and a cpu_class (\"performance\"/\"efficiency\") selecting which host core class it is pinned to — tofu assigns the actual threads deterministically. Alternatively set an explicit cpu_affinity string to bypass class-based assignment. Static IPs live in the SOPS secret, keyed by the same node names (network.node_ips)."
   type = map(object({
-    host         = optional(string)
+    host = optional(string)
+    # Pin the Proxmox VM ID rather than letting it auto-assign. Without this,
+    # destroying and recreating a node (which this repo has done more than
+    # once) hands it the next free ID — and if that ID was ever used by a
+    # different logical node, PBS backup history for the two get merged under
+    # one ID with no way to tell them apart after the fact. Pinning makes VM
+    # identity, and therefore backup history, stable across rebuilds.
+    vm_id        = optional(number)
     cpu_cores    = number
     cpu_class    = optional(string)
     cpu_affinity = optional(string)
@@ -225,14 +221,14 @@ variable "nodes" {
       pcie    = optional(bool, true)
       rombar  = optional(bool, true)
     })), [])
-    taints = optional(list(object({
-      key    = string
-      value  = optional(string, "")
-      effect = string
-    })), [])
+    # No `taints` field: Talos can never self-apply a node taint (see
+    # talos.tf's comment on the worker config_patches). Taints are applied
+    # by a Flux-managed Job instead, selecting nodes by their
+    # node.kubernetes.io/instance-type label — see
+    # kubernetes/infrastructure/home/node-taints/.
   }))
   default = {
-    cp = {
+    cp-main = {
       host       = "pmx-main"
       cpu_cores  = 2
       cpu_class  = "efficiency"
@@ -273,26 +269,9 @@ variable "nodes" {
           rombar = true
         }
       ]
-      taints = [{
-        key    = "dedicated"
-        value  = "ai"
-        effect = "NoSchedule"
-      }]
       node_labels = {
         "node.kubernetes.io/instance-type" = "gpu-worker"
         "workload/ai-inference"            = "true"
-      }
-    }
-    wk-infra = {
-      host       = "pmx-infra"
-      cpu_cores  = 2
-      cpu_class  = "efficiency"
-      memory     = 4096
-      disk_size  = 32
-      talos_role = "worker"
-      node_labels = {
-        "node.kubernetes.io/instance-type" = "infra-worker"
-        "workload/infrastructure"          = "true"
       }
     }
   }
@@ -407,9 +386,11 @@ variable "nodes" {
   }
 
   validation {
+    # `n.gpu_vram_gb == 0 || n.gpu_vram_gb <= 0` (as originally written) is
+    # redundant: == 0 is already a subset of <= 0. Simplified to <= 0 — same
+    # condition, same result, one less thing to read.
     condition = alltrue([
-      for n in values(var.nodes) : n.gpu_vram_gb == 0 || n.gpu_vram_gb <= 0 ? true :
-      n.gpu == true
+      for n in values(var.nodes) : n.gpu_vram_gb <= 0 ? true : n.gpu == true
     ])
     error_message = "gpu_vram_gb can only be set when gpu = true."
   }

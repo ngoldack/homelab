@@ -1,8 +1,13 @@
+# CRD-producer tier only: cert-manager itself plus the Hetzner DNS webhook it
+# loads. The ClusterIssuer and Certificate that CONSUME those CRDs live in
+# ../network instead, applied by a Flux Kustomization that dependsOn this one
+# — cert-manager's CRDs must exist before a ClusterIssuer/Certificate object
+# can be applied, and Flux can only guarantee that ordering across separate
+# Kustomizations, not within one.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - sources.yaml
   - helmrelease.yaml
   - webhook-helmrelease.yaml
-  - clusterissuer.yaml
-  - certificate.yaml
   - secret.sops.yaml

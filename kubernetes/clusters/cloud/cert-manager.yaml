@@ -1,0 +1,28 @@
+# Split out from infra-controllers: this Kustomization installs cert-manager
+# itself (its CRDs included) and the Hetzner DNS webhook. The ClusterIssuer
+# and Certificate that CONSUME those CRDs live in the `network` Kustomization
+# instead, which dependsOn this one — see
+# kubernetes/infrastructure/cloud/cert-manager/kustomization.yaml.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/cloud/cert-manager
+  prune: true
+  wait: true
+  dependsOn:
+    - name: cluster-vars
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

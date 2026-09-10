@@ -42,10 +42,12 @@ spec:
         installOptions:
           parallel: true
           maxConcurrent: 3
+    # Not exposed on the public Gateway: this chart's pod ServiceAccount is
+    # bound to cluster-admin, and no OIDC provider is configured here (the
+    # chart supports real per-user OIDC login — config.oidc.* — but that
+    # needs an external IdP client the operator sets up first). Reach it via
+    # `kubectl -n headlamp port-forward` until an OIDC provider is wired up;
+    # re-enable httpRoute (parentRefs: [{name: public, namespace: network}],
+    # hostnames: [headlamp.network.svc.${CLUSTER_DOMAIN}]) only once it is.
     httpRoute:
-      enabled: true
-      parentRefs:
-        - name: public
-          namespace: network
-      hostnames:
-        - headlamp.network.svc.${CLUSTER_DOMAIN}
+      enabled: false

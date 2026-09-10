@@ -16,6 +16,14 @@ tofu/terraform.tfstate.backup
 tofu/*/.terraform/
 tofu/*/terraform.tfstate
 tofu/*/terraform.tfstate.backup
+# OpenTofu's numeric-suffixed "state was rewritten" backups
+# (terraform.tfstate.<unix-timestamp>.backup), same encrypted-state risk as
+# the plain .backup file above.
+tofu/terraform.tfstate.*.backup
+tofu/*/terraform.tfstate.*.backup
+# Dated local-state snapshots kept outside tofu/ across a full teardown/
+# rebuild — same encrypted-state risk as the backups above.
+.state-archive/
 # The provider lock file IS committed so CI validates against pinned versions.
 !tofu/*/.terraform.lock.hcl
 
@@ -38,10 +46,22 @@ kubeconfig
 talosconfig
 kubeconfig.yaml
 talosconfig.yaml
+kubeconfig-home.yaml
 kubeconfig-cloud.yaml
-talosconfig-cloud.yaml
 talosconfig-home.yaml
+talosconfig-cloud.yaml
 *.kubeconfig
 *.talosconfig
 *.kubeconfig.yaml
 *.talosconfig.yaml
+
+# mktemp working files from the Taskfile's write-temp-then-mv pattern. These
+# carry a random suffix appended AFTER the extension
+# (kubeconfig-home.yaml.tmp.hK3p9x, cluster-secrets.local.yaml.tmp.Qa1Zc4), so
+# none of the exact-name or *.local.yaml rules above match them. They hold
+# plaintext kubeconfigs and decrypted SOPS output, and Task's embedded shell
+# does not run EXIT traps on interrupt — so a Ctrl-C mid-task leaves one behind.
+*.tmp.*
+
+# Editor settings (references machine-local absolute paths)
+.vscode/

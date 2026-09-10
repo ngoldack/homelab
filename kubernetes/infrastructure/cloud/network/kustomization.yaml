@@ -1,5 +1,18 @@
+# CRD-consumer tier: everything here needs either cert-manager's CRDs
+# (ClusterIssuer, Certificate) or the Gateway API CRDs (Gateway, and
+# external-dns's gateway-httproute source) already Established — the Flux
+# Kustomization that applies this path dependsOn both cert-manager and
+# gateway-api-crds. external-dns is included from its own directory (rather
+# than from ../../cloud/kustomization.yaml) specifically so it lands in this
+# same pass: it needs the `network` Namespace this Kustomization creates
+# (gateway.yaml) and the hetzner-dns-token Secret below, and kustomize/
+# kustomize-controller only guarantees namespace-before-namespaced-resource
+# ordering WITHIN one apply, not across dependent Kustomizations.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - gateway.yaml
+  - clusterissuer.yaml
+  - certificate.yaml
   - secret.sops.yaml
+  - ../external-dns

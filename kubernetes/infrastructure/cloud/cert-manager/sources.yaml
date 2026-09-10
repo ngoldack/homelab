@@ -1,0 +1,21 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: jetstack
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://charts.jetstack.io
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cert-manager-webhook-hetzner
+  namespace: flux-system
+spec:
+  interval: 2h
+  # The OFFICIAL Hetzner-maintained webhook (org "hetzner", not the
+  # community "vadimkim" one this repo used before Hetzner's Nov 2025 DNS
+  # migration) — it targets the new unified Cloud API, same repo the
+  # hcloud-cloud-controller-manager chart already ships from.
+  url: https://charts.hetzner.cloud

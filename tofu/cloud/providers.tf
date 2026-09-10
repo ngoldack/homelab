@@ -1,6 +1,22 @@
 terraform {
   required_version = ">= 1.7.0"
 
+  # Remote state, this root's own dedicated bucket (see state-backend.tf for
+  # the bootstrap sequence that created it). Credentials come from
+  # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars at every invocation, not
+  # from this block — backend blocks can't reference var./local.
+  backend "s3" {
+    bucket                      = "cloud-tofu-state-f429558f"
+    key                         = "terraform.tfstate"
+    region                      = "fsn1"
+    endpoints                   = { s3 = "https://fsn1.your-objectstorage.com" }
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    use_path_style              = true
+  }
+
   encryption {
     key_provider "pbkdf2" "state" {
       passphrase = var.state_encryption_passphrase
@@ -29,10 +45,6 @@ terraform {
       source  = "siderolabs/talos"
       version = "~> 0.11"
     }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 3.3"
-    }
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
@@ -45,6 +57,10 @@ terraform {
       source  = "carlpett/sops"
       version = "~> 1.4"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.34"
+    }
   }
 }
 
@@ -56,13 +72,17 @@ provider "imager" {
   token = local.secrets["hcloud_api_token"]
 }
 
-provider "helm" {
-  kubernetes = {
-    host                   = local.cluster_endpoint
-    client_certificate     = base64decode(talos_cluster_kubeconfig.cluster.kubernetes_client_configuration.client_certificate)
-    client_key             = base64decode(talos_cluster_kubeconfig.cluster.kubernetes_client_configuration.client_key)
-    cluster_ca_certificate = base64decode(talos_cluster_kubeconfig.cluster.kubernetes_client_configuration.ca_certificate)
-  }
+
+# Configured from the module's own kubeconfig_data output — the same
+# resource-attribute-backed provider pattern the module uses internally for
+# its own helm/kubectl providers (see .terraform/modules/talos/terraform.tf).
+# This is what lets tofu itself own the sops-age Secret (secrets.tf) instead
+# of requiring a manual `kubectl create secret` before Flux can run.
+provider "kubernetes" {
+  host                   = module.talos.kubeconfig_data.host
+  cluster_ca_certificate = module.talos.kubeconfig_data.cluster_ca_certificate
+  client_certificate     = module.talos.kubeconfig_data.client_certificate
+  client_key             = module.talos.kubeconfig_data.client_key
 }
 
 provider "aws" {

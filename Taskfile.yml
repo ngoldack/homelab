@@ -75,8 +75,14 @@ tasks:
         sh -eu -c '
           source=$1
           target=$2
-          case "$source" in *.local.yaml|*.local.yml) ;; *) echo "SOURCE must end in .local.yaml or .local.yml" >&2; exit 1;; esac
-          case "$target" in *.sops.yaml|*.sops.yml) ;; *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1;; esac
+          case "$source" in
+            *.local.yaml|*.local.yml) ;;
+            *) echo "SOURCE must end in .local.yaml or .local.yml" >&2; exit 1 ;;
+          esac
+          case "$target" in
+            *.sops.yaml|*.sops.yml) ;;
+            *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1 ;;
+          esac
           test -f "$source"
           temp_file=$(mktemp "${target}.tmp.XXXXXX")
           trap "rm -f \"$temp_file\"" EXIT HUP INT TERM
@@ -95,8 +101,14 @@ tasks:
         sh -eu -c '
           source=$1
           output=$2
-          case "$source" in *.sops.yaml|*.sops.yml) ;; *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1;; esac
-          case "$output" in *.local.yaml|*.local.yml) ;; *) echo "OUTPUT must end in .local.yaml or .local.yml" >&2; exit 1;; esac
+          case "$source" in
+            *.sops.yaml|*.sops.yml) ;;
+            *) echo "FILE must end in .sops.yaml or .sops.yml" >&2; exit 1 ;;
+          esac
+          case "$output" in
+            *.local.yaml|*.local.yml) ;;
+            *) echo "OUTPUT must end in .local.yaml or .local.yml" >&2; exit 1 ;;
+          esac
           test -f "$source"
           test ! -e "$output"
           sops --decrypt "$source" > "$output"
@@ -150,7 +162,8 @@ tasks:
           done
           test -s "$key_file"
           export SOPS_AGE_KEY_FILE="$key_file"
-          find tofu kubernetes -type f -name "*.sops.yaml" -exec sh -c "for file do sops --decrypt \"\$file\" >/dev/null; done" sh {} +
+          find tofu kubernetes -type f -name "*.sops.yaml" \
+            -exec sh -e -c "for file do sops --decrypt \"\$file\" >/dev/null; done" sh {} +
         '
 
   sops:updatekeys:all:
@@ -194,13 +207,41 @@ tasks:
     cmds:
       - |
         set -eu
-        passphrase=$(sops --output-type json --decrypt {{.TOFU_DIR}}/secret.sops.yaml | jq -r '.state_encryption_passphrase')
+        export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$PWD/{{.AGE_KEY_FILE}}}"
+        test -f "$SOPS_AGE_KEY_FILE"
+        passphrase=$(sops --output-type json --decrypt {{.TOFU_DIR}}/secret.sops.yaml \
+          | jq -r '.state_encryption_passphrase')
         test -n "$passphrase"
         export TF_VAR_state_encryption_passphrase="$passphrase"
+        # Both roots now use a remote S3-compatible (Hetzner Object Storage)
+        # state backend. Backend blocks can't read var./local. — the s3
+        # backend authenticates purely from these env vars, on every
+        # invocation (not just init), same as any other S3 client.
+        export AWS_ACCESS_KEY_ID=$(sops --output-type json --decrypt {{.TOFU_DIR}}/secret.sops.yaml \
+          | jq -r '.hetzner_object_storage_access_key')
+        export AWS_SECRET_ACCESS_KEY=$(sops --output-type json --decrypt {{.TOFU_DIR}}/secret.sops.yaml \
+          | jq -r '.hetzner_object_storage_secret_key')
         if [ -n "{{.TOFU_OUTPUT_FILE}}" ]; then
-          exec tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}} > "{{.TOFU_OUTPUT_FILE}}"
+          # Write to a private (0600) temp file first, then atomically move
+          # it into place — `> "{{.TOFU_OUTPUT_FILE}}"` alone truncates any
+          # existing (still-good) kubeconfig/talosconfig immediately, before
+          # tofu even runs, so a failed command destroys it instead of
+          # leaving it untouched.
+          temp_file=$(mktemp "{{.TOFU_OUTPUT_FILE}}.tmp.XXXXXX")
+          # EXIT only, not "EXIT HUP INT TERM" like the sops:* tasks use —
+          # those wrap themselves in a real `sh -c`, so their traps run
+          # under the system shell. This task runs directly under Task's
+          # own embedded POSIX shell (mvdan.cc/sh), which doesn't recognize
+          # signal names in `trap` at all ("trap: HUP: invalid signal
+          # specification" — confirmed live). EXIT alone still covers
+          # normal completion and most abnormal termination paths.
+          trap 'rm -f "$temp_file"' EXIT
+          chmod 600 "$temp_file"
+          tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}} > "$temp_file"
+          mv "$temp_file" "{{.TOFU_OUTPUT_FILE}}"
+        else
+          exec tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}}
         fi
-        exec tofu -chdir={{.TOFU_DIR}} {{.TOFU_ARGS}}
 
   tofu:home:plan:
     desc: Show the Home OpenTofu plan
@@ -266,14 +307,6 @@ tasks:
           TOFU_DIR: tofu/cloud
           TOFU_ARGS: destroy
 
-  tofu:cloud:handoff-cilium:
-    desc: Relinquish the seeded Cilium release after Flux has adopted it
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: state rm helm_release.cilium
-
   kubeconfig:home:export:
     desc: Export the Home kubeconfig to kubeconfig-home.yaml
     cmds:
@@ -315,7 +348,7 @@ tasks:
     cmds:
       - task: tofu:run
         vars:
-          TOFU_DIR: tofu/cloud
+          TOFU_DIR: tofu/home
           TOFU_ARGS: output -raw home_talos_backup_bucket
 
   talos-backup:cloud:bucket:
@@ -325,5 +358,3 @@ tasks:
         vars:
           TOFU_DIR: tofu/cloud
           TOFU_ARGS: output -raw cloud_talos_backup_bucket
-
-

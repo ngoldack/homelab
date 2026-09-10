@@ -19,7 +19,23 @@ spec:
       interval: 1h
   targetNamespace: network
   values:
-    provider: hetzner
+    # "hetzner" is not a built-in provider in external-dns 0.15.x (app
+    # version of chart 1.15.2) — it was moved out to the separate
+    # webhook-provider pattern. This runs the maintained community webhook
+    # (github.com/mconfalonieri/external-dns-hetzner-webhook) as a sidecar;
+    # bump webhook.image.tag deliberately, same as any other chart version.
+    provider:
+      name: webhook
+      webhook:
+        image:
+          repository: ghcr.io/mconfalonieri/external-dns-hetzner-webhook
+          tag: v1.0.2
+        env:
+          - name: HETZNER_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: hetzner-dns-token
+                key: api-token
     sources:
       - gateway-httproute
       - service
@@ -31,9 +47,3 @@ spec:
     interval: 1m
     extraArgs:
       - --default-provider-record-ttl=300
-    env:
-      - name: EXTERNAL_DNS_HETZNER_TOKEN
-        valueFrom:
-          secretKeyRef:
-            name: hetzner-dns-token
-            key: api-token

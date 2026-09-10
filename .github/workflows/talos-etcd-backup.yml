@@ -8,20 +8,56 @@ on:
 permissions:
   contents: read
 
+# Both jobs reach their cluster over Tailscale from a GitHub-hosted runner,
+# not a self-hosted one. Every credential they need (Hetzner Object Storage
+# keys, each cluster's talosconfig, the Tailscale auth key) is decrypted at
+# runtime from the SAME sops-encrypted files tofu itself reads
+# (tofu/home/secret.sops.yaml, tofu/cloud/secret.sops.yaml), via the
+# SOPS_AGE_KEY repo secret (ci.age.key's private key — see .sops.yaml for the
+# recipient list). Nothing is duplicated into separate per-value GH secrets.
+#
+# Both jobs join the tailnet with the SAME reusable auth key tofu uses to
+# enroll actual cluster nodes (tailscale_auth_key). That is deliberate for
+# now — reusing what already exists rather than provisioning a second
+# key — but it means a CI run's ephemeral join is indistinguishable from a
+# real node join unless that key is marked Ephemeral in the Tailscale admin
+# console. Newly-joined devices also need manual approval there
+# (machineAuthorized) before traffic flows at all, same as any new node.
 jobs:
   backup-home-etcd:
     name: Backup Home etcd to Hetzner Object Storage
-    runs-on: [self-hosted, homelab]
+    # Bounds EXECUTION time once the runner picks this up (e.g. talosctl or
+    # aws cp hanging). GitHub-hosted runners are always immediately
+    # schedulable, so unlike the old self-hosted design there is no separate
+    # queue-time failure mode left to bound.
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.HETZNER_OBJECT_STORAGE_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_OBJECT_STORAGE_SECRET_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}
-      AWS_EC2_METADATA_DISABLED: "true"
-      S3_ENDPOINT: https://${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}.your-objectstorage.com
-      S3_BUCKET: ${{ secrets.HOME_TALOS_BACKUP_BUCKET }}
-      TALOSCONFIG: ${{ secrets.HOME_TALOSCONFIG }}
       TALOS_VERSION: v1.13.4
+      AWS_DEFAULT_REGION: fsn1
+      S3_ENDPOINT: https://fsn1.your-objectstorage.com
+      # Not a secret (a bucket name isn't a credential) — from `tofu output
+      # home_talos_backup_bucket` in tofu/cloud. Update if the bucket is ever
+      # recreated (it carries a random suffix tofu assigns once, at creation).
+      S3_BUCKET: home-talos-etcd-28575c26
+      # cp-main's Tailscale IP (confirmed live via
+      # `talosctl -n 10.30.0.10 get addresses`, tailscale0 interface), not
+      # its hostname: using the IP directly avoids depending on the tailnet
+      # having MagicDNS enabled, which cannot be verified from outside the
+      # tailnet. Stable for the life of this device's tailnet registration —
+      # only changes if cp-main is ever removed from the tailnet and
+      # rejoins as a new device (e.g. a from-scratch reinstall).
+      TALOS_TAILNET_HOST: 100.107.85.29
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sops
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /usr/local/bin/sops \
+            "https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64"
+          chmod 0755 /usr/local/bin/sops
+
       - name: Install talosctl
         run: |
           curl --fail --location --silent --show-error \
@@ -29,29 +65,78 @@ jobs:
             "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-amd64"
           chmod 0755 /usr/local/bin/talosctl
 
-      - name: Create etcd snapshot
+      - name: Decrypt secrets
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
+          set -euo pipefail
+          umask 077
+          : "${SOPS_AGE_KEY:?SOPS_AGE_KEY repo secret is not set}"
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT HUP INT TERM
+          printf '%s' "$SOPS_AGE_KEY" > "$key_file"
+          export SOPS_AGE_KEY_FILE="$key_file"
+
+          sops -d --extract '["home_talosconfig"]' tofu/home/secret.sops.yaml > talosconfig
+          ts_authkey=$(sops -d --extract '["tailscale_auth_key"]' tofu/home/secret.sops.yaml)
+          access_key=$(sops -d --extract '["hetzner_object_storage_access_key"]' tofu/cloud/secret.sops.yaml)
+          secret_key=$(sops -d --extract '["hetzner_object_storage_secret_key"]' tofu/cloud/secret.sops.yaml)
+
+          echo "::add-mask::$ts_authkey"
+          echo "::add-mask::$access_key"
+          echo "::add-mask::$secret_key"
+          {
+            echo "TS_AUTHKEY=$ts_authkey"
+            echo "AWS_ACCESS_KEY_ID=$access_key"
+            echo "AWS_SECRET_ACCESS_KEY=$secret_key"
+          } >> "$GITHUB_ENV"
+
+      - name: Join tailnet
+        uses: tailscale/github-action@v4.1.3
+        with:
+          authkey: ${{ env.TS_AUTHKEY }}
+
+      - name: Create etcd snapshot
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
           umask 077
           trap 'rm -f talosconfig etcd.snapshot' EXIT HUP INT TERM
-          printf '%s' "$TALOSCONFIG" > talosconfig
-          talosctl --talosconfig=talosconfig etcd snapshot etcd.snapshot
+          talosctl --talosconfig=talosconfig \
+            --nodes "$TALOS_TAILNET_HOST" --endpoints "$TALOS_TAILNET_HOST" \
+            etcd snapshot etcd.snapshot
           timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
           aws s3 cp etcd.snapshot "s3://${S3_BUCKET}/etcd-${timestamp}.snapshot" \
             --endpoint-url "$S3_ENDPOINT"
 
   backup-cloud-etcd:
     name: Backup Cloud etcd to Hetzner Object Storage
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.HETZNER_OBJECT_STORAGE_ACCESS_KEY }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_OBJECT_STORAGE_SECRET_KEY }}
-      AWS_DEFAULT_REGION: ${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}
-      AWS_EC2_METADATA_DISABLED: "true"
-      S3_ENDPOINT: https://${{ secrets.HETZNER_OBJECT_STORAGE_LOCATION }}.your-objectstorage.com
-      S3_BUCKET: ${{ secrets.CLOUD_TALOS_BACKUP_BUCKET }}
-      TALOSCONFIG: ${{ secrets.CLOUD_TALOSCONFIG }}
       TALOS_VERSION: v1.13.4
+      AWS_DEFAULT_REGION: fsn1
+      S3_ENDPOINT: https://fsn1.your-objectstorage.com
+      # Not a secret — from `tofu output cloud_talos_backup_bucket`. Same
+      # random-suffix caveat as the home job's S3_BUCKET above.
+      S3_BUCKET: cloud-talos-etcd-fe190fa8
+      # cloud-talos-control-plane-1's Tailscale IP (confirmed live via
+      # `talosctl -n 91.99.0.166 get addresses`, tailscale0 interface) — see
+      # the Home job above for why this is the IP, not the hostname. Changes
+      # only if this node is ever removed from the tailnet and rejoins as a
+      # new device.
+      TALOS_TAILNET_HOST: 100.105.161.23
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sops
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /usr/local/bin/sops \
+            "https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64"
+          chmod 0755 /usr/local/bin/sops
+
       - name: Install talosctl
         run: |
           curl --fail --location --silent --show-error \
@@ -59,12 +144,47 @@ jobs:
             "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-amd64"
           chmod 0755 /usr/local/bin/talosctl
 
-      - name: Create etcd snapshot
+      - name: Decrypt secrets
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
+          set -euo pipefail
+          umask 077
+          : "${SOPS_AGE_KEY:?SOPS_AGE_KEY repo secret is not set}"
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT HUP INT TERM
+          printf '%s' "$SOPS_AGE_KEY" > "$key_file"
+          export SOPS_AGE_KEY_FILE="$key_file"
+
+          sops -d --extract '["cloud_talosconfig"]' tofu/cloud/secret.sops.yaml > talosconfig
+          ts_authkey=$(sops -d --extract '["tailscale_auth_key"]' tofu/cloud/secret.sops.yaml)
+          access_key=$(sops -d --extract '["hetzner_object_storage_access_key"]' tofu/cloud/secret.sops.yaml)
+          secret_key=$(sops -d --extract '["hetzner_object_storage_secret_key"]' tofu/cloud/secret.sops.yaml)
+
+          echo "::add-mask::$ts_authkey"
+          echo "::add-mask::$access_key"
+          echo "::add-mask::$secret_key"
+          {
+            echo "TS_AUTHKEY=$ts_authkey"
+            echo "AWS_ACCESS_KEY_ID=$access_key"
+            echo "AWS_SECRET_ACCESS_KEY=$secret_key"
+          } >> "$GITHUB_ENV"
+
+      - name: Join tailnet
+        uses: tailscale/github-action@v4.1.3
+        with:
+          authkey: ${{ env.TS_AUTHKEY }}
+
+      - name: Create etcd snapshot
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
           umask 077
           trap 'rm -f talosconfig etcd.snapshot' EXIT HUP INT TERM
-          printf '%s' "$TALOSCONFIG" > talosconfig
-          talosctl --talosconfig=talosconfig etcd snapshot etcd.snapshot
+          talosctl --talosconfig=talosconfig \
+            --nodes "$TALOS_TAILNET_HOST" --endpoints "$TALOS_TAILNET_HOST" \
+            etcd snapshot etcd.snapshot
           timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
           aws s3 cp etcd.snapshot "s3://${S3_BUCKET}/etcd-${timestamp}.snapshot" \
             --endpoint-url "$S3_ENDPOINT"

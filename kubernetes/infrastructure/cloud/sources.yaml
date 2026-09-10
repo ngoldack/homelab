@@ -1,12 +1,9 @@
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: cilium
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://helm.cilium.io
----
+# jetstack and cert-manager-webhook-hetzner moved to ../cert-manager/sources.yaml;
+# external-dns moved to ../external-dns/sources.yaml. Each HelmRepository now
+# lands in the SAME Flux Kustomization apply as the HelmRelease that consumes
+# it (cert-manager, network), rather than only in infra-controllers, which
+# neither of those Kustomizations dependsOn. Only headlamp is applied from
+# here, since headlamp itself is applied from here too (see kustomization.yaml).
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
@@ -15,30 +12,3 @@ metadata:
 spec:
   interval: 2h
   url: https://kubernetes-sigs.github.io/headlamp/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: jetstack
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://charts.jetstack.io
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: external-dns
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://kubernetes-sigs.github.io/external-dns/
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: cert-manager-webhook-hetzner
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://vadimkim.github.io/cert-manager-webhook-hetzner

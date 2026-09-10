@@ -1,0 +1,11 @@
+# Gateway API standard-channel CRDs. Nothing else in this repo installs them,
+# and both Cilium's gatewayAPI.enabled and external-dns's gateway-httproute
+# source need them present before they can run — Cilium silently skips
+# creating its own GatewayClass without them, external-dns crash-loops
+# trying to watch a CRD that doesn't exist, and the Gateway/HTTPRoute
+# manifests in this repo fail outright ("no matches for kind").
+# Bump the pinned release tag deliberately, same as any other chart version.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.2/standard-install.yaml

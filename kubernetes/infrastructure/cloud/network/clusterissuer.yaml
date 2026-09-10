@@ -1,0 +1,29 @@
+# Let's Encrypt production issuer using the official Hetzner DNS-01 webhook
+# (hetzner/cert-manager-webhook-hetzner, charts.hetzner.cloud), which
+# authenticates against the unified Hetzner Cloud API — not the community
+# webhook this repo used before Hetzner's Nov 2025 DNS migration, which
+# targeted the now-legacy dns.hetzner.com API directly. No zoneName/apiUrl
+# here: the new API scopes zones to the token's project and the webhook
+# resolves the right zone on its own.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@${CLUSTER_DOMAIN}
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          webhook:
+            groupName: acme.hetzner.com
+            solverName: hetzner
+            config:
+              tokenSecretKeyRef:
+                name: hetzner
+                key: token
+        selector:
+          dnsZones:
+            - ${CLUSTER_DOMAIN}

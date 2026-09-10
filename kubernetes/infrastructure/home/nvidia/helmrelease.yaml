@@ -8,6 +8,14 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: nvidia-device-plugin
+  # The cluster's default PodSecurity level is baseline, which rejects the
+  # device-plugin DaemonSet's hostPath mounts (/dev, /var/lib/kubelet,
+  # /run/nvidia) outright — nvidia.com/gpu would never get advertised and
+  # the P100 would stay invisible to Kubernetes.
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
 ---
 # Lets GPU pods opt into the nvidia container runtime (handler provided by the
 # nvidia-container-toolkit extension on the node).
@@ -35,14 +43,30 @@ spec:
   targetNamespace: nvidia-device-plugin
   values:
     runtimeClassName: nvidia
-    # Run only on the GPU worker (it carries hardware/gpu.model = Tesla P100)
-    # and tolerate its dedicated=ai taint so the DaemonSet can schedule there.
+    # Run only on the AI worker and tolerate its dedicated=ai taint so the
+    # DaemonSet can schedule there. The value is "Tesla-P100", not "Tesla P100":
+    # Kubernetes label values may not contain spaces, so tofu sanitises the
+    # free-text model string before Talos applies it (see local.hw_label_values
+    # in tofu/home/main.tf). A space here is not merely a mismatch — it is an
+    # invalid selector and the pod spec is rejected at admission.
     nodeSelector:
-      "hardware/gpu.model": "Tesla P100"
+      "hardware/gpu.model": "Tesla-P100"
     tolerations:
       - key: dedicated
         operator: Equal
         value: ai
         effect: NoSchedule
+    # Clear the chart's default nodeAffinity. It requires one of
+    # feature.node.kubernetes.io/pci-10de.present,
+    # feature.node.kubernetes.io/cpu-model.vendor_id=NVIDIA, or
+    # nvidia.com/gpu.present — all three are published by Node Feature
+    # Discovery, which this cluster does not run. Left at its default the
+    # DaemonSet matches no node and quietly schedules zero pods (nodeAffinity
+    # mismatches are silent, and failOnInitError only fires once a pod runs).
+    # nodeSelector above is the single source of truth for placement.
+    # Must be `null`, not `{}`: Helm coalesces maps, so an empty map leaves the
+    # chart's default keys intact (verified with helm template — the gate still
+    # rendered 4 times). Only an explicit null drops them.
+    affinity: null
     # Pascal P100: fail loudly if no GPU rather than silently scheduling none.
     failOnInitError: true

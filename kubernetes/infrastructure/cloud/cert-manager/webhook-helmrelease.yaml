@@ -5,14 +5,23 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
+  # Same Kustomization as the cert-manager HelmRelease, applied in one burst
+  # with no ordering guarantee between them — this HelmRelease-level
+  # dependsOn (Flux's helm-controller watches HelmReleases cluster-wide,
+  # independent of Kustomization boundaries) makes sure cert-manager's CRDs
+  # and webhook are Ready before this chart's webhook config depends on them.
+  dependsOn:
+    - name: cert-manager
   chart:
     spec:
       chart: cert-manager-webhook-hetzner
-      version: "1.4.2"
+      version: "0.9.0"
       sourceRef:
         kind: HelmRepository
         name: cert-manager-webhook-hetzner
       interval: 1h
   targetNamespace: cert-manager
-  values:
-    secretName: hetzner-secret
+  # No values needed: this chart takes its Hetzner Cloud API token straight
+  # from the ClusterIssuer's tokenSecretKeyRef (see network/clusterissuer.yaml)
+  # rather than a chart-level secretName setting like the community chart
+  # this replaced.

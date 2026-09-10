@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-taints
+  namespace: kube-system
+---
+# get+patch on nodes only — nothing else. This exists solely to work around a
+# structural Talos/Kubernetes limitation (see the Job's own comment): Talos's
+# own controller can never self-apply a node taint, because Kubernetes'
+# NodeRestriction admission plugin forbids a node from modifying its own
+# taints, even on a brand-new node's very first join. A cluster-admin-scoped
+# Job is the one thing that can do it instead.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-taints
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-taints
+subjects:
+  - kind: ServiceAccount
+    name: node-taints
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: node-taints
+  apiGroup: rbac.authorization.k8s.io

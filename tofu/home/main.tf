@@ -69,6 +69,23 @@ locals {
     null
   }
 
+  # Kubernetes label values must be <= 63 chars, start/end alphanumeric, and
+  # contain only [A-Za-z0-9._-] — free-text hardware names in proxmox_nodes
+  # (e.g. "Tesla P100", "Intel UHD Graphics 770") violate that on the spaces
+  # alone (confirmed live: Talos rejected the machine config outright,
+  # "invalid machine node labels: label value ... is invalid"). Precompute a
+  # sanitized version of every such string once, per host, instead of
+  # repeating the same replace() chain at each label site below.
+  hw_label_values = {
+    for host_name, host in var.proxmox_nodes : host_name => {
+      cpu_model = replace(replace(trimspace(host.cpu_model), "/[^A-Za-z0-9._-]+/", "-"), "/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/", "")
+      gpu = { for g in host.gpu : g.name =>
+        replace(replace(trimspace(g.model), "/[^A-Za-z0-9._-]+/", "-"), "/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/", "")
+      }
+      igpu = try(replace(replace(trimspace(host.igpu.model), "/[^A-Za-z0-9._-]+/", "-"), "/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/", ""), null)
+    }
+  }
+
   # Labels derivable from node/host facts — computed here so they are never
   # redeclared per node. Anything already in a node's custom node_labels wins
   # (custom map is merged last).
@@ -76,12 +93,19 @@ locals {
     for name, n in var.nodes : name => merge(
       # Control-plane role marker.
       n.talos_role == "controlplane" ? { "node-role.kubernetes.io/control-plane" = "" } : {},
-      # Topology zone = site (the module also sets the short "site" label).
-      { "topology.kubernetes.io/zone" = "home" },
+      # Custom key, not topology.kubernetes.io/zone: on the cloud side that
+      # standard key is owned and silently overwritten by hcloud-cloud-
+      # controller-manager (it sets it to the Hetzner datacenter, e.g.
+      # "fsn1-dc8"). Home has no such controller, so kubernetes.io/zone would
+      # actually stick here — but using the same custom key on both clusters
+      # means "which site is this node in" resolves consistently everywhere,
+      # rather than the two clusters answering the same question at two
+      # different label keys.
+      { "topology.homelab/site" = "home" },
       # CPU model + vCPU count from the host/node facts.
       merge(
         { "hardware/cpu.cores" = tostring(n.cpu_cores) },
-        try({ "hardware/cpu.model" = var.proxmox_nodes[local.node_host[name]].cpu_model }, {})
+        try({ "hardware/cpu.model" = local.hw_label_values[local.node_host[name]].cpu_model }, {})
       ),
       # Memory in GiB (node memory is MiB).
       { "hardware/memory.gb" = tostring(floor(n.memory / 1024)) },
@@ -89,17 +113,20 @@ locals {
       n.gpu ? merge(
         { "hardware/gpu.vram_gb" = tostring(n.gpu_vram_gb) },
         length(n.hostpci) > 0 ? { "hardware/gpu.count" = tostring(length(n.hostpci)) } : {},
-        # Take the GPU model from the host's gpu inventory matching the first
-        # passthrough mapping name, if the host declares it.
+        # Take the GPU model from the host's gpu inventory, matching ANY of
+        # the node's hostpci device names against it (not just hostpci[0] —
+        # a node with an iGPU passthrough ahead of its GPU in the list, like
+        # wk-main-performance, would otherwise silently get no gpu.model
+        # label at all, since hostpci[0] would be the iGPU, not the GPU).
         try({ "hardware/gpu.model" = [
-          for g in var.proxmox_nodes[local.node_host[name]].gpu : g.model
-          if g.name == n.hostpci[0].device
+          for g in var.proxmox_nodes[local.node_host[name]].gpu : local.hw_label_values[local.node_host[name]].gpu[g.name]
+          if contains([for h in n.hostpci : h.device], g.name)
         ][0] }, {})
       ) : {},
       # iGPU passthrough (e.g. intel-igpu for Immich VAAPI): label the model
       # from the host's igpu inventory when the node maps it.
       contains([for h in n.hostpci : h.device], "intel-igpu") ?
-      try({ "hardware/igpu" = var.proxmox_nodes[local.node_host[name]].igpu.model }, {})
+      try({ "hardware/igpu" = local.hw_label_values[local.node_host[name]].igpu }, {})
       : {}
     )
   }
@@ -116,6 +143,7 @@ locals {
     for name, node in var.nodes : name => {
       pool_name    = name
       host         = local.node_host[name]
+      vm_id        = node.vm_id
       cpu_cores    = node.cpu_cores
       cpu_affinity = local.node_affinity[name]
       memory       = node.memory
@@ -123,9 +151,46 @@ locals {
       talos_role   = node.talos_role
       hostpci      = node.hostpci
       node_labels  = local.node_labels[name]
+      ext_key      = local.extension_set_keys[name]
       # Static IP sourced from network.node_ips[<node>]; a missing
       # entry falls back to DHCP (null).
       ip = try(var.network.node_ips[name], null)
+    }
+  }
+
+  # machine.install.extensions in a Talos machine config has had no effect
+  # since Talos 1.10 (kept only so pre-1.10 configs still validate) — system
+  # extensions must be baked into the boot image itself via Image Factory.
+  # Group nodes by their fully-resolved (defaults + per-node), deduped,
+  # sorted extension list, so nodes that need the same set share one
+  # schematic/image instead of building one per node.
+  node_extension_sets = {
+    for name, node in var.nodes : name => sort(distinct(concat(var.talos_default_extensions, node.extensions)))
+  }
+  extension_set_keys = {
+    for name, exts in local.node_extension_sets : name => substr(sha256(join(",", exts)), 0, 12)
+  }
+  # Two (or more) nodes legitimately sharing a key is the whole point here
+  # (that's the dedup), but a `{k => v}` for-expression treats ANY repeated
+  # key as a hard error regardless of whether the values match — confirmed
+  # live: "Duplicate object key" the moment two nodes actually share a
+  # schematic. Iterate the already-deduplicated key list instead, so this
+  # for-expression only ever produces each key once.
+  unique_extension_sets = {
+    for key in distinct(values(local.extension_set_keys)) :
+    key => local.node_extension_sets[[
+      for name, k in local.extension_set_keys : name if k == key
+    ][0]]
+  }
+  # (host, extension-set) pairs actually needed — not every host necessarily
+  # runs every profile.
+  iso_downloads = {
+    for combo in distinct([
+      for name, node in var.nodes :
+      "${local.node_host[name]}::${local.extension_set_keys[name]}"
+      ]) : combo => {
+      host    = split("::", combo)[0]
+      ext_key = split("::", combo)[1]
     }
   }
 
@@ -145,7 +210,16 @@ locals {
       pool_name  = inst.pool_name
       talos_role = inst.talos_role
       ip         = inst.ip
-      current_ip = try(proxmox_virtual_environment_vm.talos_nodes[key].ipv4_addresses[1][0], null)
+      # ipv4_addresses is a list PER NETWORK INTERFACE, not just "the NIC" —
+      # a Talos guest reports lo/bond0/dummy0/teql0/tunl0/sit0/ip6tnl0 before
+      # its real NIC (confirmed live via the QEMU agent's own
+      # network-get-interfaces output), so a fixed index like [1] picks up
+      # an empty/irrelevant interface instead. Take the first interface
+      # that actually has an address and isn't loopback.
+      current_ip = try([
+        for iface in proxmox_virtual_environment_vm.talos_nodes[key].ipv4_addresses :
+        iface[0] if length(iface) > 0 && !startswith(iface[0], "127.")
+      ][0], null)
     }
   }
 
@@ -167,23 +241,81 @@ check "network_node_ips_known_nodes" {
   }
 }
 
-# Download the Talos OS ISO directly onto each Proxmox node that is used.
-resource "proxmox_download_file" "talos_iso" {
-  for_each = var.proxmox_nodes
+# One Image Factory schematic per unique resolved extension set (see
+# local.unique_extension_sets) — this is what actually gets system
+# extensions onto a node; the per-node machine.install.extensions config
+# patches in talos.tf do not (see the comment there).
+resource "talos_image_factory_schematic" "this" {
+  for_each = local.unique_extension_sets
 
-  provider     = proxmox.node[each.key]
-  node_name    = each.key
+  schematic = yamlencode({
+    customization = {
+      # Serial console, set here rather than via machine.install.extraKernelArgs:
+      # these nodes boot a UKI (the live config carries grubUseUKICmdline: true),
+      # so the kernel command line is baked into the image by the Factory and
+      # install-time extra args do not reach it. Talos's stock metal cmdline is
+      # `console=tty0` only — verified against /proc/cmdline and /proc/consoles
+      # on all three nodes — so without this the serial0 display configured on
+      # each VM would be attached to a console nothing ever writes to.
+      # tty0 is kept first so the framebuffer console (where the Talos dashboard
+      # renders) still works on nodes without a GPU passed through.
+      extraKernelArgs = ["console=tty0", "console=ttyS0,115200n8"]
+      systemExtensions = {
+        officialExtensions = each.value
+      }
+    }
+  })
+}
+
+data "talos_image_factory_urls" "this" {
+  for_each = local.unique_extension_sets
+
+  talos_version = var.talos_version
+  schematic_id  = talos_image_factory_schematic.this[each.key].id
+  platform      = "metal"
+  architecture  = "amd64"
+}
+
+# Download the schematic-specific Talos ISO onto each (host, extension-set)
+# pair actually needed — not every host necessarily runs every profile.
+resource "proxmox_download_file" "talos_iso" {
+  for_each = local.iso_downloads
+
+  provider     = proxmox.node[each.value.host]
+  node_name    = each.value.host
   content_type = "iso"
-  datastore_id = each.value.iso_datastore
-  file_name    = "metal-${var.talos_version}-amd64.iso"
-  url          = "https://github.com/siderolabs/talos/releases/download/${var.talos_version}/metal-amd64.iso"
+  datastore_id = var.proxmox_nodes[each.value.host].iso_datastore
+  # Named for the schematic ID, not the extension-set key. ext_key hashes the
+  # extension list alone, so any other schematic change (kernel args, overlays,
+  # meta) would produce new image CONTENT behind an unchanged FILENAME —
+  # and Proxmox refuses to overwrite an existing ISO ("refusing to override
+  # existing file"), leaving the apply permanently wedged until the stale file
+  # is deleted by hand. Keying the name on the schematic ID makes every distinct
+  # image a distinct file, so a changed schematic replaces cleanly.
+  # The resource's for_each key stays ext_key: it must be known at plan time,
+  # and the schematic ID is only known after apply.
+  file_name = "talos-${var.talos_version}-${substr(talos_image_factory_schematic.this[each.value.ext_key].id, 0, 12)}-amd64.iso"
+  url       = data.talos_image_factory_urls.this[each.value.ext_key].urls.iso
+
+  # Download the replacement BEFORE removing the old one. The running VMs keep
+  # the outgoing ISO mounted as their cdrom, and Proxmox will not delete a
+  # volume that is still attached — destroy-then-create would try exactly that
+  # and strand the apply. Safe only because file_name is schematic-derived
+  # above, so the incoming file never collides with the outgoing one.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Create Proxmox VMs for each node in the cluster
 resource "proxmox_virtual_environment_vm" "talos_nodes" {
-  provider = proxmox.node[each.value.host]
+  # node_password (root@pam), not node (api_token) — see the comment on
+  # provider.proxmox.node_password in providers.tf: this resource sets
+  # cpu.affinity, which Proxmox only accepts from a root@pam session.
+  provider = proxmox.node_password[each.value.host]
 
   for_each  = local.vm_instances
+  vm_id     = each.value.vm_id
   name      = "${var.cluster_name}-${each.key}"
   node_name = each.value.host
   tags      = ["talos", "k8s", each.value.talos_role, each.value.pool_name, each.value.host]
@@ -210,9 +342,15 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
 
   agent {
     enabled = true
+    # Explicit ipv4=true rather than the provider's default "any global
+    # unicast address" wait: on a dual-stack-capable network, IPv6 alone
+    # can satisfy the default and this repo does everything over IPv4.
+    wait_for_ip {
+      ipv4 = true
+    }
   }
 
-  # Primary NIC — on the dedicated VM VLAN (10.20.11.0/24, VLAN 2011), tagged
+  # Primary NIC — on the dedicated VM VLAN (10.30.0.0/24, VLAN 3000), tagged
   # on the host's VM bridge. The VLAN ID comes from the public network variable.
   network_device {
     bridge  = var.proxmox_nodes[each.value.host].bridge
@@ -227,15 +365,26 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     file_format  = "raw"
   }
 
-  # CDROM drive to boot into Talos live installation ISO
-  cdrom {
-    file_id = proxmox_download_file.talos_iso[each.value.host].id
+  # Required alongside bios = "ovmf" below: the small EFI vars disk. "4m" is
+  # the current recommended size (vs. the older "2m") — same datastore as
+  # the root disk, no reason to split it elsewhere.
+  efi_disk {
+    datastore_id = try(var.proxmox_nodes[each.value.host].storage_pool, var.proxmox_storage_pool)
+    file_format  = "raw"
+    type         = "4m"
   }
 
-  # PCIe passthrough — maps host GPUs (e.g. the Tesla P100s) into this VM. Only
+  # CDROM drive to boot into Talos live installation ISO — the schematic
+  # build matching this node's own resolved extension set (see
+  # local.iso_downloads), not just any ISO on the node's host.
+  cdrom {
+    file_id = proxmox_download_file.talos_iso["${each.value.host}::${each.value.ext_key}"].id
+  }
+
+  # PCIe passthrough — maps host GPUs (e.g. the Tesla P100) into this VM. Only
   # populated for pools with `hostpci` set (wk-main-performance). Requires IOMMU +
-  # vfio-pci on the Proxmox host and PCI resource mappings named per pool
-  # config (e.g. nvidia-p100 on pmx-main; nvidia-p100-0/1 on pmx-ai).
+  # vfio-pci on the Proxmox host and a PCI resource mapping named per pool
+  # config (nvidia-p100-x16 on pmx-main).
   # bpg/proxmox: `device` is the hostpciX slot, `mapping` is the Proxmox
   # resource mapping name (works with API-token auth; `id` would need root
   # password auth). pcie=true requires the q35 machine type.
@@ -254,12 +403,62 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     type = "l26" # Linux 2.6+ Kernel
   }
 
-  # q35 is required for PCIe passthrough ports (hostpci pcie=true).
-  machine = length(each.value.hostpci) > 0 ? "q35" : null
+  # Every node uses the same machine type + firmware, deliberately — no
+  # per-node branching (q35 was previously conditional on hostpci being set;
+  # now it's unconditional so the whole fleet is consistent, not just the
+  # PCIe-passthrough node).
+  machine = "q35"
+  bios    = "ovmf"
+
+  # Serial console, fleet-wide (not just PCIe-passthrough nodes): once a
+  # passed-through GPU's driver (e.g. i915) loads, it takes over VGA console
+  # ownership from the emulated display — Proxmox's noVNC "Console" tab then
+  # just freezes on the last framebuffer frame, since nothing is attached to
+  # the physical GPU's real output. The kernel already writes boot/console
+  # output to ttyS0 regardless, so pointing the VM's display at serial0
+  # keeps Proxmox's Console tab showing live output for every node.
+  serial_device {
+    device = "socket"
+  }
+
+  vga {
+    type = "serial0"
+  }
 
   # Define VM boot order. Disk (scsi0) is preferred so that after Talos installs to
   # disk on first boot and reboots, the VM boots the installed system rather than the
   # live ISO again. The CDROM remains as a fallback for the initial install boot.
   boot_order = ["scsi0", "ide3"]
+}
+
+# local.cluster_endpoint indexes var.network.node_ips by the control plane's
+# node name — without this check, forgetting to give a new control-plane
+# node a static IP surfaces only as OpenTofu's generic "the given key does
+# not exist" error deep in a `local.cluster_endpoint` reference, far from
+# the actual misconfiguration in terraform.tfvars.
+check "controlplane_has_static_ip" {
+  assert {
+    condition     = contains(keys(var.network.node_ips), local.controlplane_node_name)
+    error_message = "The control-plane node ${local.controlplane_node_name} must have a static IP in network.node_ips — it derives cluster_endpoint."
+  }
+}
+
+# data.talos_machine_configuration.controlplane in talos.tf is a SINGLETON:
+# its install image and nodeLabels are hardcoded to
+# keys(local.controlplane_instances)[0], because it isn't for_each'd the way
+# the worker data source is. talos_machine_configuration_apply.controlplane
+# DOES for_each over every control-plane node, so a second control plane
+# would silently re-render and push the FIRST control plane's own config
+# (install image, labels) onto itself under a different node's identity —
+# keys() sorts lexicographically, so which node is "first" isn't even stable
+# across a tfvars reorder. Enforced here rather than by generalizing the
+# singleton, since this repo has never needed more than one control plane and
+# multi-CP wiring (etcd bootstrap ordering, cluster_endpoint as a single IP)
+# would need its own design pass regardless.
+check "single_controlplane_only" {
+  assert {
+    condition     = length(local.controlplane_instances) == 1
+    error_message = "tofu/home supports exactly one control-plane node today: data.talos_machine_configuration.controlplane in talos.tf is a singleton indexed by keys(local.controlplane_instances)[0], not for_each'd. Adding a second control-plane node needs that data source (and its install-image/nodeLabels indexing) generalized first."
+  }
 }
 

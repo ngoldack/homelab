@@ -4,9 +4,12 @@ metadata:
   name: network
 ---
 # Public ingress gateway. Cilium's Gateway API implementation programs an envoy
-# listener on the cloud node(s); TLS terminates here using the cert-manager
-# wildcard cert. Traffic lands only on cloud nodes — the listener is pinned to
-# site=cloud and home nodes are never a public ingress path.
+# listener on this (cloud) cluster's own node(s); TLS terminates here using
+# the cert-manager wildcard cert. The cloud and home Talos clusters are
+# entirely separate clusters (this Gateway only ever runs on cloud nodes
+# because that's the only cluster it exists in) — home workloads are never a
+# public ingress path because nothing here can schedule onto the home
+# cluster at all, not because of any node-selector pinning within this one.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -25,4 +28,11 @@ spec:
           - name: wildcard-svc-tls
       allowedRoutes:
         namespaces:
-          from: All
+          # Opt-in only: a namespace must carry this label before any
+          # HTTPRoute in it can attach to the public Gateway. Label a
+          # namespace to expose a workload publicly:
+          #   kubectl label namespace <ns> gateway.ngoldack.xyz/public-ingress=true
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.xyz/public-ingress: "true"

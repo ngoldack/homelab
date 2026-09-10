@@ -2,3 +2,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: truenas-csi
+  # The cluster's default PodSecurity level is baseline (see kube-apiserver's
+  # admission-control-config), which rejects the CSI node DaemonSet outright:
+  # it needs hostNetwork, hostPID, privileged, and multiple hostPaths to
+  # mount NFS/iSCSI shares from the host's namespaces. No PVC on any
+  # truenas-csi StorageClass can mount without this.
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

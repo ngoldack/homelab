@@ -1,7 +1,11 @@
 creation_rules:
+  # ...age1f6cd8a... is ci.age.key's public key — added so GitHub Actions
+  # (talos-etcd-backup.yml) can decrypt these directly at runtime via the
+  # SOPS_AGE_KEY secret, instead of duplicating individual values as
+  # separate GH secrets.
   - path_regex: tofu/(home|cloud)/secret\.sops\.yaml$
     age: &age_recipients >-
-      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k
+      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k,age1f6cd8atfuvhxmjugw5pquk45tszqxlh557sg8k9dsufzc9kgmpqshjm9pz
 
   - path_regex: kubernetes/.*/.*\.sops\.yaml$
     age: >-

@@ -45,5 +45,3 @@ spec:
     txtOwnerId: ${CLUSTER_NAME:-home-talos}
     policy: sync
     interval: 1m
-    extraArgs:
-      - --default-provider-record-ttl=300

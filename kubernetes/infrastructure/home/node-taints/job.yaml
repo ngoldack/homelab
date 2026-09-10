@@ -21,7 +21,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: node-taints-2
+  name: node-taints-3
   namespace: kube-system
 spec:
   backoffLimit: 3
@@ -29,15 +29,30 @@ spec:
     spec:
       serviceAccountName: node-taints
       restartPolicy: OnFailure
-      containers:
-        - name: kubectl
+      # rancher/kubectl is a distroless-style image (no /bin/sh), so this
+      # runs kubectl directly as each container's entrypoint rather than a
+      # shell script — an initContainer for the first taint (initContainers
+      # run sequentially, one per completion) and the main container for the
+      # second, with no shell dependency anywhere.
+      initContainers:
+        - name: taint-gpu
           image: rancher/kubectl:v1.36.2
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -eu
-              kubectl taint nodes -l node.kubernetes.io/instance-type=gpu-worker \
-                dedicated=ai:NoSchedule --overwrite
-              kubectl taint nodes -l node.kubernetes.io/instance-type=media-worker \
-                dedicated=media:NoSchedule --overwrite
+          command: ["kubectl"]
+          args:
+            - taint
+            - nodes
+            - -l
+            - node.kubernetes.io/instance-type=gpu-worker
+            - dedicated=ai:NoSchedule
+            - --overwrite
+      containers:
+        - name: taint-media
+          image: rancher/kubectl:v1.36.2
+          command: ["kubectl"]
+          args:
+            - taint
+            - nodes
+            - -l
+            - node.kubernetes.io/instance-type=media-worker
+            - dedicated=media:NoSchedule
+            - --overwrite

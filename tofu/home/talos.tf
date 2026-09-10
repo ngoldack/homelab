@@ -16,6 +16,37 @@ locals {
     ]
   })
 
+  # Talos runs kubelet as its own containerized process, isolated from the
+  # host's mount namespace — installing siderolabs/iscsi-tools puts
+  # /etc/iscsi and /var/lib/iscsi on the HOST, but kubelet itself still can't
+  # see them, so any pod's hostPath mount of those paths (truenas-csi's node
+  # DaemonSet does exactly this) fails with "hostPath type check failed: ...
+  # is not a directory" even though `talosctl ls` shows the directory exists.
+  # extraMounts is Talos's documented fix: explicitly bind these into
+  # kubelet's own view. Applied to every node (not just truenas-csi's usual
+  # targets) because its DaemonSet's blanket tolerations schedule it
+  # everywhere, control plane included.
+  iscsi_kubelet_extra_mounts = yamlencode({
+    machine = {
+      kubelet = {
+        extraMounts = [
+          {
+            destination = "/etc/iscsi"
+            type        = "bind"
+            source      = "/etc/iscsi"
+            options     = ["bind", "rshared", "rw"]
+          },
+          {
+            destination = "/var/lib/iscsi"
+            type        = "bind"
+            source      = "/var/lib/iscsi"
+            options     = ["bind", "rshared", "rw"]
+          },
+        ]
+      }
+    }
+  })
+
   # Prefer the live QEMU-agent-reported address (needed pre-bootstrap: the
   # node is still on DHCP, its eventual static IP isn't live yet), but fall
   # back to the known static IP if the agent query comes back empty. A
@@ -35,8 +66,9 @@ locals {
 resource "talos_machine_secrets" "this" {
   talos_version = var.talos_version
 
-  # prevent_destroy temporarily removed for the full teardown/rebuild —
-  # restore it once the fresh cluster is up.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "talos_machine_configuration" "controlplane" {
@@ -96,6 +128,7 @@ data "talos_machine_configuration" "controlplane" {
           }
         }
       }),
+      local.iscsi_kubelet_extra_mounts,
       # Same derived-label treatment as workers get (see
       # data.talos_machine_configuration.worker below) — this data source
       # assumes a single control plane (indexed [0] the same way
@@ -166,6 +199,7 @@ data "talos_machine_configuration" "worker" {
           }
         }
       }),
+      local.iscsi_kubelet_extra_mounts,
     ],
     each.value.gpu ? [
       yamlencode({

@@ -21,7 +21,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: node-taints
+  name: node-taints-2
   namespace: kube-system
 spec:
   backoffLimit: 3

@@ -16,9 +16,9 @@ spec:
   targetNamespace: truenas-csi
   values:
     truenas:
-      url: wss://nas-main:443/api/current
+      url: wss://10.20.10.10:443/api/current
       defaultPool: fast
-      nfsServer: nas-main
-      nvmeofPortal: nas-main:4420
+      nfsServer: 10.20.10.10
+      nvmeofPortal: 10.20.10.10:4420
       insecureSkipTLS: true
       existingSecret: truenas-api-credentials

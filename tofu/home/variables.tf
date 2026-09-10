@@ -167,10 +167,11 @@ variable "cluster_api_port" {
 }
 
 variable "talos_default_extensions" {
-  description = "Talos system extensions installed on every node. Defaults include the TrueNAS-CSI storage clients: nfs-utils (rpcbind/rpc.statd for NFS mounts) and nvme-cli (NVMe-oF userspace tooling; the nvme_tcp/nvme_fabrics kernel modules ship in the Talos kernel), and qemu-guest-agent — required for every VM resource below, which sets agent.enabled = true: the bpg/proxmox provider's own docs say not to enable that flag unless the guest actually runs qemu-guest-agent (confirmed live: without this extension, the agent never reports network interfaces and every apply hangs on \"waiting for the QEMU agent\" until timeout)."
+  description = "Talos system extensions installed on every node. Defaults include the TrueNAS-CSI storage clients: nfs-utils (rpcbind/rpc.statd for NFS mounts), iscsi-tools (open-iscsi — /etc/iscsi and /var/lib/iscsi, needed by truenas-csi's node DaemonSet even on hosts that only ever mount NFS/NVMe-oF volumes, since the DaemonSet hostPath-mounts them unconditionally) and nvme-cli (NVMe-oF userspace tooling; the nvme_tcp/nvme_fabrics kernel modules ship in the Talos kernel), and qemu-guest-agent — required for every VM resource below, which sets agent.enabled = true: the bpg/proxmox provider's own docs say not to enable that flag unless the guest actually runs qemu-guest-agent (confirmed live: without this extension, the agent never reports network interfaces and every apply hangs on \"waiting for the QEMU agent\" until timeout)."
   type        = list(string)
   default = [
     "siderolabs/nfs-utils",
+    "siderolabs/iscsi-tools",
     "siderolabs/nvme-cli",
     "siderolabs/qemu-guest-agent",
   ]

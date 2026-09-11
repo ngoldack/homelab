@@ -69,6 +69,21 @@ resource "helm_release" "cilium" {
     # underlay.
     gatewayAPI = {
       enabled = true
+      # Local, not the chart's default of Cluster. This fixes intermittent 503s.
+      #
+      # cilium-envoy is a DaemonSet, so it runs on EVERY node including the
+      # Hetzner ingress node. Under Cluster policy the node that receives the
+      # VIP traffic load-balances it across all of them, so roughly one request
+      # in five was handed to the Envoy on the Hetzner node — which cannot
+      # reach pods on the LAN nodes at all (the same host-netns limitation that
+      # made the original public-ingress design unworkable) and answers 503.
+      #
+      # Local keeps the request on the node that received it. Only home nodes
+      # answer ARP for the VIP (CiliumL2AnnouncementPolicy is restricted to
+      # topology.homelab/site=home), so the receiving node is always one that
+      # can reach the backends. It also preserves the client source IP, which
+      # Cluster policy SNATs away.
+      externalTrafficPolicy = "Local"
       gatewayClass = {
         # Must be the STRING "true", not a bool (the chart's schema rejects a
         # boolean: "got boolean, want string"), and not the "auto" default:

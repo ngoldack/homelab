@@ -28,10 +28,28 @@ spec:
       nodeSelector:
         topology.homelab/site: home
     truenas:
-      url: wss://10.20.10.10:443/api/current
+      # 10.30.0.5 is TrueNAS on the CLUSTER's own VLAN 3000, not its management
+      # address 10.20.10.10 on VLAN 2010. Both land on the same 10GbE NIC in
+      # the same aggregation switch, but 10.20.10.10 is a DIFFERENT L2 segment,
+      # so reaching it means routing through the UDM Pro — which lives in the
+      # apartment, at the far end of a wireless bridge. Storage traffic between
+      # two machines on the same switch was crossing that bridge twice.
+      #
+      # Measured from a pod, TCP connect to the same appliance:
+      #   10.30.0.5    (same VLAN, L2)   0.000315s
+      #   10.20.10.10  (routed)          0.027609s
+      # 88x the latency, and NFS is latency-bound: a 256MiB write managed
+      # 7.8 MB/s over the routed path.
+      #
+      # This stays correct once the planned 10Gb fibre replaces the wireless
+      # bridge: inter-VLAN routing would still funnel every byte through the
+      # UDM Pro, which routes well under 10Gb — more so with CyberSecure
+      # enabled, since IPS disables hardware offload. Same-L2 keeps storage off
+      # the router entirely.
+      url: wss://10.30.0.5:443/api/current
       defaultPool: fast
-      nfsServer: 10.20.10.10
-      nvmeofPortal: 10.20.10.10:4420
+      nfsServer: 10.30.0.5
+      nvmeofPortal: 10.30.0.5:4420
       insecureSkipTLS: true
       existingSecret: truenas-api-credentials
   # Give the node DaemonSet the host's NVMe host NQN.

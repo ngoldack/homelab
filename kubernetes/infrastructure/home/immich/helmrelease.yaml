@@ -38,10 +38,20 @@ spec:
           # own, with a generated name and the default StorageClass.
           existingClaim: immich-library
       metrics:
-        # Immich exports Prometheus metrics; vmagent's selectAllByDefault picks
-        # up any scrape object in the cluster, so this plus a VMServiceScrape
-        # later is all that is needed to graph it.
-        enabled: true
+        # OFF because this flag renders a prometheus-operator ServiceMonitor
+        # (monitoring.coreos.com/v1), and those CRDs are not installed here —
+        # the monitoring stack is VictoriaMetrics, whose operator uses its own
+        # VMServiceScrape kind. With it on, the Helm install fails outright:
+        #   no matches for kind "ServiceMonitor" in version
+        #   "monitoring.coreos.com/v1"
+        #
+        # The VM operator can convert ServiceMonitors, but only if the
+        # prometheus-operator CRDs are installed alongside it, which is a whole
+        # second CRD set to own for one chart's benefit. Scraping Immich is
+        # instead a VMServiceScrape added here later — vmagent runs with
+        # selectAllByDefault, so such an object is picked up with no further
+        # wiring.
+        enabled: false
 
     # Valkey (Redis) is DISABLED by default in this chart, and Immich does not
     # start without it — it uses it for the job queues behind uploads,

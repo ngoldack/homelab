@@ -396,3 +396,39 @@ variable "nodes" {
     error_message = "gpu_vram_gb can only be set when gpu = true."
   }
 }
+
+# Hetzner Cloud ingress nodes. These are ordinary WORKERS of this same
+# cluster, not a second cluster — the split-brain "cloud cluster" that used to
+# live in tofu/cloud is gone, along with the ClusterMesh it would have needed.
+# They join over Talos KubeSpan (WireGuard), so the cluster endpoint stays the
+# LAN address 10.30.0.10 and no certSAN change is required.
+#
+# Deliberately NOT folded into var.nodes: that map is Proxmox-shaped (host,
+# vm_id, cpu_class, cpu_affinity, hostpci) and its validations assert against
+# this host's CPU/memory pools, which are at 100% allocation. A Hetzner server
+# shares none of those fields.
+#
+# Defaults to {} so a from-scratch bootstrap with no hcloud_api_token in
+# secret.sops.yaml still plans and applies — the LAN cluster stands alone and
+# ingress is purely additive.
+variable "cloud_nodes" {
+  description = "Hetzner Cloud worker nodes, keyed by node name. Ingress-only: each is tainted so nothing schedules there except workloads that explicitly tolerate it."
+  type = map(object({
+    server_type = string
+    location    = string
+    # Talos/Image Factory architecture ("amd64"/"arm64"). Note hcloud's own
+    # snapshot vocabulary is "x86"/"arm" — converted in ingress.tf.
+    arch = optional(string, "arm64")
+    # Extra Talos system extensions on top of the ingress baseline. The
+    # baseline is deliberately tiny (tailscale only): this node has no
+    # Proxmox guest agent, no NVIDIA/i915, and no NFS/iSCSI/NVMe clients,
+    # because truenas-csi must never run here (its node DaemonSet tolerates
+    # everything and hostPath-mounts /).
+    extensions = optional(list(string), [])
+    # Labels merged onto the node. "node.homelab/role" = "ingress" is what
+    # Cilium's gatewayAPI.hostNetwork node selector matches, so Envoy binds
+    # 80/443 HERE and nowhere else.
+    node_labels = optional(map(string), {})
+  }))
+  default = {}
+}

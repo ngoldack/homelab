@@ -61,6 +61,23 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.16"
     }
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = "~> 1.54"
+    }
+    # Builds a Hetzner snapshot from a Talos Image Factory disk image (it
+    # boots a throwaway rescue server, writes the image, snapshots it, then
+    # deletes the server). Hetzner Cloud cannot boot an arbitrary image, so
+    # something has to produce that snapshot; this is the one piece we do NOT
+    # hand-roll, because the alternative is bespoke SSH-provisioner glue doing
+    # rescue-mode `dd` — the least declarative, most fragile thing in tofu.
+    # Everything else about the ingress node (server, firewall, primary IP,
+    # machine config) is authored directly in ingress.tf rather than taken
+    # from the hcloud-talos module.
+    imager = {
+      source  = "hcloud-talos/imager"
+      version = "~> 1.0"
+    }
   }
 }
 
@@ -151,4 +168,17 @@ provider "helm" {
     client_certificate     = base64decode(talos_cluster_kubeconfig.this.kubernetes_client_configuration.client_certificate)
     client_key             = base64decode(talos_cluster_kubeconfig.this.kubernetes_client_configuration.client_key)
   }
+}
+
+# Hetzner Cloud, for the public ingress worker (see ingress.tf). This cluster
+# spans both Proxmox (the LAN nodes) and Hetzner (one ingress node); there is
+# no second cluster and no second tofu root. `try(..., null)` so a from-scratch
+# bootstrap that hasn't yet been given an hcloud token — or one that sets
+# cloud_nodes = {} — still plans and applies cleanly.
+provider "hcloud" {
+  token = try(local.secrets["hcloud_api_token"], null)
+}
+
+provider "imager" {
+  token = try(local.secrets["hcloud_api_token"], null)
 }

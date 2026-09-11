@@ -65,18 +65,38 @@ spec:
         # own guidance is to size from a live burn-in rather than a formula.
         retentionPeriod: "3"
         # Pinned to the home site, and this is load-bearing rather than
-        # tidiness. truenas-fast-nvmeof is NVMe-oF to the NAS at 10.20.10.10,
+        # tidiness. All TrueNAS StorageClasses reach the NAS at 10.20.10.10,
         # which is not routable from the Hetzner ingress node across KubeSpan —
         # the same reachability limit truenas-csi's own node DaemonSet is
-        # pinned for. Because that StorageClass is WaitForFirstConsumer, the
-        # volume is provisioned wherever the pod lands, so losing this selector
-        # does not degrade performance, it hangs the pod unable to mount.
+        # pinned for. Losing this selector does not degrade performance, it
+        # hangs the pod unable to mount.
         nodeSelector:
           topology.homelab/site: home
         storage:
           accessModes:
             - ReadWriteOnce
-          storageClassName: truenas-fast-nvmeof
+          # NFS, deliberately and temporarily, and this is the weakest choice
+          # in this file.
+          #
+          # truenas-fast-nvmeof is the right substrate for a TSDB — small
+          # random writes and frequent fsync are what block storage is for, and
+          # VictoriaMetrics advises against NFS for its data directory, with a
+          # reported corruption risk on unclean shutdown. It is not usable yet:
+          # NVMe-oF staging fails with no NVMe controller created at all
+          # (/sys/class/nvme empty) even though port 4420 is open and the host
+          # NQN is now stable, which points at the TrueNAS subsystem refusing
+          # these initiators. Each home node's NQN has to be added to that
+          # subsystem's host list (or "allow any host" enabled); the NQNs are
+          # derived from each node's machine UUID, so they survive reboots but
+          # change if a VM is rebuilt.
+          #
+          # Switch this back to truenas-fast-nvmeof once that is done. Because
+          # storageClassName is immutable on a bound PVC, the change means
+          # deleting the PVC so the operator recreates it — and every TrueNAS
+          # StorageClass is reclaimPolicy: Retain, so the old volume is kept on
+          # the NAS rather than deleted, leaving the historical data
+          # recoverable but also orphaned until cleaned up by hand.
+          storageClassName: truenas-fast-nfs
           resources:
             requests:
               storage: 50Gi

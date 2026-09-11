@@ -102,7 +102,7 @@ spec:
           # StorageClass is reclaimPolicy: Retain, so the old volume is kept on
           # the NAS rather than deleted, leaving the historical data
           # recoverable but also orphaned until cleaned up by hand.
-          storageClassName: truenas-fast-nfs-monitoring
+          storageClassName: truenas-fast-nfs-monitoring-vmsingle
           resources:
             requests:
               storage: 50Gi

@@ -35,7 +35,7 @@ spec:
     # ../monitoring/helmrelease.yaml). Move this to a block class once NVMe-oF
     # works — and note storageClassName is immutable on a bound PVC, so that
     # means a dump/restore or a replica swap, not an in-place edit.
-    storageClassName: truenas-fast-nfs-immich
+    storageClassName: truenas-fast-nfs-immich-database
   postgresql:
     shared_preload_libraries:
       - "vchord.so"

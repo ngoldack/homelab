@@ -51,33 +51,38 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
-# Per-app StorageClasses.
+# Per-PVC StorageClasses.
 #
-# Layout is always {pool}/k8s/{protocol}/{app}/pvc-<uid>, so the three generic
-# classes above land at e.g. fast/k8s/nfs/pvc-<uid> and these add the app
-# segment: fast/k8s/nfs/immich/pvc-<uid>.
+# Layout is always {pool}/k8s/{protocol}/{namespace}/{app}/pvc-<uid>, so a
+# dataset identifies itself on the NAS without cross-referencing anything:
+#   fast/k8s/nfs/immich/database/pvc-<uid>
+#   tank/k8s/nfs/immich/library/pvc-<uid>
+# Classes are named truenas-{pool}-{protocol}-{namespace}-{app} to match.
 #
-# Why a class per app rather than one knob: datasetPath is a StorageClass
-# parameter, and it is the ONLY naming lever the driver exposes. The leaf name
-# cannot carry the app either — the driver derives it from the CSI request
-# name (volumeName := SanitizeVolumeName(req.Name) in pkg/driver/controller.go)
-# which the external-provisioner generates as pvc-<uid>. The provisioner does
-# run with --extra-create-metadata, so the PVC's name and namespace ARE in the
-# parameters map, but the driver reads no csi.storage.k8s.io/* key and its
-# dataset Comment is hardcoded to "CSI volume <path>" with no override. So one
-# class per (pool, protocol, app) is the cost of an identifiable path.
+# This costs roughly one StorageClass per PVC, which is worth stating plainly:
+# datasetPath is a StorageClass parameter, so a per-PVC path needs a per-PVC
+# class. There is no cheaper mechanism. The leaf cannot carry the meaning
+# either — the driver derives it from the CSI request name
+# (volumeName := SanitizeVolumeName(req.Name) in pkg/driver/controller.go),
+# which the external-provisioner generates as pvc-<uid>. The provisioner runs
+# with --extra-create-metadata, so the PVC's name and namespace ARE in the
+# parameters map, but the driver reads no csi.storage.k8s.io/* key, and its
+# dataset Comment is hardcoded to "CSI volume <path>" with no override.
 #
-# Name them truenas-{pool}-{protocol}-{app}. To map a UUID back to a workload:
+# Adding a workload means adding a class here. To map a UUID back from the
+# cluster side:
 #   kubectl get pv -o custom-columns=PV:.metadata.name,NS:.spec.claimRef.namespace,CLAIM:.spec.claimRef.name
+
+# VictoriaMetrics' TSDB.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-fast-nfs-monitoring
+  name: truenas-fast-nfs-monitoring-vmsingle
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "fast"
-  datasetPath: "k8s/nfs/monitoring"
+  datasetPath: "k8s/nfs/monitoring/vmsingle"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
@@ -85,17 +90,18 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+
 ---
-# Immich's Postgres. Fast pool.
+# Immich's PostgreSQL data directory.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-fast-nfs-immich
+  name: truenas-fast-nfs-immich-database
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "fast"
-  datasetPath: "k8s/nfs/immich"
+  datasetPath: "k8s/nfs/immich/database"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
@@ -103,19 +109,37 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+
 ---
-# Immich's photo/video library: bulk media on the spinning pool. Same app
-# segment as above — the pool is what separates them, so both read as
-# .../k8s/nfs/immich/ on their respective pools.
+# Immich's machine-learning model cache (CLIP/face models).
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-tank-nfs-immich
+  name: truenas-fast-nfs-immich-cache
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/immich/cache"
+  compression: "LZ4"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+
+---
+# Immich's photo/video library: bulk media, spinning pool.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-tank-nfs-immich-library
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "tank"
-  datasetPath: "k8s/nfs/immich"
+  datasetPath: "k8s/nfs/immich/library"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"

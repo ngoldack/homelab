@@ -18,7 +18,7 @@ spec:
     # library has to be mountable from more than one node at once. NFS
     # supports this; a block class would not.
     - ReadWriteMany
-  storageClassName: truenas-tank-nfs-immich
+  storageClassName: truenas-tank-nfs-immich-library
   resources:
     requests:
       storage: 500Gi

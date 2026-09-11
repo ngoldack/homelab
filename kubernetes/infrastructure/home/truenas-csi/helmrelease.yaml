@@ -34,3 +34,50 @@ spec:
       nvmeofPortal: 10.20.10.10:4420
       insecureSkipTLS: true
       existingSecret: truenas-api-credentials
+  # Give the node DaemonSet the host's NVMe host NQN.
+  #
+  # NVMe-oF staging failed with "NVMe-oF device for nqn.2011-06.com.truenas:...
+  # did not appear after connect". The connect itself was being issued; the
+  # problem is identity. The container image ships no /etc/nvme/hostnqn — only
+  # discovery.conf, confirmed by listing /etc/nvme inside the running pod — and
+  # nvme-cli generates a RANDOM host NQN whenever that file is absent, so the
+  # initiator introduced itself under a different name on every attempt. The
+  # host already has a stable one from the siderolabs/nvme-cli extension
+  # (nqn.2017-11.dev.talos:uuid:...), so this binds the host's /etc/nvme into
+  # the container and the NQN becomes stable across connects and reboots.
+  #
+  # A postRenderer rather than values because the chart exposes no key for it:
+  # its node DaemonSet template hostPath-mounts /etc/iscsi, /var/lib/iscsi and
+  # /, and never references /etc/nvme at all. This is a strategic-merge patch
+  # so the new entries merge into the existing volumes/volumeMounts lists by
+  # name, instead of a JSON6902 patch whose hard-coded container index would
+  # break silently if the chart reordered its containers.
+  #
+  # This alone is NOT sufficient — /etc/nvme must also be bound into kubelet's
+  # own mount namespace, which is done in tofu/home/talos.tf's
+  # csi_kubelet_extra_mounts. Without that half, this hostPath fails the same
+  # "type check failed: is not a directory" way /etc/iscsi originally did.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: DaemonSet
+              name: truenas-csi-node
+            patch: |
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: truenas-csi-node
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: csi-node
+                        volumeMounts:
+                          - name: nvme-dir
+                            mountPath: /etc/nvme
+                    volumes:
+                      - name: nvme-dir
+                        hostPath:
+                          path: /etc/nvme
+                          type: Directory

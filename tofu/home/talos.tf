@@ -25,17 +25,19 @@ locals {
     ]
   })
 
+  # Storage-client paths that truenas-csi's node DaemonSet hostPath-mounts.
+  #
   # Talos runs kubelet as its own containerized process, isolated from the
-  # host's mount namespace — installing siderolabs/iscsi-tools puts
-  # /etc/iscsi and /var/lib/iscsi on the HOST, but kubelet itself still can't
-  # see them, so any pod's hostPath mount of those paths (truenas-csi's node
-  # DaemonSet does exactly this) fails with "hostPath type check failed: ...
-  # is not a directory" even though `talosctl ls` shows the directory exists.
-  # extraMounts is Talos's documented fix: explicitly bind these into
-  # kubelet's own view. Applied to every node (not just truenas-csi's usual
-  # targets) because its DaemonSet's blanket tolerations schedule it
-  # everywhere, control plane included.
-  iscsi_kubelet_extra_mounts = yamlencode({
+  # host's mount namespace — installing siderolabs/iscsi-tools or
+  # siderolabs/nvme-cli puts their directories on the HOST, but kubelet itself
+  # still can't see them, so any pod's hostPath mount of those paths
+  # (truenas-csi's node DaemonSet does exactly this) fails with "hostPath type
+  # check failed: ... is not a directory" even though `talosctl ls` shows the
+  # directory exists. extraMounts is Talos's documented fix: explicitly bind
+  # these into kubelet's own view. Applied to every node (not just
+  # truenas-csi's usual targets) because its DaemonSet's blanket tolerations
+  # schedule it everywhere, control plane included.
+  csi_kubelet_extra_mounts = yamlencode({
     machine = {
       kubelet = {
         extraMounts = [
@@ -49,6 +51,31 @@ locals {
             destination = "/var/lib/iscsi"
             type        = "bind"
             source      = "/var/lib/iscsi"
+            options     = ["bind", "rshared", "rw"]
+          },
+          # /etc/nvme holds the host's stable NVMe host NQN and hostid, put
+          # there by the siderolabs/nvme-cli extension. The truenas-csi node
+          # DaemonSet's container image ships no /etc/nvme/hostnqn of its own
+          # (only discovery.conf — confirmed by inspecting the running
+          # container), and nvme-cli invents a RANDOM host NQN whenever that
+          # file is missing. A host identity that changes on every connect is
+          # not one a TrueNAS NVMe-oF subsystem can reliably present a
+          # namespace to, which is why staging failed with "NVMe-oF device ...
+          # did not appear after connect" while the connection itself was
+          # being made.
+          #
+          # A hostPath mount alone does not fix that — the same reason the two
+          # iscsi entries above exist. Talos runs kubelet in its own mount
+          # namespace, so a directory can be plainly visible via `talosctl ls`
+          # on the host and still be invisible to a pod's hostPath. The
+          # corresponding volume/volumeMount is added to the DaemonSet by a
+          # postRenderer patch in
+          # kubernetes/infrastructure/home/truenas-csi/helmrelease.yaml,
+          # because the chart offers no values key for it.
+          {
+            destination = "/etc/nvme"
+            type        = "bind"
+            source      = "/etc/nvme"
             options     = ["bind", "rshared", "rw"]
           },
         ]
@@ -137,7 +164,7 @@ data "talos_machine_configuration" "controlplane" {
           }
         }
       }),
-      local.iscsi_kubelet_extra_mounts,
+      local.csi_kubelet_extra_mounts,
       # Lets a pod obtain a scoped Talos API credential by creating a
       # ServiceAccount CR (serviceaccounts.talos.dev). Enabling this is what
       # makes Talos install and serve that CRD at all, and it runs a
@@ -246,7 +273,7 @@ data "talos_machine_configuration" "worker" {
           }
         }
       }),
-      local.iscsi_kubelet_extra_mounts,
+      local.csi_kubelet_extra_mounts,
     ],
     each.value.gpu ? [
       yamlencode({

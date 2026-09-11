@@ -1,0 +1,42 @@
+# Immich in a browser, reachable ONLY from the tailnet.
+#
+# The route attaches to the same public Gateway as anything else, so it gets
+# the real Let's Encrypt wildcard for *.svc.ngoldack.de and no certificate
+# warnings. What makes it Tailscale-only is not the Gateway and not a network
+# policy — it is DNS: the A record for this hostname points at the ingress
+# node's Tailscale address (100.124.160.55) rather than its public IP
+# (2.28.31.116). A 100.64.0.0/10 address is unroutable off the tailnet, so a
+# device that is not on Tailscale cannot reach it even though the name resolves
+# publicly.
+#
+# Worth being precise about why it is done this way rather than by firewalling
+# the public IP to the Tailscale CGNAT range: that does not work. A client on
+# the tailnet connecting to the node's PUBLIC address still arrives from its
+# own public source IP, so a CGNAT-scoped firewall rule would lock out the very
+# devices it was meant to admit. Pointing the name at the tailnet address is
+# what actually routes the traffic through WireGuard.
+#
+# Envoy already listens on 0.0.0.0:443 on this node (hostNetwork), so it
+# accepts connections arriving on tailscale0 with no extra configuration.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich
+  namespace: immich
+  annotations:
+    # Overrides the Gateway's own target annotation, which points at the public
+    # IP. external-dns applies the most specific annotation, so this record
+    # gets the tailnet address while anything else attached to the same Gateway
+    # keeps the public one.
+    external-dns.alpha.kubernetes.io/target: "100.124.160.55"
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-wildcard
+  hostnames:
+    - immich.svc.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: immich-server
+          port: 2283

@@ -2,3 +2,10 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: immich
+  labels:
+    # The public Gateway's allowedRoutes selector requires this label before
+    # any HTTPRoute in the namespace may attach to it. The label name says
+    # "public-ingress" because that is the Gateway's gate, not because this
+    # service is public — Immich is reachable only from the tailnet, enforced
+    # by where its DNS record points (see httproute.yaml).
+    gateway.ngoldack.de/public-ingress: "true"

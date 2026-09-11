@@ -6,3 +6,4 @@ resources:
   - database.yaml
   - library-pvc.yaml
   - helmrelease.yaml
+  - httproute.yaml

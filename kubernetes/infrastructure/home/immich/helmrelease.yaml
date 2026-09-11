@@ -23,6 +23,13 @@ spec:
         name: immich
       interval: 1h
   targetNamespace: immich
+  # Without this Flux names the release <targetNamespace>-<name>, i.e.
+  # "immich-immich", and every object inherits that stutter:
+  # immich-immich-server, immich-immich-valkey. That is not just ugly — the
+  # Service names are what REDIS_HOSTNAME below has to match, so the stutter
+  # would have to be encoded in the config too. Pinning the release name keeps
+  # the objects as immich-server / immich-valkey / immich-machine-learning.
+  releaseName: immich
   install:
     createNamespace: false
     remediation:

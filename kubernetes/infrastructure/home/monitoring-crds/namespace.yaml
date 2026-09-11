@@ -6,3 +6,21 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
+  labels:
+    # Talos ships a cluster-wide PodSecurity admission default of "baseline"
+    # (exempting only kube-system), so a namespace with no pod-security labels
+    # silently inherits it. baseline forbids exactly the things node-exporter
+    # exists to use — hostNetwork, hostPID, hostPath mounts of /proc, /sys and
+    # /, and hostPort 9100 — and the DaemonSet controller cannot create pods at
+    # all. The failure is quiet in the worst way: the DaemonSet reports
+    # DESIRED=5 CURRENT=0 and no pod is ever created, so there is nothing to
+    # look at with `kubectl logs`; the reason lives only in the DaemonSet's
+    # events. Reading host CPU/memory/disk/network for every node is the whole
+    # point of node-exporter, so the namespace has to permit it.
+    pod-security.kubernetes.io/enforce: privileged
+    # enforce is relaxed, but audit and warn are deliberately left at baseline
+    # so anything ELSE in this namespace that starts demanding host access
+    # still shows up — in the API server audit log and as a warning on apply —
+    # instead of the exemption quietly covering the whole namespace forever.
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

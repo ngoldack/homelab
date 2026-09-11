@@ -1,0 +1,24 @@
+# The photo/video library. Named explicitly rather than letting a chart derive
+# it, so it reads as "immich-library" everywhere it appears.
+#
+# On the tank pool: this is bulk media that grows without bound, and it does
+# not belong on the small fast pool next to databases. Its own StorageClass
+# puts it at tank/k8s/immich-library/... on the NAS.
+#
+# Start modest — the class allows volume expansion, so this can grow in place.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+spec:
+  accessModes:
+    # ReadWriteMany: the server and the machine-learning pods are scheduled
+    # independently (ML is pinned to the GPU node, the server is not), so the
+    # library has to be mountable from more than one node at once. NFS
+    # supports this; a block class would not.
+    - ReadWriteMany
+  storageClassName: truenas-immich-library
+  resources:
+    requests:
+      storage: 500Gi

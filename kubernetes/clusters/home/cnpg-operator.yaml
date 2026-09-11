@@ -1,0 +1,28 @@
+# CloudNativePG operator + CRDs. Its own Kustomization so immich.yaml can
+# dependsOn it: Immich's Cluster and Database CRs cannot apply before these
+# CRDs are established, and a Kustomization that fails to apply also cannot
+# prune, so an ordering mistake here wedges more than just Immich.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cnpg-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/cnpg-operator
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+    - name: infra-controllers
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

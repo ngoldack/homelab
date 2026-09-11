@@ -1,0 +1,26 @@
+# Creates the extensions inside the database. CNPG bootstraps the cluster with
+# an "app" database owned by an "app" role and generates its password into the
+# Secret immich-database-app; this CR reconciles the extension set within it.
+#
+# vector and vchord back smart search; cube and earthdistance back Immich's
+# geospatial queries. All four are declared "present" so CNPG creates them if
+# missing and leaves them alone otherwise.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: immich-database
+  namespace: immich
+spec:
+  name: app
+  owner: app
+  cluster:
+    name: immich-database
+  extensions:
+    - name: vector
+      ensure: present
+    - name: vchord
+      ensure: present
+    - name: earthdistance
+      ensure: present
+    - name: cube
+      ensure: present

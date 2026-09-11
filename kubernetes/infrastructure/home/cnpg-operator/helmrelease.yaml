@@ -1,0 +1,32 @@
+# CloudNativePG, operator only. Database Cluster/Database CRs live beside the
+# app that owns them (see ../immich/), so this release is pure control plane
+# and nothing here needs to change when an app is added.
+#
+# 1.30 matters specifically: Immich's Postgres needs the vchord extension, and
+# the reference setup delivers it as an OCI extension image via
+# spec.postgresql.extensions plus a separate Database CR — both of which are
+# recent CNPG features, not present in older operators.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: "0.29.0"
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+      interval: 1h
+  targetNamespace: cnpg-system
+  install:
+    createNamespace: false
+  values:
+    # Keep the operator on the LAN nodes. It only talks to the API server, but
+    # the Hetzner ingress node is a small arm64 box reserved for ingress and
+    # everything else in this cluster is pinned the same way.
+    nodeSelector:
+      topology.homelab/site: home

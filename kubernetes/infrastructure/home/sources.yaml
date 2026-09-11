@@ -38,3 +38,23 @@ metadata:
 spec:
   interval: 2h
   url: https://victoriametrics.github.io/helm-charts/
+---
+# Consumed by cnpg-operator/, applied by its own Flux Kustomization so Immich's
+# Cluster/Database CRs can depend on the CRDs existing.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cloudnative-pg
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://cloudnative-pg.github.io/charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: immich
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://immich-app.github.io/immich-charts

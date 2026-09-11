@@ -1,0 +1,33 @@
+# Immich. Depends on cnpg-operator for the postgresql.cnpg.io CRDs, and
+# transitively on infra-controllers for the TrueNAS StorageClasses its library
+# PVC and database volume bind to.
+#
+# wait: false deliberately. The library PVC is 500Gi and the machine-learning
+# image is several GB, so a first reconcile can exceed any sane timeout; with
+# wait: true a slow-but-healthy rollout would be reported as a failed
+# Kustomization and retried from the top.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: immich
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/immich
+  prune: true
+  wait: false
+  timeout: 20m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

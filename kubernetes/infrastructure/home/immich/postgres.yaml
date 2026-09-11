@@ -1,0 +1,55 @@
+# Immich's Postgres, following immich-charts' own reference setup
+# (local/cloudnative-pg.yaml upstream).
+#
+# The vchord extension is the reason this is not a stock Postgres: Immich's
+# smart search stores CLIP embeddings as vectors, and vchord provides the
+# index type it queries them with. It arrives as an OCI extension image
+# mounted into the instance rather than a custom Postgres build, which is why
+# the operator must be recent.
+#
+# shared_preload_libraries loads vchord.so at startup; the extensions are then
+# CREATEd inside the database by the Database CR in database.yaml. Both halves
+# are required — preloading alone does not create the extension, and creating
+# it without the preload fails.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: immich-database
+  namespace: immich
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  # Pinned to the home site: every TrueNAS StorageClass reaches the NAS at
+  # 10.20.10.10, which is not routable from the Hetzner ingress node.
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  storage:
+    size: 20Gi
+    # Its own class so the dataset lands at fast/k8s/immich-db/... on the NAS
+    # instead of the generic fast/k8s/nfs/... — see the comment block in
+    # ../truenas-csi/storageclasses.yaml for why the leaf stays a UUID.
+    #
+    # NFS is NOT where a Postgres data directory belongs; block storage is.
+    # This is on NFS only because truenas-fast-nvmeof cannot mount yet (see
+    # ../monitoring/helmrelease.yaml). Move this to a block class once NVMe-oF
+    # works — and note storageClassName is immutable on a bound PVC, so that
+    # means a dump/restore or a replica swap, not an in-place edit.
+    storageClassName: truenas-immich-db
+  postgresql:
+    shared_preload_libraries:
+      - "vchord.so"
+    extensions:
+      - name: vchord
+        image:
+          reference: ghcr.io/tensorchord/vchord-scratch:pg18-v1.1.1
+        dynamic_library_path:
+          - /usr/lib/postgresql/18/lib
+        extension_control_path:
+          - /usr/share/postgresql/18/
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

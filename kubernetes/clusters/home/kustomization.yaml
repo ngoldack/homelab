@@ -15,3 +15,6 @@ resources:
   # dependsOn monitoring-crds, which dependsOn infra-controllers.
   - monitoring-crds.yaml
   - monitoring.yaml
+  # Immich and its database operator.
+  - cnpg-operator.yaml
+  - immich.yaml

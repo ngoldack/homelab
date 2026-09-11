@@ -1,0 +1,143 @@
+# Immich. The chart is bjw-s app-template based, so each component nests its
+# workload under <component>.controllers.main.containers.main.
+#
+# No ingress is configured. Exposing this publicly is a deliberate decision
+# that has not been made yet — the standing policy is Tailscale-only for
+# internal services and never exposing home addresses, and Immich holds
+# personal photos. Reach it for now with:
+#   kubectl -n immich port-forward svc/immich-server 2283:2283
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: immich
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 20m
+  chart:
+    spec:
+      chart: immich
+      version: "0.12.0"
+      sourceRef:
+        kind: HelmRepository
+        name: immich
+      interval: 1h
+  targetNamespace: immich
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    immich:
+      persistence:
+        library:
+          # The PVC from library-pvc.yaml. The chart would otherwise create its
+          # own, with a generated name and the default StorageClass.
+          existingClaim: immich-library
+      metrics:
+        # Immich exports Prometheus metrics; vmagent's selectAllByDefault picks
+        # up any scrape object in the cluster, so this plus a VMServiceScrape
+        # later is all that is needed to graph it.
+        enabled: true
+
+    # Valkey (Redis) is DISABLED by default in this chart, and Immich does not
+    # start without it — it uses it for the job queues behind uploads,
+    # thumbnail generation and ML processing. Enabling it is not optional.
+    valkey:
+      enabled: true
+
+    server:
+      enabled: true
+      controllers:
+        main:
+          containers:
+            main:
+              env:
+                # CNPG publishes the generated credentials in the
+                # <cluster>-app Secret. Referencing its keys means the password
+                # is never written to this repo, and a CNPG-driven rotation is
+                # picked up by restarting the pod rather than editing git.
+                DB_HOSTNAME: immich-database-rw
+                DB_PORT: "5432"
+                DB_USERNAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: username
+                DB_PASSWORD:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: password
+                DB_DATABASE_NAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: dbname
+                REDIS_HOSTNAME: immich-valkey
+      # Keep the server on the LAN: it mounts the library from the NAS, which
+      # the Hetzner ingress node cannot reach.
+      defaultPodOptions:
+        nodeSelector:
+          topology.homelab/site: home
+
+    machine-learning:
+      enabled: true
+      controllers:
+        main:
+          containers:
+            main:
+              env:
+                DB_HOSTNAME: immich-database-rw
+                DB_PORT: "5432"
+                DB_USERNAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: username
+                DB_PASSWORD:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: password
+                DB_DATABASE_NAME:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-database-app
+                      key: dbname
+                REDIS_HOSTNAME: immich-valkey
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 1Gi
+                limits:
+                  # One P100. CLIP inference and face recognition are what this
+                  # GPU is in the machine for.
+                  nvidia.com/gpu: 1
+                  memory: 8Gi
+      # Pinned to the GPU node, mirroring ../nvidia/helmrelease.yaml exactly:
+      # the same hardware/gpu.model selector, the same dedicated=ai toleration,
+      # and the nvidia RuntimeClass that the device plugin's handler expects.
+      # Without the toleration this silently never schedules — the node carries
+      # dedicated=ai:NoSchedule.
+      defaultPodOptions:
+        runtimeClassName: nvidia
+        nodeSelector:
+          "hardware/gpu.model": "Tesla-P100"
+        tolerations:
+          - key: dedicated
+            operator: Equal
+            value: ai
+            effect: NoSchedule
+      persistence:
+        # Model cache. The chart defaults this to an emptyDir, which means
+        # re-downloading several GB of CLIP/face models on every pod restart.
+        cache:
+          enabled: true
+          type: persistentVolumeClaim
+          storageClass: truenas-fast-nfs
+          accessMode: ReadWriteOnce
+          size: 20Gi

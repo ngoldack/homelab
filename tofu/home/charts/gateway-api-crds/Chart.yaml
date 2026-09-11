@@ -1,0 +1,37 @@
+# Gateway API CRDs, vendored verbatim from the upstream v1.4.1 STANDARD
+# channel release, wrapped in a minimal local chart so tofu can own them.
+#
+# Why tofu and not Flux:
+#   cilium-operator checks for the Gateway API CRDs exactly ONCE at startup and
+#   never retries. Flux cannot install them early enough — Flux itself needs a
+#   CNI to be running, and the CNI is Cilium. When these were Flux-owned on the
+#   old cloud cluster the operator started 24 minutes before the CRDs existed,
+#   silently skipped its Gateway API controller, and the Gateway sat at
+#   "Waiting for controller" from creation until it was noticed much later.
+#   Owning them here puts a real dependency edge in the same graph that
+#   installs Cilium (see helm_release.cilium's depends_on).
+#
+# Why this exact version:
+#   Cilium 1.19 requires Gateway API v1.4.1. Do NOT bump to "latest". v1.6.2
+#   graduated TLSRoute to the standard channel at v1 and dropped v1alpha2,
+#   while cilium-operator 1.19.5 unconditionally builds a field indexer for
+#   TLSRoute at v1alpha2 and dies without it — taking the whole operator into
+#   CrashLoopBackOff. At v1.4.1 TLSRoute is experimental-channel-only and
+#   therefore simply absent here, which the operator handles gracefully.
+#   v1.6.2 also ships a ValidatingAdmissionPolicy that refuses any install
+#   below v1.5.0, so downgrading out of it again requires deleting that policy
+#   by hand first. Bump this in lockstep with Cilium, against Cilium's docs.
+#
+# Why a chart and not kubernetes_manifest:
+#   kubernetes_manifest does a server-side dry-run at PLAN time, which hard
+#   fails on a from-scratch build where no cluster exists yet.
+#
+# Do not rename this release or move the chart path: Helm deletes a release's
+# resources on uninstall, and these CRDs cascade-delete every Gateway and
+# HTTPRoute in the cluster.
+apiVersion: v2
+name: gateway-api-crds
+description: Kubernetes Gateway API standard-channel CRDs (vendored upstream release)
+type: application
+version: 1.4.1
+appVersion: "1.4.1"

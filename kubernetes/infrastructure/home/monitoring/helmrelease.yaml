@@ -181,6 +181,12 @@ spec:
 
     grafana:
       enabled: true
+      # Grafana builds redirects and absolute links from root_url. Without it
+      # it assumes localhost:3000 and OAuth/redirect flows and some panel
+      # share-links point at the wrong host once it is behind the Gateway.
+      grafana.ini:
+        server:
+          root_url: "https://grafana.ngoldack.de"
       nodeSelector:
         topology.homelab/site: home
       # The sidecar watches for ConfigMaps carrying this label and drops their

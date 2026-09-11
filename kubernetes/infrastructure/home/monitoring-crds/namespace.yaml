@@ -17,6 +17,10 @@ metadata:
     # look at with `kubectl logs`; the reason lives only in the DaemonSet's
     # events. Reading host CPU/memory/disk/network for every node is the whole
     # point of node-exporter, so the namespace has to permit it.
+    # Lets the Grafana HTTPRoute attach to the public Gateway. The name says
+    # "public-ingress" because that is the Gateway's own gate; Grafana is
+    # reachable only on the LAN, via local DNS.
+    gateway.ngoldack.de/public-ingress: "true"
     pod-security.kubernetes.io/enforce: privileged
     # enforce is relaxed, but audit and warn are deliberately left at baseline
     # so anything ELSE in this namespace that starts demanding host access

@@ -1,0 +1,29 @@
+# Headlamp on the LAN at https://headlamp.ngoldack.de.
+#
+# SECURITY NOTE, because this one is different from Grafana and Immich:
+# headlamp's ServiceAccount is bound to cluster-admin
+# (clusterrolebinding headlamp-headlamp-admin), and no OIDC provider is
+# configured in helmrelease.yaml. Its protection is therefore the network and
+# whatever token gate the UI itself presents — not an identity provider.
+#
+# That is acceptable only because this name resolves ONLY in local DNS and the
+# VIP is an RFC1918 address: nothing outside the LAN can reach it, and the
+# Gateway is not published to the internet. It must NOT be given a public DNS
+# record, and if the public Gateway is ever genuinely exposed this route should
+# move behind Authentik first.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: headlamp
+  namespace: headlamp
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - headlamp.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: headlamp-headlamp
+          port: 80

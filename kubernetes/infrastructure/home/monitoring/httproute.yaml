@@ -1,0 +1,22 @@
+# Grafana on the LAN at https://grafana.ngoldack.de.
+#
+# Same shape as Immich's route: the name resolves only in local DNS, so this is
+# not reachable from the internet even though the certificate is a real Let's
+# Encrypt one. Grafana has its own login, so unlike Headlamp it is not relying
+# solely on the network being private.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - grafana.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: monitoring-victoria-metrics-k8s-stack-grafana
+          port: 80

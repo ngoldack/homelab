@@ -48,13 +48,6 @@ tasks:
         test -f home-flux.age.key
         age-keygen -y home-flux.age.key
 
-  sops:keys:cloud-flux:public:
-    desc: Print the Cloud Flux age recipient
-    cmds:
-      - |
-        test -f cloud-flux.age.key
-        age-keygen -y cloud-flux.age.key
-
   sops:edit:
     desc: Edit a SOPS-encrypted file
     requires:
@@ -121,7 +114,7 @@ tasks:
         sh -eu -c '
           key_file=$(mktemp)
           trap "rm -f \"$key_file\"" EXIT HUP INT TERM
-          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+          for identity in age.key home-flux.age.key; do
             if [ -f "$identity" ]; then
               cat "$identity" >> "$key_file"
             fi
@@ -155,7 +148,7 @@ tasks:
         sh -eu -c '
           key_file=$(mktemp)
           trap "rm -f \"$key_file\"" EXIT HUP INT TERM
-          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+          for identity in age.key home-flux.age.key; do
             if [ -f "$identity" ]; then
               cat "$identity" >> "$key_file"
             fi
@@ -173,7 +166,7 @@ tasks:
         sh -eu -c '
           key_file=$(mktemp)
           trap "rm -f \"$key_file\"" EXIT HUP INT TERM
-          for identity in age.key ci.age.key home-flux.age.key cloud-flux.age.key; do
+          for identity in age.key home-flux.age.key; do
             if [ -f "$identity" ]; then
               cat "$identity" >> "$key_file"
             fi
@@ -267,46 +260,6 @@ tasks:
           TOFU_DIR: tofu/home
           TOFU_ARGS: destroy
 
-  tofu:cloud:init:
-    desc: Initialize the Cloud OpenTofu root
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: init
-
-  tofu:cloud:validate:
-    desc: Validate the Cloud OpenTofu root
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: validate
-
-  tofu:cloud:plan:
-    desc: Show the complete Cloud OpenTofu plan
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: plan
-
-  tofu:cloud:apply:
-    desc: Apply the complete Cloud OpenTofu configuration
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: apply
-
-  tofu:cloud:destroy:
-    desc: Destroy the Cloud OpenTofu-managed infrastructure
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: destroy
-
   kubeconfig:home:export:
     desc: Export the Home kubeconfig to kubeconfig-home.yaml
     cmds:
@@ -325,24 +278,6 @@ tasks:
           TOFU_ARGS: output -raw talosconfig
           TOFU_OUTPUT_FILE: talosconfig-home.yaml
 
-  kubeconfig:cloud:export:
-    desc: Export the Cloud kubeconfig to kubeconfig-cloud.yaml
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: output -raw cloud_cluster_kubeconfig
-          TOFU_OUTPUT_FILE: kubeconfig-cloud.yaml
-
-  talosconfig:cloud:export:
-    desc: Export the Cloud talosconfig to talosconfig-cloud.yaml
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: output -raw cloud_cluster_talosconfig
-          TOFU_OUTPUT_FILE: talosconfig-cloud.yaml
-
   talos-backup:home:bucket:
     desc: Print the Home Talos etcd backup bucket name
     cmds:
@@ -350,11 +285,3 @@ tasks:
         vars:
           TOFU_DIR: tofu/home
           TOFU_ARGS: output -raw home_talos_backup_bucket
-
-  talos-backup:cloud:bucket:
-    desc: Print the Cloud Talos etcd backup bucket name
-    cmds:
-      - task: tofu:run
-        vars:
-          TOFU_DIR: tofu/cloud
-          TOFU_ARGS: output -raw cloud_talos_backup_bucket

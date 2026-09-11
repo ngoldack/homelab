@@ -1,15 +1,25 @@
 creation_rules:
-  # ...age1f6cd8a... is ci.age.key's public key. It was added so GitHub
-  # Actions (talos-etcd-backup.yml) could decrypt these at runtime via the
-  # SOPS_AGE_KEY secret. That workflow is gone — etcd backups now run in
-  # cluster as a CronJob (kubernetes/infrastructure/home/talos-backup/) —
-  # so nothing in CI decrypts these files any more and this recipient is
-  # unused. It is kept for now only to avoid a rekey mid-migration; drop it
-  # in the same `sops updatekeys` pass that removes the cloud recipients.
-  - path_regex: tofu/(home|cloud)/secret\.sops\.yaml$
+  # Two personal age keys (age.key and a backup identity). Both rules share
+  # them so any secret in the repo is decryptable by the operator.
+  #
+  # Two recipients were dropped when the cloud cluster was destroyed:
+  #   ...age1f6cd8a... — ci.age.key, added so GitHub Actions
+  #     (talos-etcd-backup.yml) could decrypt at runtime via the SOPS_AGE_KEY
+  #     secret. That workflow is gone; etcd backups run in-cluster as a
+  #     CronJob (kubernetes/infrastructure/home/talos-backup/), so nothing in
+  #     CI decrypts anything any more.
+  #   ...age1lk8hyd... — cloud-flux.age.key, the Flux sops-age identity of the
+  #     cloud cluster, which no longer exists.
+  # Run `task sops:updatekeys` after changing this file, or existing files keep
+  # their old recipient list and the change is cosmetic only.
+  - path_regex: tofu/home/secret\.sops\.yaml$
     age: &age_recipients >-
-      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k,age1f6cd8atfuvhxmjugw5pquk45tszqxlh557sg8k9dsufzc9kgmpqshjm9pz
+      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k
 
+  # Adds ...age1qw89zl... — home-flux.age.key, the identity Flux's sops-age
+  # Secret carries in-cluster. Only the kubernetes/ tree needs it: those files
+  # are decrypted by kustomize-controller, whereas tofu/ files are only ever
+  # decrypted locally by the operator.
   - path_regex: kubernetes/.*/.*\.sops\.yaml$
     age: >-
-      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k,age1f6cd8atfuvhxmjugw5pquk45tszqxlh557sg8k9dsufzc9kgmpqshjm9pz,age1qw89zltkg52p3s5qw5ejwzg3tusat0vth9aumcj2m5pwuyz9zyjq69kwf0,age1lk8hyd9mducrxtn04vk9u9x827ccd8w0l5qu8aru4wt56vhf3vaqjem4x6
+      age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k,age1qw89zltkg52p3s5qw5ejwzg3tusat0vth9aumcj2m5pwuyz9zyjq69kwf0

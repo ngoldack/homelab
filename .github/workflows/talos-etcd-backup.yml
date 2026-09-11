@@ -37,9 +37,11 @@ jobs:
       AWS_DEFAULT_REGION: fsn1
       S3_ENDPOINT: https://fsn1.your-objectstorage.com
       # Not a secret (a bucket name isn't a credential) — from `tofu output
-      # home_talos_backup_bucket` in tofu/cloud. Update if the bucket is ever
+      # home_talos_backup_bucket` in tofu/home. Update if the bucket is ever
       # recreated (it carries a random suffix tofu assigns once, at creation).
-      S3_BUCKET: home-talos-etcd-28575c26
+      # Was stale (home-talos-etcd-28575c26) after the bucket moved roots and
+      # was recreated during a from-scratch rebuild.
+      S3_BUCKET: home-talos-etcd-a531af5c
       # cp-main's Tailscale IP (confirmed live via
       # `talosctl -n 10.30.0.10 get addresses`, tailscale0 interface), not
       # its hostname: using the IP directly avoids depending on the tailnet
@@ -47,7 +49,13 @@ jobs:
       # tailnet. Stable for the life of this device's tailnet registration —
       # only changes if cp-main is ever removed from the tailnet and
       # rejoins as a new device (e.g. a from-scratch reinstall).
-      TALOS_TAILNET_HOST: 100.107.85.29
+      #
+      # That caveat is not hypothetical: this sat stale at 100.107.85.29 after
+      # a from-scratch rebuild re-registered cp-main, so the job could not have
+      # reached it even if a runner had picked it up. Re-check after ANY
+      # cp-main reinstall:
+      #   talosctl -n 10.30.0.10 get addressstatuses | grep tailscale0
+      TALOS_TAILNET_HOST: 100.100.108.66
     steps:
       - uses: actions/checkout@v4
 
@@ -79,8 +87,8 @@ jobs:
 
           sops -d --extract '["home_talosconfig"]' tofu/home/secret.sops.yaml > talosconfig
           ts_authkey=$(sops -d --extract '["tailscale_auth_key"]' tofu/home/secret.sops.yaml)
-          access_key=$(sops -d --extract '["hetzner_object_storage_access_key"]' tofu/cloud/secret.sops.yaml)
-          secret_key=$(sops -d --extract '["hetzner_object_storage_secret_key"]' tofu/cloud/secret.sops.yaml)
+          access_key=$(sops -d --extract '["hetzner_object_storage_access_key"]' tofu/home/secret.sops.yaml)
+          secret_key=$(sops -d --extract '["hetzner_object_storage_secret_key"]' tofu/home/secret.sops.yaml)
 
           echo "::add-mask::$ts_authkey"
           echo "::add-mask::$access_key"
@@ -109,6 +117,18 @@ jobs:
           timestamp=$(date --utc +%Y%m%dT%H%M%SZ)
           aws s3 cp etcd.snapshot "s3://${S3_BUCKET}/etcd-${timestamp}.snapshot" \
             --endpoint-url "$S3_ENDPOINT"
+
+      # This bucket sat empty for the cluster's entire life without anyone
+      # noticing, because nothing ever asserted that a snapshot actually
+      # arrived. A green job that uploaded nothing is worse than a red one.
+      - name: Verify the snapshot landed
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          objects=$(aws s3 ls "s3://${S3_BUCKET}/" --endpoint-url "$S3_ENDPOINT" | wc -l)
+          echo "objects now in ${S3_BUCKET}: ${objects}"
+          test "${objects}" -gt 0
 
   backup-cloud-etcd:
     name: Backup Cloud etcd to Hetzner Object Storage

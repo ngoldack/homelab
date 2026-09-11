@@ -5,7 +5,15 @@
 # not belong on the small fast pool next to databases. Its own StorageClass
 # puts it at tank/k8s/immich-library/... on the NAS.
 #
-# Start modest — the class allows volume expansion, so this can grow in place.
+# 4 TiB (~4.4 TB). The class allows volume expansion, so this can still grow
+# later without recreating — but growing does NOT retro-apply the StorageClass's
+# snapshot schedule, which the driver only reads when the volume is first
+# created. That is why this was sized up by recreating the (empty) PVC rather
+# than expanding it: the same operation also picks up the daily snapshot task.
+#
+# On NFS the driver sets a ZFS refquota, which is thin — the dataset consumes
+# only what is actually written, so this does not reserve 4 TiB on the tank
+# pool up front.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -21,4 +29,4 @@ spec:
   storageClassName: truenas-tank-nfs-immich-library
   resources:
     requests:
-      storage: 500Gi
+      storage: 4Ti

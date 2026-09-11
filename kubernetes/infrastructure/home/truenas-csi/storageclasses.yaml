@@ -103,6 +103,14 @@ parameters:
   pool: "fast"
   datasetPath: "k8s/nfs/immich/database"
   compression: "LZ4"
+  # Every 6 hours, kept two weeks. More frequent than the library because the
+  # database is small and changes constantly, and because losing it loses the
+  # index of the photos even when the photo files survive.
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"
@@ -141,6 +149,21 @@ parameters:
   pool: "tank"
   datasetPath: "k8s/nfs/immich/library"
   compression: "LZ4"
+  # Automatic ZFS snapshots of the photo library. These parameters make the
+  # driver create a real TrueNAS Periodic Snapshot Task scoped to THIS PVC's
+  # own dataset (createSnapshotTaskFromParameters in pkg/driver/controller.go),
+  # not a hand-made task on the parent — so it is declarative and travels with
+  # the volume. Daily at 03:15, kept one month.
+  #
+  # These are independent of Kubernetes VolumeSnapshot objects, which matters:
+  # the driver's DeleteSnapshot returns success to Kubernetes even when ZFS
+  # refuses the delete, so k8s-side snapshots are not a trustworthy record.
+  # A TrueNAS-side task is.
+  snapshot.schedule: "15 3 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "1"
+  snapshot.retentionUnit: "MONTH"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"

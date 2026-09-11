@@ -45,15 +45,18 @@ proxmox_nodes = {
     # Minimal host reserve: 2 GiB RAM + 2 efficiency threads for the host OS
     # (headless, ARC capped on-host).
     #
-    # This reserve is now razor-thin, not comfortable: at max_memory_gb=94 it
-    # leaves the current fleet's full memory allocation (92 GiB across 4
-    # nodes) exactly at the usable ceiling, with zero declared slack for the
-    # host OS or ZFS ARC beyond these 2 GiB. It has not caused an OOM in
-    # practice only because no guest is anywhere near fully using its
-    # allocation (wk-main-efficiency in particular). Raising this reserve
-    # further requires shrinking a node's memory allocation to compensate —
-    # a live-infrastructure change, not a config-only fix, so it's left as a
-    # deliberate follow-up rather than done here.
+    # This reserve used to be razor-thin, and it eventually bit. With the fleet
+    # allocating 92 of the 94 usable GiB, wk-main-performance stopped starting
+    # at all: Proxmox failed the task with "QEMU exited with code 1", which is
+    # what a host unable to hand back the requested memory looks like once ZFS
+    # ARC has grown into the free space.
+    #
+    # The follow-up this comment used to defer has now happened —
+    # wk-main-performance went from 64 to 48 GiB — so the fleet totals 76 GiB
+    # and roughly 18 GiB is genuinely free for the host OS and ARC. These 2 GiB
+    # are now a floor with real slack above them, rather than the only thing
+    # between the host and an OOM. Keep it that way: check the fleet total
+    # against max_memory_gb before growing any node's memory.
     reserved = {
       memory = 2
       cpu    = { class = "efficiency", count = 2 }
@@ -171,7 +174,15 @@ nodes = {
     vm_id       = 105
     cpu_cores   = 16
     cpu_class   = "performance"
-    memory      = 65536
+    # 48 GiB, down from 64. The VM stopped starting at 64: Proxmox failed the
+    # task with "QEMU exited with code 1", which is what a failure to allocate
+    # looks like — the host has 94 GiB usable and the fleet was asking for 92
+    # of it, leaving nothing for the host OS once ZFS ARC had grown. At 48 the
+    # fleet totals 76 GiB (4 + 16 + 8 + 48), leaving ~18 GiB of real headroom.
+    # Kept in sync with the live VM, which was resized by hand first: without
+    # this line the next apply would push it straight back to 64 and break the
+    # node again.
+    memory      = 49152
     disk_size   = 96
     talos_role  = "worker"
     gpu         = true

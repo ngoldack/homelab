@@ -91,6 +91,65 @@ spec:
               # 3.x appVersion of its own.
               image:
                 tag: v3.2.0
+              # The chart's probes are far too aggressive for this workload and
+              # were actively breaking uploads. It hardcodes timeoutSeconds: 1
+              # on liveness AND readiness; under upload load /api/server/ping
+              # takes longer than a second to answer, three probes fail, and
+              # kubelet KILLS the container mid-upload. Confirmed in the events:
+              #   Liveness probe failed: ... context deadline exceeded
+              #   Container main failed liveness probe, will be restarted
+              # Every in-flight request dies with it, which is what surfaced in
+              # immich-go as "io: read/write on closed pipe" — a client-side
+              # symptom of the server vanishing mid-body, not a network fault.
+              #
+              # 10s timeout with 6 failures over 15s periods means the app has
+              # to be unresponsive for ~90s before a restart, instead of 3s.
+              # A liveness probe should catch a hung process, not a busy one.
+              probes:
+                liveness:
+                  enabled: true
+                  custom: true
+                  spec:
+                    httpGet:
+                      path: /api/server/ping
+                      port: http
+                    initialDelaySeconds: 0
+                    periodSeconds: 15
+                    timeoutSeconds: 10
+                    failureThreshold: 6
+                readiness:
+                  enabled: true
+                  custom: true
+                  spec:
+                    httpGet:
+                      path: /api/server/ping
+                      port: http
+                    initialDelaySeconds: 0
+                    periodSeconds: 15
+                    timeoutSeconds: 10
+                    failureThreshold: 6
+                startup:
+                  enabled: true
+                  custom: true
+                  spec:
+                    httpGet:
+                      path: /api/server/ping
+                      port: http
+                    initialDelaySeconds: 0
+                    periodSeconds: 10
+                    timeoutSeconds: 10
+                    failureThreshold: 30
+              # Requests stay modest so this still schedules on an ordinary LAN
+              # worker; the limits are the headroom asked for. Note the ceiling
+              # is only reachable on a node that actually has it — see the
+              # comment on defaultPodOptions below.
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+                limits:
+                  cpu: "8"
+                  memory: 16Gi
               env:
                 # CNPG publishes the generated credentials in the
                 # <cluster>-app Secret. Referencing its keys means the password
@@ -147,6 +206,33 @@ spec:
               # 3.x appVersion of its own.
               image:
                 tag: v3.2.0
+              # Same fix as the server: the chart hardcodes timeoutSeconds: 1,
+              # and this pod's readiness probe was already failing under load
+              # ("Readiness probe failed: ... dial tcp"). Model inference is
+              # bursty and CPU-bound here, so a 1s ping budget is unrealistic.
+              probes:
+                liveness:
+                  enabled: true
+                  custom: true
+                  spec:
+                    httpGet:
+                      path: /ping
+                      port: http
+                    initialDelaySeconds: 0
+                    periodSeconds: 15
+                    timeoutSeconds: 10
+                    failureThreshold: 6
+                readiness:
+                  enabled: true
+                  custom: true
+                  spec:
+                    httpGet:
+                      path: /ping
+                      port: http
+                    initialDelaySeconds: 0
+                    periodSeconds: 15
+                    timeoutSeconds: 10
+                    failureThreshold: 6
               env:
                 DB_HOSTNAME: immich-database-rw
                 DB_PORT: "5432"

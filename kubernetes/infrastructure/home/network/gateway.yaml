@@ -21,16 +21,10 @@ metadata:
   name: public
   namespace: network
   annotations:
-    # external-dns reads the DNS target from HERE, not from the Gateway's
-    # status. In host-network mode Cilium makes the Gateway's Service a
-    # ClusterIP but only ever populates status.addresses from
-    # Service.status.loadBalancer.ingress, which a ClusterIP never sets — so
-    # Gateway.status.addresses stays permanently empty and the Gateway reports
-    # Programmed=False/AddressNotAssigned even though traffic flows fine
-    # (cilium/cilium#42786, #45485). external-dns's --default-targets cannot
-    # cover this either: its gateway source emits zero endpoints when there is
-    # no address, and there is nothing for a default to rewrite.
-    external-dns.alpha.kubernetes.io/target: "${INGRESS_TARGET_IP}"
+    # Ask Cilium's LB-IPAM for this exact address out of the pool in
+    # lb-ipam.yaml, rather than whatever it hands out next. The VIP is what
+    # local DNS points at, so it has to be stable across a Gateway recreate.
+    lbipam.cilium.io/ips: "10.30.0.200"
 spec:
   gatewayClassName: cilium
   listeners:

@@ -1,0 +1,26 @@
+# Makes a home node answer ARP for the VIPs allocated above, so the address is
+# actually reachable on the LAN rather than merely assigned.
+#
+# Restricted to the home site on purpose. The Hetzner ingress node is on a
+# different L2 segment entirely — it could never answer ARP for a 10.30.0.0/24
+# address, and letting it try would just add a node that loses every election
+# it enters.
+#
+# Leadership is per-service and backed by a Kubernetes Lease, so the VIP fails
+# over to another home node when the current holder reboots. That is the main
+# thing this buys over pinning a service to one node's IP.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: lan
+spec:
+  nodeSelector:
+    matchLabels:
+      topology.homelab/site: home
+  # ens18 is the LAN interface on every Proxmox-hosted node (verified with
+  # `talosctl get addresses` — 10.30.0.x/24 sits on ens18). Announcing on the
+  # wrong interface fails silently: the Service still shows an assigned IP and
+  # nothing answers ARP for it.
+  interfaces:
+    - ens18
+  loadBalancerIPs: true

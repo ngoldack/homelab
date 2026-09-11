@@ -1,0 +1,18 @@
+# LAN addresses for LoadBalancer Services, handed out by Cilium's own IPAM.
+#
+# 10.30.0.200-250 on the cluster VLAN (10.30.0.0/24). The nodes sit at .10,
+# .21, .22 and .23 and the gateway at .1, so this range is clear of them and
+# leaves room for future services without touching this file again.
+#
+# These are real LAN addresses: anything on the network reaches them directly,
+# including clients arriving over UniFi Teleport, which land on the LAN like
+# any other local device. That is the whole point — no Hetzner hop, no VPN
+# client requirement, and no private address published in public DNS.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lan
+spec:
+  blocks:
+    - start: "10.30.0.200"
+      stop: "10.30.0.250"

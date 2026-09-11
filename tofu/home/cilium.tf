@@ -77,30 +77,35 @@ resource "helm_release" "cilium" {
         create = "true"
       }
       hostNetwork = {
-        # Envoy binds the listener directly on the node instead of waiting for
-        # a LoadBalancer Service address that nothing would ever assign — there
-        # is no CiliumLoadBalancerIPPool here and an hcloud LB is a paid
-        # resource we do not need when the ingress node already has a public IP.
-        enabled = true
-        nodes = {
-          # Binds 80/443 ONLY on the Hetzner ingress node. This selector FAILS
-          # OPEN: if it matches nothing — a typo, a renamed label, a node that
-          # never got the label — Cilium binds 443 on every node in the
-          # cluster, including the LAN ones, and logs nothing about it. The
-          # label is set in ingress.tf via machine.nodeLabels. Verify after any
-          # change with:
-          #   kubectl -n kube-system get cm cilium-config \
-          #     -o jsonpath='{.data.gateway-api-hostnetwork-nodelabelselector}'
-          #   nmap -p 443 10.30.0.10 10.30.0.21 10.30.0.22 10.30.0.23   # silent
-          matchLabels = {
-            "node.homelab/role" = "ingress"
-          }
-        }
+        # OFF. This used to bind Envoy's listener directly on the Hetzner
+        # ingress node, because that node had a public IP and nothing here
+        # could assign a LoadBalancer address.
+        #
+        # That design could not serve home workloads, and not merely slowly:
+        # Envoy ran in the ingress node's HOST network namespace, and from
+        # there it could not reach pods on the LAN nodes at all. Every request
+        # to Immich returned 503 with the backend healthy and answering 200
+        # in-cluster, and Cilium on the ingress node listing the right endpoint
+        # as active. Traffic also crossed the WAN twice for a service in the
+        # same room as the client.
+        #
+        # The replacement is a LoadBalancer address on the LAN, handed out by
+        # CiliumLoadBalancerIPPool and announced with ARP by
+        # CiliumL2AnnouncementPolicy (both in
+        # kubernetes/infrastructure/home/network/). Envoy then runs as an
+        # ordinary pod on a home node and reaches backends over normal pod
+        # networking.
+        #
+        # Note this flag is GLOBAL — the chart offers no per-Gateway override,
+        # so it cannot be on for a public Gateway and off for an internal one
+        # at the same time. Turning it on again would break the LAN VIP.
+        enabled = false
       }
     }
 
-    # Required for the above: in host-network mode Envoy binds the listener
-    # port on the node itself, and 443 is privileged. BOTH halves are needed —
+    # Envoy still binds 443, which is privileged, so these stay even though
+    # host-network mode is now off — the bind just happens in the pod's own
+    # network namespace instead of the node's. BOTH halves are needed —
     # the chart's values.yaml is explicit that keepCapNetBindService applies
     # "in addition to granting the capability to the container", and setting
     # only one leaves the bind failing with
@@ -123,8 +128,32 @@ resource "helm_release" "cilium" {
     # across the WAN leg while small ones pass — the failure mode where ping
     # works and TLS handshakes hang.
     MTU = 1370
-    # Roll the agents when this changes, rather than leaving nodes on a stale
-    # MTU until something else restarts them.
+
+    # L2 announcements: a home node answers ARP for the LoadBalancer VIPs
+    # handed out by CiliumLoadBalancerIPPool, so services get a real, stable
+    # address on the LAN (10.30.0.0/24) that any client on the network can
+    # reach — including remote clients arriving over UniFi Teleport, which
+    # lands them on the LAN like any other local device.
+    #
+    # This is what replaces gatewayAPI.hostNetwork above. Leadership is per
+    # service and fails over between eligible nodes, so the VIP survives a
+    # single node reboot rather than being tied to one machine's IP.
+    l2announcements = {
+      enabled = true
+    }
+
+    # L2 announcements lease-renew through the Kubernetes API, and Cilium's
+    # default client rate limit is low enough that the agents start logging
+    # client-side throttling once leases are in play. Raised per Cilium's own
+    # L2-announcement guidance; without it leadership flaps under load and the
+    # VIP briefly stops answering ARP.
+    k8sClientRateLimit = {
+      qps   = 20
+      burst = 100
+    }
+
+    # Roll the agents when values change, rather than leaving nodes on a stale
+    # MTU or datapath config until something else restarts them.
     rollOutCiliumPods = true
 
     # rollOutCiliumPods covers only the AGENT DaemonSet, not the operator

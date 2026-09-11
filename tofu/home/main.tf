@@ -410,19 +410,48 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   machine = "q35"
   bios    = "ovmf"
 
-  # Serial console, fleet-wide (not just PCIe-passthrough nodes): once a
-  # passed-through GPU's driver (e.g. i915) loads, it takes over VGA console
-  # ownership from the emulated display — Proxmox's noVNC "Console" tab then
-  # just freezes on the last framebuffer frame, since nothing is attached to
-  # the physical GPU's real output. The kernel already writes boot/console
-  # output to ttyS0 regardless, so pointing the VM's display at serial0
-  # keeps Proxmox's Console tab showing live output for every node.
+  # Kept so the serial console still exists and `qm terminal <vmid>` works from
+  # the Proxmox host. It is no longer what the noVNC Console tab shows — see
+  # the vga block below.
   serial_device {
     device = "socket"
   }
 
+  # std, not serial0, and not virtio-gpu.
+  #
+  # This used to be `serial0`, which means the VM has NO emulated graphics
+  # device at all and Proxmox's Console tab is a bare serial terminal. The
+  # reasoning was that a passed-through GPU's driver takes VGA console
+  # ownership away from the emulated display once it loads, freezing noVNC on
+  # the last frame. That part is true, but the cure was worse: with no
+  # framebuffer there is no UEFI/POST output, no bootloader, and no Talos
+  # console dashboard — the Console tab just prints "starting serial terminal
+  # on interface serial0" and then sits empty, because Talos renders its
+  # dashboard on tty0 and nothing writes to ttyS0 once boot is done. A VM that
+  # fails before Talos starts (as wk-main-performance did when the host could
+  # not allocate its memory) shows absolutely nothing either way.
+  #
+  # std is the Bochs/stdvga adapter: it works off the plain EFI framebuffer
+  # with NO guest driver at any stage, so POST, the bootloader and the Talos
+  # dashboard are all visible. virtio-gpu would need the guest's virtio_gpu
+  # DRM driver (and VirtioGpuDxe in OVMF) to show anything, which buys
+  # performance and resizing this text console has no use for, at the cost of
+  # a driver dependency exactly when things are broken enough to need looking
+  # at.
+  #
+  # The passthrough trade-off is accepted deliberately: on wk-main-media and
+  # wk-main-performance the graphical console will freeze once i915/nvidia
+  # claims it, but POST and early boot — the part worth seeing — appear first.
+  # Serial is not lost in either case; it moves to `qm terminal <vmid>`.
+  #
+  # The kernel cmdline already targets both consoles
+  # (console=tty0 console=ttyS0,115200n8, set via the Image Factory schematic),
+  # so no Talos-side change is needed.
+  #
+  # Takes effect on the VM's next power cycle — a display adapter cannot be
+  # hot-changed.
   vga {
-    type = "serial0"
+    type = "std"
   }
 
   # Define VM boot order. Disk (scsi0) is preferred so that after Talos installs to

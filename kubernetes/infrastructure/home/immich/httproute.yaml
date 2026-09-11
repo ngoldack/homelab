@@ -1,34 +1,27 @@
-# Immich in a browser, reachable ONLY from the tailnet.
+# Immich in a browser, on the LAN.
 #
-# The route attaches to the same public Gateway as anything else, so it gets
-# the real Let's Encrypt wildcard for *.svc.ngoldack.de and no certificate
-# warnings. What makes it Tailscale-only is not the Gateway and not a network
-# policy — it is DNS: the A record for this hostname points at the ingress
-# node's Tailscale address (100.124.160.55) rather than its public IP
-# (2.28.31.116). A 100.64.0.0/10 address is unroutable off the tailnet, so a
-# device that is not on Tailscale cannot reach it even though the name resolves
-# publicly.
+# Reached at https://immich.svc.ngoldack.de, which resolves — via local DNS on
+# the UniFi gateway, not public DNS — to the Gateway's LAN VIP 10.30.0.200.
+# Remote access is UniFi Teleport: a Teleport client lands on the LAN like any
+# other local device, so the same name and the same certificate work from
+# anywhere without exposing anything to the internet.
 #
-# Worth being precise about why it is done this way rather than by firewalling
-# the public IP to the Tailscale CGNAT range: that does not work. A client on
-# the tailnet connecting to the node's PUBLIC address still arrives from its
-# own public source IP, so a CGNAT-scoped firewall rule would lock out the very
-# devices it was meant to admit. Pointing the name at the tailnet address is
-# what actually routes the traffic through WireGuard.
+# The certificate is the real Let's Encrypt wildcard for *.svc.ngoldack.de, so
+# there are no browser warnings despite nothing being publicly reachable.
+# cert-manager solves DNS-01 through its Hetzner webhook, which needs neither a
+# public A record nor an inbound port.
 #
-# Envoy already listens on 0.0.0.0:443 on this node (hostNetwork), so it
-# accepts connections arriving on tailscale0 with no extra configuration.
+# An earlier version of this route pointed DNS at the Hetzner ingress node
+# instead. That could not work: Envoy ran in that node's host network
+# namespace and could not reach pods on the LAN nodes at all, so every request
+# returned 503 while the backend answered 200 in-cluster — and even had it
+# worked, traffic would have crossed the WAN twice to reach a service in the
+# same room as the client.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: immich
   namespace: immich
-  annotations:
-    # Overrides the Gateway's own target annotation, which points at the public
-    # IP. external-dns applies the most specific annotation, so this record
-    # gets the tailnet address while anything else attached to the same Gateway
-    # keeps the public one.
-    external-dns.alpha.kubernetes.io/target: "100.124.160.55"
 spec:
   parentRefs:
     - name: public

@@ -164,16 +164,16 @@ nodes = {
     }
   }
 
-  # Dedicated AI/inference worker — 64GB RAM for large models plus runtime
-  # overhead and the x16 P100. Pinned to all 8 P-cores (16 threads).
+  # Dedicated AI/inference worker — 48GB RAM for models plus runtime overhead,
+  # and the x16 P100. Pinned to all 8 P-cores (16 threads).
   # The Intel iGPU moved to wk-main-media: this node is single-purpose now, so
   # inference cannot starve a transcode (or vice versa) and either capability
   # can be rebooted without taking the other down.
   wk-main-performance = {
-    host        = "pmx-main"
-    vm_id       = 105
-    cpu_cores   = 16
-    cpu_class   = "performance"
+    host      = "pmx-main"
+    vm_id     = 105
+    cpu_cores = 16
+    cpu_class = "performance"
     # 48 GiB, down from 64. The VM stopped starting at 64: Proxmox failed the
     # task with "QEMU exited with code 1", which is what a failure to allocate
     # looks like — the host has 94 GiB usable and the fleet was asking for 92

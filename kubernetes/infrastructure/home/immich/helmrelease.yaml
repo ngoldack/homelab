@@ -1,11 +1,9 @@
 # Immich. The chart is bjw-s app-template based, so each component nests its
 # workload under <component>.controllers.main.containers.main.
 #
-# No ingress is configured. Exposing this publicly is a deliberate decision
-# that has not been made yet — the standing policy is Tailscale-only for
-# internal services and never exposing home addresses, and Immich holds
-# personal photos. Reach it for now with:
-#   kubectl -n immich port-forward svc/immich-server 2283:2283
+# Reached at https://immich.ngoldack.de on the LAN — see httproute.yaml. The
+# name resolves only in local DNS, so nothing is published to the internet
+# despite the certificate being a real Let's Encrypt one.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -72,6 +70,27 @@ spec:
         main:
           containers:
             main:
+              # Pinned ahead of the chart. immich-charts 0.12.0 is the newest
+              # release (May 2026) and still carries appVersion v2.6.3, while
+              # upstream Immich is on v3.2.0 (Sep 2026) — the chart has never
+              # tracked 3.x. The chart sets no image tag of its own, so without
+              # this it silently deploys the 4-month-old appVersion.
+              #
+              # Verified compatible with this deployment before bumping, since
+              # v3.0.0/v3.1.0 are flagged breaking:
+              #   - v3 REMOVED pgvecto.rs and errors out on it. This cluster
+              #     already runs VectorChord (vchord), which is its successor
+              #     and the recommended path — see ../immich/postgres.yaml.
+              #   - v3 requires an x86-64-v2 CPU or better (numpy bump). The
+              #     nodes are i9-13900HX, far above that baseline.
+              #   - The remaining breaking changes are API/mobile-level
+              #     (class-validator to zod, removed DTOs); the migration guide
+              #     states only a few environment variables were removed, and
+              #     none of the DB_*/REDIS_HOSTNAME values used here.
+              # Bump this tag deliberately, and drop it once the chart ships a
+              # 3.x appVersion of its own.
+              image:
+                tag: v3.2.0
               env:
                 # CNPG publishes the generated credentials in the
                 # <cluster>-app Secret. Referencing its keys means the password
@@ -107,6 +126,27 @@ spec:
         main:
           containers:
             main:
+              # Pinned ahead of the chart. immich-charts 0.12.0 is the newest
+              # release (May 2026) and still carries appVersion v2.6.3, while
+              # upstream Immich is on v3.2.0 (Sep 2026) — the chart has never
+              # tracked 3.x. The chart sets no image tag of its own, so without
+              # this it silently deploys the 4-month-old appVersion.
+              #
+              # Verified compatible with this deployment before bumping, since
+              # v3.0.0/v3.1.0 are flagged breaking:
+              #   - v3 REMOVED pgvecto.rs and errors out on it. This cluster
+              #     already runs VectorChord (vchord), which is its successor
+              #     and the recommended path — see ../immich/postgres.yaml.
+              #   - v3 requires an x86-64-v2 CPU or better (numpy bump). The
+              #     nodes are i9-13900HX, far above that baseline.
+              #   - The remaining breaking changes are API/mobile-level
+              #     (class-validator to zod, removed DTOs); the migration guide
+              #     states only a few environment variables were removed, and
+              #     none of the DB_*/REDIS_HOSTNAME values used here.
+              # Bump this tag deliberately, and drop it once the chart ships a
+              # 3.x appVersion of its own.
+              image:
+                tag: v3.2.0
               env:
                 DB_HOSTNAME: immich-database-rw
                 DB_PORT: "5432"

@@ -1,0 +1,156 @@
+# Takes an etcd snapshot and uploads it to Hetzner Object Storage.
+#
+# This replaces .github/workflows/talos-etcd-backup.yml, which never produced
+# a single successful backup. Five defects in it were fixed; the sixth was
+# fatal and environmental — every CI run joined a NEW ephemeral Tailscale
+# device needing manual admin-console approval, so it could never run
+# unattended. Running inside the cluster removes the problem at the root
+# rather than working around it: there is no tailnet hop, and no node IP or
+# hostname to keep in sync (see the endpoint note below).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: talos-backup
+  namespace: talos-backup
+spec:
+  schedule: "17 3 * * *"
+  # Wall-clock local time, so the run stays at 03:17 across DST rather than
+  # drifting an hour twice a year. Supported since Kubernetes 1.27; this
+  # cluster is on 1.36.
+  timeZone: Europe/Berlin
+  # Forbid, not Replace: a snapshot that is still uploading must never be
+  # killed halfway by the next schedule.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # A missed window (node down, cluster mid-upgrade) should be picked up if
+  # the CronJob controller notices within an hour, not silently skipped.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # Keep this at the home site. It cannot land on the Hetzner ingress
+          # node anyway (that node carries dedicated=ingress:NoSchedule and
+          # nothing here tolerates it), but stating the intent explicitly
+          # means the placement survives the taint ever being removed. The
+          # ingress node is a cax11 — 2 GB RAM and a small disk — and this pod
+          # writes a full etcd snapshot plus its encrypted copy to local
+          # scratch, so it genuinely does not belong there.
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: talos-backup
+              # Pinned to an exact release tag, never :latest. v0.1.0-beta.3
+              # is the newest clean release tag published to ghcr.io (the
+              # later tags are v0.1.0-beta.3-N-g<sha> dev builds), and the
+              # manifest is a real multi-arch index covering linux/amd64 and
+              # linux/arm64.
+              image: ghcr.io/siderolabs/talos-backup:v0.1.0-beta.3
+              imagePullPolicy: IfNotPresent
+              workingDir: /tmp
+              env:
+                # Talos's config loader resolves the talosconfig path via
+                # GetDefaultPaths(), which calls GetTalosDirectory() FIRST —
+                # and that falls back to os.UserHomeDir(), which errors out
+                # when $HOME is unset. That error aborts path resolution
+                # entirely, before the mounted service-account credential is
+                # ever considered. Setting TALOS_HOME (checked first, and
+                # returned immediately when absolute) makes resolution
+                # independent of whatever HOME the container runtime does or
+                # does not inject. TALOSCONFIG then names the credential
+                # outright instead of relying on it being found by fallback.
+                # The upstream sample omits both and is a coin-flip on runtime
+                # behaviour; these two lines make it deterministic.
+                - name: TALOS_HOME
+                  value: /tmp
+                - name: TALOSCONFIG
+                  value: /var/run/secrets/talos.dev/config
+                - name: AWS_REGION
+                  value: fsn1
+                - name: CUSTOM_S3_ENDPOINT
+                  value: https://fsn1.your-objectstorage.com
+                # USE_PATH_STYLE is deliberately NOT set, and must not be
+                # "fixed" by adding it. Its logic is inverted upstream:
+                # pkg/config/service.go reads
+                #   UsePathStyle: os.Getenv("USE_PATH_STYLE") == "false"
+                # and pkg/s3/s3.go consumes that value directly with no
+                # second inversion — so USE_PATH_STYLE="true" would select
+                # virtual-hosted style, the exact opposite of what it reads
+                # like. Omitting it yields virtual-hosted addressing
+                # (https://$BUCKET.fsn1.your-objectstorage.com/...), which
+                # Hetzner supports: the bucket subdomain resolves in DNS and
+                # returns a correct S3 <Error><Code>AccessDenied</Code> naming
+                # this bucket, confirming it routes. Omission is also the
+                # stable choice if upstream ever un-inverts the flag.
+                - name: BUCKET
+                  value: home-talos-etcd-a531af5c
+                - name: CLUSTER_NAME
+                  value: ${CLUSTER_NAME}
+                # Snapshots are age-encrypted before upload. This is the
+                # public half only and is safe in git. It matters here because
+                # this cluster has no Kubernetes secrets-at-rest encryption
+                # configured, so a raw etcd snapshot contains every Secret in
+                # the cluster in plaintext — object-storage ACLs would be the
+                # only thing protecting them. The private half is NOT in the
+                # cluster (that would defeat the purpose); it lives in
+                # tofu/home/secret.sops.yaml as talos_backup_age_private_key,
+                # and is required to restore. Note the env var name: the
+                # binary reads AGE_X25519_PUBLIC_KEY.
+                - name: AGE_X25519_PUBLIC_KEY
+                  value: age1qze98cnxne4h03axz8807nlrlqpt79sf79zmyq46vt0k5mffe9qsctgghk
+              envFrom:
+                # Supplies AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+                - secretRef:
+                    name: talos-backup-s3-credentials
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                # Scratch space for the snapshot and its encrypted copy;
+                # also TALOS_HOME. Needed because the root filesystem is
+                # read-only above.
+                - name: tmp
+                  mountPath: /tmp
+                - name: talos-secrets
+                  mountPath: /var/run/secrets/talos.dev
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: talos-secrets
+              secret:
+                # Created by Talos from the ServiceAccount CR in
+                # serviceaccount.yaml, same name as that CR. The generated
+                # talosconfig points at endpoint "talos.default" — a Service
+                # that Talos's kubeaccess EndpointController maintains itself,
+                # keeping its EndpointSlice in sync with the control-plane
+                # address set. That is why no node IP appears anywhere in this
+                # manifest, and why the single control plane being replaced or
+                # renumbered needs no edit here.
+                secretName: talos-backup
+                # 0440, not 0400. The kubelet owns projected secret files as
+                # root and sets their GROUP to the pod's fsGroup (1000 here);
+                # the container runs as uid 1000, which is NOT the owner. With
+                # 0400 the only readable bit belongs to root and the process
+                # cannot read its own credential. 0440 grants the group read
+                # and keeps it off-limits to everyone else.
+                defaultMode: 0440

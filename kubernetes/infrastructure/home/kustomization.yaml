@@ -5,6 +5,14 @@ resources:
   - truenas-csi
   - nvidia
   - node-taints
+  # Depends on machine.features.kubernetesTalosAPIAccess being enabled in the
+  # control plane's machine config (tofu/home/talos.tf) — that is what makes
+  # Talos install the serviceaccounts.talos.dev CRD this directory's
+  # ServiceAccount CR is an instance of. Apply the tofu change first, or this
+  # Kustomization fails to apply the CR (no matching CRD) and, because a
+  # Kustomization that cannot build/apply also cannot prune, it blocks the
+  # whole infra-controllers reconcile rather than failing in isolation.
+  - talos-backup
   # headlamp only. NOT network or external-dns: those are applied by their own
   # Flux Kustomization (clusters/home/network.yaml) so their CRD ordering can be
   # expressed, and network/kustomization.yaml already includes ../external-dns —

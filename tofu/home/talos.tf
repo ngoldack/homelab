@@ -138,6 +138,44 @@ data "talos_machine_configuration" "controlplane" {
         }
       }),
       local.iscsi_kubelet_extra_mounts,
+      # Lets a pod obtain a scoped Talos API credential by creating a
+      # ServiceAccount CR (serviceaccounts.talos.dev). Enabling this is what
+      # makes Talos install and serve that CRD at all, and it runs a
+      # controller on the control plane that reconciles each CR into a Secret
+      # holding a generated talosconfig. Used by the talos-backup CronJob in
+      # kubernetes/infrastructure/home/talos-backup/ to take etcd snapshots
+      # from inside the cluster.
+      #
+      # This is a control-plane-only feature — etcd lives here, and Talos
+      # documents it as such — so it is deliberately absent from the worker
+      # config below. It applies live through
+      # talos_machine_configuration_apply with no reboot.
+      #
+      # Both lists are deliberately as narrow as they go:
+      #   allowedRoles — os:etcd:backup authorizes exactly one API method,
+      #     /machine.MachineService/EtcdSnapshot. This is the ceiling; the
+      #     reconciler rejects any CR requesting a role absent from it, so a
+      #     compromised pod cannot escalate to os:admin by asking for it.
+      #   allowedKubernetesNamespaces — only the namespace containing the
+      #     backup CronJob. kube-system would be far too broad: every
+      #     workload already running there could mint an etcd credential.
+      #
+      # Field name note: this is the pre-v1.14 spelling, which is correct for
+      # var.talos_version (v1.13.4) — verified against
+      # pkg/machinery/config/types/v1alpha1/v1alpha1_types.go at that tag.
+      # Talos v1.14 replaces it with a separate KubeTalosAPIAccessConfig
+      # document, so this block must be revisited before bumping past v1.13.
+      yamlencode({
+        machine = {
+          features = {
+            kubernetesTalosAPIAccess = {
+              enabled                     = true
+              allowedRoles                = ["os:etcd:backup"]
+              allowedKubernetesNamespaces = ["talos-backup"]
+            }
+          }
+        }
+      }),
       # Same derived-label treatment as workers get (see
       # data.talos_machine_configuration.worker below) — this data source
       # assumes a single control plane (indexed [0] the same way

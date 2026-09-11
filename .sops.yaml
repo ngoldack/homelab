@@ -1,8 +1,11 @@
 creation_rules:
-  # ...age1f6cd8a... is ci.age.key's public key — added so GitHub Actions
-  # (talos-etcd-backup.yml) can decrypt these directly at runtime via the
-  # SOPS_AGE_KEY secret, instead of duplicating individual values as
-  # separate GH secrets.
+  # ...age1f6cd8a... is ci.age.key's public key. It was added so GitHub
+  # Actions (talos-etcd-backup.yml) could decrypt these at runtime via the
+  # SOPS_AGE_KEY secret. That workflow is gone — etcd backups now run in
+  # cluster as a CronJob (kubernetes/infrastructure/home/talos-backup/) —
+  # so nothing in CI decrypts these files any more and this recipient is
+  # unused. It is kept for now only to avoid a rekey mid-migration; drop it
+  # in the same `sops updatekeys` pass that removes the cloud recipients.
   - path_regex: tofu/(home|cloud)/secret\.sops\.yaml$
     age: &age_recipients >-
       age1h3lgj5t47k5vx67ck9gztwa7kr8pafzlnk725p82nvlvhn8z9g0qze7alf,age1eqnl3ytjeeav32yzpypjahxhr0s2xrlclyj5sfyyflp4w9huf32s0t660k,age1f6cd8atfuvhxmjugw5pquk45tszqxlh557sg8k9dsufzc9kgmpqshjm9pz

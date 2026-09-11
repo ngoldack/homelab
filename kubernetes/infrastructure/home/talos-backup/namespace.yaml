@@ -1,0 +1,10 @@
+# A dedicated namespace rather than kube-system, purely for least privilege.
+# machine.features.kubernetesTalosAPIAccess.allowedKubernetesNamespaces in
+# tofu/home/talos.tf names the namespaces whose pods may mint Talos API
+# credentials by creating a ServiceAccount CR. Pointing that at kube-system
+# would let anything already running there mint an etcd-backup credential;
+# pointing it at a namespace that contains only this CronJob does not.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: talos-backup

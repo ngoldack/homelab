@@ -81,14 +81,20 @@ spec:
           # truenas-fast-nvmeof is the right substrate for a TSDB — small
           # random writes and frequent fsync are what block storage is for, and
           # VictoriaMetrics advises against NFS for its data directory, with a
-          # reported corruption risk on unclean shutdown. It is not usable yet:
-          # NVMe-oF staging fails with no NVMe controller created at all
-          # (/sys/class/nvme empty) even though port 4420 is open and the host
-          # NQN is now stable, which points at the TrueNAS subsystem refusing
-          # these initiators. Each home node's NQN has to be added to that
-          # subsystem's host list (or "allow any host" enabled); the NQNs are
-          # derived from each node's machine UUID, so they survive reboots but
-          # change if a VM is rebuilt.
+          # reported corruption risk on unclean shutdown.
+          #
+          # It is not usable yet, and NOT for the reason it first appeared.
+          # Every layer was cleared by hand from the node's own CSI container:
+          # the subsystem is set to "All hosts are allowed", `nvme discover`
+          # against 10.20.10.10:4420 returns the expected subsystem, and
+          # `nvme connect` establishes it — creating /dev/nvme0n1 and the
+          # by-id symlink nvme-uuid.<ns-uuid> that the driver looks for. So the
+          # transport, the target and the host permissions are all fine; what
+          # fails is only the driver's own post-connect wait, which gives up
+          # after ~9s with "device did not appear after connect". Retry this
+          # before assuming anything is broken on the NAS: the earlier attempts
+          # ran while the container still had no stable host NQN, and that has
+          # since been fixed (see ../truenas-csi/helmrelease.yaml).
           #
           # Switch this back to truenas-fast-nvmeof once that is done. Because
           # storageClassName is immutable on a bound PVC, the change means
@@ -96,7 +102,7 @@ spec:
           # StorageClass is reclaimPolicy: Retain, so the old volume is kept on
           # the NAS rather than deleted, leaving the historical data
           # recoverable but also orphaned until cleaned up by hand.
-          storageClassName: truenas-fast-nfs
+          storageClassName: truenas-fast-nfs-monitoring
           resources:
             requests:
               storage: 50Gi

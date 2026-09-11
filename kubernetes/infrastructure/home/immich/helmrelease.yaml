@@ -138,6 +138,6 @@ spec:
         cache:
           enabled: true
           type: persistentVolumeClaim
-          storageClass: truenas-fast-nfs
+          storageClass: truenas-fast-nfs-immich
           accessMode: ReadWriteOnce
           size: 20Gi

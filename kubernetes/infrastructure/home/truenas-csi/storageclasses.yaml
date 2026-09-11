@@ -51,31 +51,33 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
-# Per-workload StorageClasses.
+# Per-app StorageClasses.
 #
-# These exist for one reason: making TrueNAS datasets identifiable from the
-# TrueNAS side. The dataset's leaf name is always pvc-<PV UID> and cannot be
-# changed — the driver derives it from the CSI request name
-# (volumeName := SanitizeVolumeName(req.Name) in pkg/driver/controller.go),
-# which the external-provisioner generates as pvc-<uid>. The provisioner is
-# even started with --extra-create-metadata, so the PVC's name and namespace
-# ARE passed through in the parameters map, but the driver never reads any
-# csi.storage.k8s.io/* key, so it cannot name the dataset after the claim.
+# Layout is always {pool}/k8s/{protocol}/{app}/pvc-<uid>, so the three generic
+# classes above land at e.g. fast/k8s/nfs/pvc-<uid> and these add the app
+# segment: fast/k8s/nfs/immich/pvc-<uid>.
 #
-# datasetPath is the one lever it does honour, so the PATH carries the meaning
-# instead: fast/k8s/immich-db/pvc-<uid> rather than fast/k8s/nfs/pvc-<uid>.
-# Add a class here for any workload whose data should be recognisable on the
-# NAS. To map a UUID back to a workload from the cluster side:
-#   kubectl get pv -o custom-columns=PV:.metadata.name,CLAIM:.spec.claimRef.namespace,NAME:.spec.claimRef.name
+# Why a class per app rather than one knob: datasetPath is a StorageClass
+# parameter, and it is the ONLY naming lever the driver exposes. The leaf name
+# cannot carry the app either — the driver derives it from the CSI request
+# name (volumeName := SanitizeVolumeName(req.Name) in pkg/driver/controller.go)
+# which the external-provisioner generates as pvc-<uid>. The provisioner does
+# run with --extra-create-metadata, so the PVC's name and namespace ARE in the
+# parameters map, but the driver reads no csi.storage.k8s.io/* key and its
+# dataset Comment is hardcoded to "CSI volume <path>" with no override. So one
+# class per (pool, protocol, app) is the cost of an identifiable path.
+#
+# Name them truenas-{pool}-{protocol}-{app}. To map a UUID back to a workload:
+#   kubectl get pv -o custom-columns=PV:.metadata.name,NS:.spec.claimRef.namespace,CLAIM:.spec.claimRef.name
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-monitoring
+  name: truenas-fast-nfs-monitoring
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "fast"
-  datasetPath: "k8s/monitoring"
+  datasetPath: "k8s/nfs/monitoring"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
@@ -84,15 +86,16 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
+# Immich's Postgres. Fast pool.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-immich-db
+  name: truenas-fast-nfs-immich
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "fast"
-  datasetPath: "k8s/immich-db"
+  datasetPath: "k8s/nfs/immich"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
@@ -101,16 +104,18 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
-# The photo/video library: bulk data on the spinning pool, not the fast one.
+# Immich's photo/video library: bulk media on the spinning pool. Same app
+# segment as above — the pool is what separates them, so both read as
+# .../k8s/nfs/immich/ on their respective pools.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: truenas-immich-library
+  name: truenas-tank-nfs-immich
 provisioner: csi.truenas.io
 parameters:
   protocol: "nfs"
   pool: "tank"
-  datasetPath: "k8s/immich-library"
+  datasetPath: "k8s/nfs/immich"
   compression: "LZ4"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"

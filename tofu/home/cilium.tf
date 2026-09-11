@@ -142,17 +142,14 @@ resource "helm_release" "cilium" {
     operator = {
       rollOutPods = true
     }
-    #
-    # Shared ClusterMesh CA, identical on both clusters (see tofu/cloud/cloud.tf's
-    # cilium_values) — passed as a Helm value rather than a pre-created
-    # "cilium-ca" Kubernetes Secret, because cloud's Cilium is rendered
-    # client-side (`helm_template`, no live-cluster lookup) and could never
-    # detect/reuse a pre-existing secret there; a values-based CA works
-    # identically for both a real helm_release (here) and a client-side
-    # render (cloud), with no apply-ordering dependency either way.
-    ca = {
-      cert = base64encode(local.secrets["cilium_ca_crt"])
-      key  = base64encode(local.secrets["cilium_ca_key"])
-    }
+    # NOTE: there is deliberately no CA pinned here. A top-level `ca = {cert,
+    # key}` block used to sit at this spot, meant to give both clusters an
+    # identical ClusterMesh CA. It never did anything: the chart reads the CA
+    # from `tls.ca.*`, not the top level, so Helm silently ignored it as an
+    # unknown value and Cilium generated its own CA anyway. Both reasons to
+    # have it are now gone — ClusterMesh was dropped when the two clusters
+    # were consolidated into this one, so there is no peer to share a CA with,
+    # and a self-generated CA is the right default for a single cluster.
+    # cilium_ca_crt/cilium_ca_key remain in secret.sops.yaml, unused.
   })]
 }

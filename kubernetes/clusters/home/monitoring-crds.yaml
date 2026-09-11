@@ -1,0 +1,32 @@
+# The VictoriaMetrics operator CRDs, split into their own Kustomization purely
+# so the ordering below can exist: monitoring.yaml dependsOn this one, and with
+# wait: true Flux holds the stack back until these 25 CRDs are actually
+# established. Same shape as the cert-manager -> network edge.
+#
+# dependsOn infra-controllers because that is what applies
+# kubernetes/infrastructure/home/sources.yaml, which holds the
+# victoria-metrics HelmRepository this release pulls from.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring-crds
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/monitoring-crds
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+    - name: infra-controllers
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

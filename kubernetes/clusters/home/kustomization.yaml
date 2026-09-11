@@ -11,3 +11,7 @@ resources:
   - cert-manager.yaml
   - infrastructure.yaml
   - network.yaml
+  # Split in two so the CRD-before-CR edge is explicit: monitoring.yaml
+  # dependsOn monitoring-crds, which dependsOn infra-controllers.
+  - monitoring-crds.yaml
+  - monitoring.yaml

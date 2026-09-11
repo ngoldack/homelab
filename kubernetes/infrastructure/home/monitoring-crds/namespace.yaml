@@ -1,0 +1,8 @@
+# Created here rather than in ../monitoring/ because this Kustomization is
+# applied first and its HelmRelease already targets this namespace. The
+# monitoring Kustomization depends on this one, so the namespace is guaranteed
+# to exist by the time the stack lands.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

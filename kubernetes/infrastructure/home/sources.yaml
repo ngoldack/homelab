@@ -25,3 +25,16 @@ metadata:
 spec:
   interval: 2h
   url: https://kubernetes-sigs.github.io/headlamp/
+---
+# Consumed by monitoring-crds/ and monitoring/, which are applied by their own
+# Flux Kustomizations (clusters/home/monitoring-crds.yaml, monitoring.yaml) so
+# the CRD-before-CR ordering can be expressed as a dependsOn edge. Both of
+# those depend on infra-controllers, which is what applies this file.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: victoria-metrics
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://victoriametrics.github.io/helm-charts/

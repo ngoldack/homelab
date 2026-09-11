@@ -1,0 +1,195 @@
+# The monitoring core: VictoriaMetrics (vmsingle + vmagent + vmalert),
+# Alertmanager, node-exporter, kube-state-metrics and Grafana, from the
+# victoria-metrics-k8s-stack umbrella chart.
+#
+# Why the umbrella chart rather than the operator plus hand-written CRs: the
+# stack ships the scrape configuration for kubelet, cAdvisor, kube-apiserver,
+# CoreDNS, kube-state-metrics and node-exporter, plus the RBAC each of those
+# needs. Hand-rolling that is dozens of bespoke VMServiceScrape/VMNodeScrape
+# objects to write and keep correct across upgrades, for no control worth
+# having. (The repo's hand-roll-it rule came from a vendored OpenTofu module
+# that hid resource wiring — it is not a rule against Helm charts, which this
+# repo already uses for cert-manager, external-dns, truenas-csi and nvidia.)
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-metrics-k8s-stack
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 20m
+  chart:
+    spec:
+      chart: victoria-metrics-k8s-stack
+      version: "0.92.1"
+      sourceRef:
+        kind: HelmRepository
+        name: victoria-metrics
+      interval: 1h
+  targetNamespace: monitoring
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    victoria-metrics-operator:
+      # The CRDs come from the standalone victoria-metrics-operator-crds
+      # release (../monitoring-crds/), so the operator subchart must not also
+      # try to install them — two Helm releases owning the same 25 cluster
+      # scoped objects is a fight neither wins cleanly.
+      #
+      # Note the umbrella overrides the operator subchart's own default here:
+      # standalone the operator ships crds.plain=false, but this chart's values
+      # set crds.plain=true. With crds.enabled=false that distinction is moot,
+      # but it is exactly the kind of override that makes a values snippet
+      # copied from the operator chart's docs behave differently here.
+      crds:
+        enabled: false
+        plain: false
+
+    # vmsingle, not vmcluster. vmcluster splits into vminsert/vmselect/vmstorage
+    # for horizontal scale and HA that a five-node homelab has no use for; it
+    # triples the moving parts and the failure modes for the same data.
+    vmsingle:
+      enabled: true
+      spec:
+        # MONTHS, not days. VictoriaMetrics' retentionPeriod is month-based
+        # when it carries no unit suffix, so "3" is three months — a bare
+        # number copied from a Prometheus config meaning days would silently
+        # retain ~90x too much. Deliberately conservative to start: all three
+        # TrueNAS StorageClasses set allowVolumeExpansion, so this and the PVC
+        # can both grow once real cardinality is known. VictoriaMetrics'
+        # own guidance is to size from a live burn-in rather than a formula.
+        retentionPeriod: "3"
+        # Pinned to the home site, and this is load-bearing rather than
+        # tidiness. truenas-fast-nvmeof is NVMe-oF to the NAS at 10.20.10.10,
+        # which is not routable from the Hetzner ingress node across KubeSpan —
+        # the same reachability limit truenas-csi's own node DaemonSet is
+        # pinned for. Because that StorageClass is WaitForFirstConsumer, the
+        # volume is provisioned wherever the pod lands, so losing this selector
+        # does not degrade performance, it hangs the pod unable to mount.
+        nodeSelector:
+          topology.homelab/site: home
+        storage:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: truenas-fast-nvmeof
+          resources:
+            requests:
+              storage: 50Gi
+        resources:
+          requests:
+            cpu: 200m
+            memory: 1Gi
+          limits:
+            memory: 4Gi
+    vmcluster:
+      enabled: false
+
+    vmagent:
+      enabled: true
+      spec:
+        # Leave selectAllByDefault on (chart default) so any VMServiceScrape,
+        # VMPodScrape, VMNodeScrape, VMStaticScrape, VMProbe or VMScrapeConfig
+        # created anywhere in the cluster is scraped without per-object label
+        # wiring. Exporters added later need only their scrape object.
+        selectAllByDefault: true
+        nodeSelector:
+          topology.homelab/site: home
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+
+    vmalert:
+      enabled: true
+      spec:
+        nodeSelector:
+          topology.homelab/site: home
+
+    alertmanager:
+      enabled: true
+      spec:
+        nodeSelector:
+          topology.homelab/site: home
+
+    # OFF for the same reason as defaultDashboards below, which is worth being
+    # explicit about because "no alerting rules" looks like an oversight.
+    #
+    # defaultRules does not embed rules in the chart. It renders a sync-job
+    # (helm.sh/hook: post-install,post-upgrade) that fetches PrometheusRule
+    # YAML over the network on every install and every upgrade, from unpinned
+    # branch tips:
+    #   raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/...
+    #   raw.githubusercontent.com/monitoring-mixins/website/master/...
+    # Two consequences this repo cannot accept. First, reproducibility: two
+    # applies a month apart produce different alerting rules from identical
+    # git state, which is exactly what "reproducible from the repo" rules out.
+    # Second, availability: the fetch is a Helm hook, so a reconcile with no
+    # egress to GitHub fails the whole HelmRelease rather than degrading.
+    #
+    # Rules will instead be vendored into this repo as VMRule objects at a
+    # known revision. Until that lands there is NO alerting — metrics are
+    # collected and queryable, but nothing pages. That is a deliberate,
+    # visible gap rather than a silent dependency on a branch tip.
+    defaultRules:
+      enabled: false
+
+    # OFF on purpose, and not because dashboards are unwanted.
+    #
+    # The chart populates these through a sync-job that fetches dashboard JSON
+    # over the network at run time from raw.githubusercontent.com URLs pointing
+    # at master branches — unpinned, unverified, re-fetched on every sync. That
+    # is a live network dependency and a supply-chain path for arbitrary JSON
+    # rendered in a browser holding a Grafana session, and it means the cluster
+    # is not reproducible from this repo alone. Dashboards are instead vendored
+    # into the repo as ConfigMaps and picked up by the sidecar below, so every
+    # dashboard is a reviewable, diffable file at a known revision.
+    defaultDashboards:
+      enabled: false
+
+    grafana:
+      enabled: true
+      nodeSelector:
+        topology.homelab/site: home
+      # The sidecar watches for ConfigMaps carrying this label and drops their
+      # contents into Grafana's provisioning directory — this is what makes
+      # "dashboards declared in git" work without a second operator and its
+      # CRDs. Add a dashboard by committing a ConfigMap with
+      # `grafana_dashboard: "1"`; there is nothing else to wire.
+      sidecar:
+        dashboards:
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+        datasources:
+          enabled: true
+      # No Ingress/HTTPRoute. Reaching this is an unresolved decision — the
+      # standing policy is Tailscale-only for internal services and never
+      # exposing home addresses, and attaching it to the public Cilium Gateway
+      # would put a credentialed UI on the internet. Until that is settled,
+      # access is via `kubectl -n monitoring port-forward svc/<grafana> 3000`.
+      ingress:
+        enabled: false
+
+    # Runs on every node, including the arm64 Hetzner ingress node. Its own
+    # chart default toleration is {effect: NoSchedule, operator: Exists} with
+    # NO key, which tolerates every NoSchedule taint in this cluster —
+    # dedicated=ingress, dedicated=ai, dedicated=media and the control-plane
+    # taint alike. So it is deliberately left at defaults and must NOT be given
+    # a nodeSelector: pinning it to the home site would silently drop the
+    # ingress node's OS metrics, and adding per-taint tolerations would be
+    # redundant. Verified against the subchart's values.yaml.
+    prometheus-node-exporter:
+      enabled: true
+
+    kube-state-metrics:
+      enabled: true
+      nodeSelector:
+        topology.homelab/site: home

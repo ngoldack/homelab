@@ -1,0 +1,41 @@
+# The VictoriaMetrics operator's 25 CRDs, installed on their own so that
+# CRD-before-CR ordering is a Flux dependsOn edge rather than a race inside a
+# single chart. The stack chart in ../monitoring/ creates VMSingle, VMAgent,
+# VMAlert, VMRule and VMServiceScrape objects on its very first reconcile, so
+# the CRDs genuinely must be Established first.
+#
+# Two things about this chart were verified rather than assumed, because both
+# are common ways this pattern goes wrong:
+#
+# 1. It is NOT subject to Helm's install-once `crds/` directory behaviour. The
+#    CRDs live in charts/crds/templates/crd.yaml — ordinary templates — which
+#    `helm template` renders (25 CustomResourceDefinitions). That means normal
+#    Helm upgrade semantics apply and Flux will roll schema changes forward on
+#    a chart bump. There is deliberately no spec.install.crds/spec.upgrade.crds
+#    override here: those only matter for charts that ship a real crds/
+#    directory, where Flux defaults upgrade.crds to Skip and would silently
+#    never update the schema.
+#
+# 2. It fits comfortably in the Helm release Secret. The CRD bundle is large
+#    (~1.1 MB rendered) and there is a recurring upstream issue about the stack
+#    exceeding the 1 MB etcd object limit. Measured at this version: gzip
+#    compresses it to 65 KB, ~87 KB once base64-encoded as Helm stores it —
+#    roughly 91% headroom. Re-measure before assuming a future bump is safe.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: victoria-metrics-operator-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: victoria-metrics-operator-crds
+      version: "0.14.0"
+      sourceRef:
+        kind: HelmRepository
+        name: victoria-metrics
+      interval: 1h
+  targetNamespace: monitoring
+  install:
+    createNamespace: false

@@ -1,0 +1,32 @@
+# The monitoring stack proper. Depends on monitoring-crds because this chart
+# creates VMSingle/VMAgent/VMAlert/VMRule objects on its first reconcile, and
+# transitively on infra-controllers — which is what brings up truenas-csi and
+# therefore the truenas-fast-nvmeof StorageClass the TSDB's PVC binds to.
+#
+# The timeout is generous on purpose: the first reconcile provisions a 50Gi
+# NVMe-oF volume on the NAS and pulls several sizeable images.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/monitoring
+  prune: true
+  wait: true
+  timeout: 25m
+  retryInterval: 2m
+  dependsOn:
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

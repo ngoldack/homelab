@@ -243,17 +243,23 @@ data "talos_machine_configuration" "cloud_worker" {
             enabled = true
           }
         }
-        # Registered by the kubelet at join time, so the taint exists before
-        # the node is ever schedulable. The Flux-managed node-taints Job used
-        # for the LAN nodes leaves a window open between join and reconcile;
-        # that window is not acceptable on a public node.
-        registerWithTaints = [
-          {
-            key    = "dedicated"
-            value  = "ingress"
-            effect = "NoSchedule"
-          },
-        ]
+        kubelet = {
+          extraArgs = {
+            # Taint this node at REGISTRATION, via the kubelet's own flag —
+            # not machine.nodeTaints (not a valid key here, and self-applied
+            # taints are blocked by the NodeRestriction admission plugin
+            # anyway, which is the whole reason the LAN nodes need a
+            # Flux-managed Job to taint them). NodeRestriction explicitly
+            # permits a node to set taints at registration; what it forbids is
+            # modifying them afterwards.
+            #
+            # Registration-time matters here: the Flux Job approach leaves a
+            # window between a node joining and the Job reconciling, during
+            # which anything could schedule onto it. That is tolerable on the
+            # LAN and is not tolerable on a public node.
+            "register-with-taints" = "dedicated=ingress:NoSchedule"
+          }
+        }
         nodeLabels = merge(
           {
             # What Cilium's gatewayAPI.hostNetwork node selector matches, so

@@ -207,3 +207,28 @@ nodes = {
   }
 }
 
+
+# Public ingress on Hetzner Cloud. An ordinary WORKER of this same cluster —
+# there is no second cluster and no ClusterMesh. It joins over Talos KubeSpan,
+# so the cluster endpoint stays the LAN address and nothing is forwarded on the
+# home router.
+#
+# CAX11 (2 vCPU Ampere, 4 GB, ARM64) is the smallest Hetzner instance and is
+# generously sized for what this node does: terminate TLS and proxy. All real
+# workloads stay on the LAN nodes — this one carries a
+# dedicated=ingress:NoSchedule taint applied at registration.
+cloud_nodes = {
+  ingress-fsn1 = {
+    server_type = "cax11"
+    location    = "fsn1"
+    arch        = "arm64"
+    # node.homelab/role=ingress and topology.homelab/site=cloud are set
+    # unconditionally in ingress.tf — the first is what Cilium's Gateway API
+    # host-network selector matches (it fails OPEN, so it must be exact), the
+    # second is what keeps truenas-csi's everything-tolerating node DaemonSet
+    # off this host.
+    node_labels = {
+      "node.kubernetes.io/instance-type" = "ingress"
+    }
+  }
+}

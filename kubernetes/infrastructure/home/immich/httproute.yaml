@@ -1,12 +1,12 @@
 # Immich in a browser, on the LAN.
 #
-# Reached at https://immich.svc.ngoldack.de, which resolves — via local DNS on
+# Reached at https://immich.ngoldack.de, which resolves — via local DNS on
 # the UniFi gateway, not public DNS — to the Gateway's LAN VIP 10.30.0.200.
 # Remote access is UniFi Teleport: a Teleport client lands on the LAN like any
 # other local device, so the same name and the same certificate work from
 # anywhere without exposing anything to the internet.
 #
-# The certificate is the real Let's Encrypt wildcard for *.svc.ngoldack.de, so
+# The certificate is the real Let's Encrypt wildcard for *.ngoldack.de, so
 # there are no browser warnings despite nothing being publicly reachable.
 # cert-manager solves DNS-01 through its Hetzner webhook, which needs neither a
 # public A record nor an inbound port.
@@ -26,9 +26,9 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-wildcard
+      sectionName: https-apex
   hostnames:
-    - immich.svc.ngoldack.de
+    - immich.ngoldack.de
   rules:
     - backendRefs:
         - name: immich-server

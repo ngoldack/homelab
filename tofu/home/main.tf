@@ -450,8 +450,26 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   #
   # Takes effect on the VM's next power cycle — a display adapter cannot be
   # hot-changed.
+  #
+  # PER-NODE, and this distinction is load-bearing rather than tidy. Nodes with
+  # a passed-through GPU keep serial0 (no emulated display at all): giving such
+  # a VM BOTH an emulated VGA and a real passed-through GPU puts two devices
+  # into VGA arbitration — visible in the guest log as
+  # "vgaarb: VGA decodes changed" right after the driver binds — a documented
+  # way to hang a passthrough guest at boot. wk-main-media did exactly that:
+  # fine for weeks on serial0, and the first boot after switching it to std
+  # never came back, while the GPU-less nodes cycled cleanly.
+  #
+  # Being precise about the evidence, because the rule is broader than what was
+  # actually observed: wk-main-performance also has passthrough (the P100) and
+  # DID come back on std. The hang was specific to the Intel iGPU, which
+  # participates in VGA arbitration in a way a compute-only NVIDIA card does
+  # not. Keying off hostpci rather than "is it an iGPU" is therefore
+  # deliberately conservative — it costs POST visibility on the P100 node that
+  # node may not need to lose, and that is the right side to err on for a
+  # setting whose failure mode is a node that never boots.
   vga {
-    type = "std"
+    type = length(each.value.hostpci) > 0 ? "serial0" : "std"
   }
 
   # Define VM boot order. Disk (scsi0) is preferred so that after Talos installs to

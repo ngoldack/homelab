@@ -11,6 +11,11 @@ spec:
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer
+  # Both levels. "*.${CLUSTER_DOMAIN}" covers immich.ngoldack.de; a wildcard
+  # matches exactly ONE label, so it does NOT cover anything under svc. — hence
+  # keeping "*.svc.${CLUSTER_DOMAIN}" alongside it rather than replacing it, so
+  # existing svc. names keep working while shorter names become possible.
   dnsNames:
+    - "*.${CLUSTER_DOMAIN}"
     - "*.svc.${CLUSTER_DOMAIN}"
-    - "svc.${CLUSTER_DOMAIN}"
+    - "${CLUSTER_DOMAIN}"

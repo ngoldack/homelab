@@ -46,3 +46,21 @@ spec:
           selector:
             matchLabels:
               gateway.ngoldack.de/public-ingress: "true"
+    # Second listener for short names directly under the domain
+    # (immich.ngoldack.de). A separate listener rather than a broader hostname
+    # on the first one, because a wildcard matches a single label: one listener
+    # cannot serve both *.ngoldack.de and *.svc.ngoldack.de.
+    - name: https-apex
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/public-ingress: "true"

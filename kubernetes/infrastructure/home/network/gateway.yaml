@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: network
+---
+# Public ingress gateway. There is ONE cluster now — the Hetzner node is an
+# ordinary worker of it, joined over KubeSpan — so this Gateway can route to a
+# pod on any node, including the LAN ones, through normal in-cluster
+# networking. (It previously lived on a separate "cloud" cluster, which is why
+# reaching home workloads used to be impossible and ClusterMesh was on the
+# table at all.)
+#
+# Envoy binds 80/443 only on the node labelled node.homelab/role=ingress,
+# enforced by Cilium's gatewayAPI.hostNetwork.nodes selector in
+# tofu/home/cilium.tf — NOT by this manifest. That selector fails OPEN: if it
+# ever stops matching, Envoy binds 443 on every LAN node instead. Verify with:
+#   nmap -p 443 10.30.0.10 10.30.0.21 10.30.0.22 10.30.0.23   # must be silent
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public
+  namespace: network
+  annotations:
+    # external-dns reads the DNS target from HERE, not from the Gateway's
+    # status. In host-network mode Cilium makes the Gateway's Service a
+    # ClusterIP but only ever populates status.addresses from
+    # Service.status.loadBalancer.ingress, which a ClusterIP never sets — so
+    # Gateway.status.addresses stays permanently empty and the Gateway reports
+    # Programmed=False/AddressNotAssigned even though traffic flows fine
+    # (cilium/cilium#42786, #45485). external-dns's --default-targets cannot
+    # cover this either: its gateway source emits zero endpoints when there is
+    # no address, and there is nothing for a default to rewrite.
+    external-dns.alpha.kubernetes.io/target: "${INGRESS_TARGET_IP}"
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: https-wildcard
+      protocol: HTTPS
+      port: 443
+      hostname: "*.svc.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          # Opt-in only: a namespace must carry this label before any
+          # HTTPRoute in it can attach to the public Gateway. Label a
+          # namespace to expose a workload publicly:
+          #   kubectl label namespace <ns> gateway.ngoldack.de/public-ingress=true
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/public-ingress: "true"

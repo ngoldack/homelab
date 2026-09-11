@@ -5,3 +5,8 @@ resources:
   - truenas-csi
   - nvidia
   - node-taints
+  # headlamp only. NOT network or external-dns: those are applied by their own
+  # Flux Kustomization (clusters/home/network.yaml) so their CRD ordering can be
+  # expressed, and network/kustomization.yaml already includes ../external-dns —
+  # listing it here too is a duplicate-resource-id build failure.
+  - headlamp

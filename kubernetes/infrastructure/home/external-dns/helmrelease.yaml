@@ -37,8 +37,13 @@ spec:
                 name: hetzner-dns-token
                 key: api-token
     sources:
+      # gateway-httproute only. The `service` source was safe when this ran on
+      # a separate, nearly-empty cloud cluster; it is not safe now that this is
+      # the ONE cluster. With policy: sync below, `service` would make
+      # external-dns consider every annotated Service in the whole cluster —
+      # including anything later deployed to the LAN nodes — a candidate for
+      # public DNS records. Publishing is an explicit act: create an HTTPRoute.
       - gateway-httproute
-      - service
     # Only manage records under svc.{domain} — nothing else in the zone.
     domainFilters:
       - svc.${CLUSTER_DOMAIN}

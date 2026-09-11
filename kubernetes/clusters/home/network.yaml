@@ -10,12 +10,11 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./kubernetes/infrastructure/cloud/network
+  path: ./kubernetes/infrastructure/home/network
   prune: true
   wait: true
   dependsOn:
     - name: cert-manager
-    - name: gateway-api-crds
   sourceRef:
     kind: GitRepository
     name: flux-system

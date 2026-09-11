@@ -15,3 +15,13 @@ metadata:
 spec:
   interval: 2h
   url: https://raw.githubusercontent.com/truenas/truenas-csi/master/charts
+---
+# Consumed by headlamp/, which is applied from this same Kustomization.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: headlamp
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://kubernetes-sigs.github.io/headlamp/

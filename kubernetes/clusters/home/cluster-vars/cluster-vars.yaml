@@ -6,3 +6,9 @@ metadata:
 data:
   CLUSTER_NAME: home
   CLUSTER_DOMAIN: ngoldack.de
+  # Public IPv4 of the Hetzner ingress node (tofu output cloud_ingress_ipv4).
+  # external-dns cannot learn this from the Gateway: Cilium never populates
+  # Gateway.status.addresses in host-network mode (cilium/cilium#42786), so the
+  # target is set explicitly via an annotation on the Gateway itself. Update
+  # this if the ingress node's primary IP ever changes.
+  INGRESS_TARGET_IP: "2.28.31.116"

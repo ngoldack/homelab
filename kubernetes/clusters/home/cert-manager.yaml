@@ -10,7 +10,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./kubernetes/infrastructure/cloud/cert-manager
+  path: ./kubernetes/infrastructure/home/cert-manager
   prune: true
   wait: true
   dependsOn:

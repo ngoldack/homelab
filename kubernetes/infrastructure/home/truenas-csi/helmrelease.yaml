@@ -15,6 +15,18 @@ spec:
       interval: 1h
   targetNamespace: truenas-csi
   values:
+    # Keep the node DaemonSet on the LAN nodes only. It tolerates EVERY taint
+    # (tolerations: [{operator: Exists}]) and hostPath-mounts "/", so the
+    # dedicated=ingress:NoSchedule taint does not stop it landing on the
+    # Hetzner ingress node — where it would try to reach TrueNAS at
+    # 10.20.10.10 across a subnet that is not routed there, and would need
+    # iscsi-tools/nfs-utils that the ingress node's Talos schematic
+    # deliberately does not carry. A positive site label is the only thing
+    # that actually keeps it off; the chart exposes node.nodeSelector but no
+    # node.affinity.
+    node:
+      nodeSelector:
+        topology.homelab/site: home
     truenas:
       url: wss://10.20.10.10:443/api/current
       defaultPool: fast

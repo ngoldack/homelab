@@ -22,7 +22,8 @@ resource "helm_release" "gateway_api_crds" {
   chart     = "${path.module}/charts/gateway-api-crds"
 
   # CRDs are cluster-scoped and slow to establish; give the API server time to
-  # register all six before anything depends on them.
+  # register all thirteen (plus the safe-upgrades policy) before anything
+  # depends on them.
   wait    = true
   timeout = 300
 }

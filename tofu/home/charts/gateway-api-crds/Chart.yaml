@@ -1,4 +1,4 @@
-# Gateway API CRDs, vendored verbatim from the upstream v1.4.1 STANDARD
+# Gateway API CRDs, vendored verbatim from the upstream v1.6.1 EXPERIMENTAL
 # channel release, wrapped in a minimal local chart so tofu can own them.
 #
 # Why tofu and not Flux:
@@ -11,16 +11,34 @@
 #   Owning them here puts a real dependency edge in the same graph that
 #   installs Cilium (see helm_release.cilium's depends_on).
 #
-# Why this exact version:
-#   Cilium 1.19 requires Gateway API v1.4.1. Do NOT bump to "latest". v1.6.2
-#   graduated TLSRoute to the standard channel at v1 and dropped v1alpha2,
-#   while cilium-operator 1.19.5 unconditionally builds a field indexer for
-#   TLSRoute at v1alpha2 and dies without it — taking the whole operator into
-#   CrashLoopBackOff. At v1.4.1 TLSRoute is experimental-channel-only and
-#   therefore simply absent here, which the operator handles gracefully.
-#   v1.6.2 also ships a ValidatingAdmissionPolicy that refuses any install
-#   below v1.5.0, so downgrading out of it again requires deleting that policy
-#   by hand first. Bump this in lockstep with Cilium, against Cilium's docs.
+# Why this exact version and channel:
+#   Cilium 1.20 REQUIRES Gateway API v1.6.1 minimum: its operator unconditionally
+#   indexes TLSRoute at v1 — the mirror image of the 1.19.5 crash, where the
+#   operator indexed TLSRoute at v1alpha2 and died when v1.6.2-standard removed
+#   it (which is why this chart was pinned at v1.4.1). The EXPERIMENTAL channel
+#   is now mandatory for two independent reasons:
+#     1. Cilium 1.20's upgrade guide states that only the v1.6.1 EXPERIMENTAL
+#        TLSRoute CRD still serves v1alpha2; installing v1.6 STANDARD would
+#        orphan any existing v1alpha2 TLSRoute objects in etcd. (This cluster
+#        has none — everything is HTTPRoute — but experimental is the
+#        upgrade-safe superset regardless.)
+#     2. The Gateway API `ExternalAuth` HTTPRoute filter (GEP-1494) that Cilium
+#        1.20 implements — the edge-authz hook the authentik plan depends on —
+#        is experimental-channel-only. With the STANDARD CRDs installed, the
+#        API server silently PRUNES the filter field, and a route intended to
+#        require authentication reconciles UNPROTECTED. That silent-prune is
+#        the reason the channel is not a matter of taste.
+#
+# Why the swap lands cleanly (read before doing any of this again):
+#   The v1.6.1 bundle also ships a ValidatingAdmissionPolicy ("safe-upgrades")
+#   that refuses (a) any CRD bundle below v1.5.0 and (b) installing experimental
+#   CRDs over standard-channel ones. We were on v1.4.1-standard, which predates
+#   that policy, so the cluster has NO safe-upgrades policy yet — the CRD update
+#   is unconstrained. Helm applies CustomResourceDefinitions far ahead of
+#   ValidatingAdmissionPolicy in its install order, so the CRDs land BEFORE the
+#   policy starts enforcing. Once this chart is applied, the policy exists and
+#   FUTURE moves across channels or below v1.5.0 require deleting the policy
+#   first — the bundle's own denial messages say so.
 #
 # Why a chart and not kubernetes_manifest:
 #   kubernetes_manifest does a server-side dry-run at PLAN time, which hard
@@ -31,7 +49,7 @@
 # HTTPRoute in the cluster.
 apiVersion: v2
 name: gateway-api-crds
-description: Kubernetes Gateway API standard-channel CRDs (vendored upstream release)
+description: Kubernetes Gateway API experimental-channel CRDs (vendored upstream release)
 type: application
-version: 1.4.1
-appVersion: "1.4.1"
+version: 1.6.1
+appVersion: "1.6.1"

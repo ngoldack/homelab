@@ -7,7 +7,13 @@
 
 resource "helm_release" "cilium" {
   # cilium-operator's Gateway API check is one-shot with no retry, so the CRDs
-  # must exist before it starts — see gateway-api-crds.tf.
+  # must exist before it starts — see gateway-api-crds.tf. Since 1.20 the edge is
+  # sharper: the operator unconditionally indexes TLSRoute at v1, which only the
+  # vendored Gateway API v1.6.1 EXPERIMENTAL bundle serves alongside v1alpha2 —
+  # a standard-channel v1.6.x CRD set satisfies v1 but strands any v1alpha2
+  # objects, and an older bundle strands v1 and crashes the operator (this is
+  # how 1.19.5 + v1.6.2-standard interacted; see the chart's Chart.yaml). Bump
+  # this chart and charts/gateway-api-crds together, never one without the other.
   depends_on = [helm_release.gateway_api_crds]
 
   name             = "cilium"
@@ -15,7 +21,7 @@ resource "helm_release" "cilium" {
   create_namespace = false
   repository       = "https://helm.cilium.io"
   chart            = "cilium"
-  version          = "1.19.5"
+  version          = "1.20.1"
 
   # The helm provider's default is 300s, which is not enough to roll the agent
   # DaemonSet across every node — especially with rollOutCiliumPods enabled,

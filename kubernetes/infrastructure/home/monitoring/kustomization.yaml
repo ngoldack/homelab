@@ -17,21 +17,65 @@ configMapGenerator:
     options:
       labels:
         grafana_dashboard: "1"
+      annotations:
+        # Grafana dashboards are full of ${datasource}, ${__interval} and
+        # friends. Flux's postBuild.substituteFrom runs envsubst over every
+        # manifest in this Kustomization and, in strict mode, fails on any
+        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
+        # monitoring reconcile with:
+        #   envsubst error: variable not set (strict mode): "datasource"
+        # This annotation is Flux's supported opt-out per resource. It must be
+        # on every dashboard ConfigMap, not just the one that happened to fail
+        # first.
+        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-victoriametrics
     files: [dashboards/victoriametrics.json]
     options:
       labels:
         grafana_dashboard: "1"
+      annotations:
+        # Grafana dashboards are full of ${datasource}, ${__interval} and
+        # friends. Flux's postBuild.substituteFrom runs envsubst over every
+        # manifest in this Kustomization and, in strict mode, fails on any
+        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
+        # monitoring reconcile with:
+        #   envsubst error: variable not set (strict mode): "datasource"
+        # This annotation is Flux's supported opt-out per resource. It must be
+        # on every dashboard ConfigMap, not just the one that happened to fail
+        # first.
+        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmagent
     files: [dashboards/vmagent.json]
     options:
       labels:
         grafana_dashboard: "1"
+      annotations:
+        # Grafana dashboards are full of ${datasource}, ${__interval} and
+        # friends. Flux's postBuild.substituteFrom runs envsubst over every
+        # manifest in this Kustomization and, in strict mode, fails on any
+        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
+        # monitoring reconcile with:
+        #   envsubst error: variable not set (strict mode): "datasource"
+        # This annotation is Flux's supported opt-out per resource. It must be
+        # on every dashboard ConfigMap, not just the one that happened to fail
+        # first.
+        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmalert
     files: [dashboards/vmalert.json]
     options:
       labels:
         grafana_dashboard: "1"
+      annotations:
+        # Grafana dashboards are full of ${datasource}, ${__interval} and
+        # friends. Flux's postBuild.substituteFrom runs envsubst over every
+        # manifest in this Kustomization and, in strict mode, fails on any
+        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
+        # monitoring reconcile with:
+        #   envsubst error: variable not set (strict mode): "datasource"
+        # This annotation is Flux's supported opt-out per resource. It must be
+        # on every dashboard ConfigMap, not just the one that happened to fail
+        # first.
+        kustomize.toolkit.fluxcd.io/substitute: disabled
 
 generatorOptions:
   disableNameSuffixHash: true

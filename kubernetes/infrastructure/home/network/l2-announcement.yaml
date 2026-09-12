@@ -14,6 +14,14 @@ kind: CiliumL2AnnouncementPolicy
 metadata:
   name: lan
 spec:
+  # Only Services labelled as the internal scope — the edge Gateway's Service
+  # carries scope=public and its LB IP (the Hetzner primary) must never be
+  # ARP-answered on ens18. Without this selector the policy announces ALL
+  # LoadBalancer IPs of ALL Services, which since edge.yaml exists would
+  # include that public address on the LAN segment.
+  servicesSelector:
+    matchLabels:
+      dns.ngoldack.de/scope: internal
   nodeSelector:
     matchLabels:
       topology.homelab/site: home

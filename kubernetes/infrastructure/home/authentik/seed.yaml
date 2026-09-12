@@ -60,8 +60,7 @@ data:
           name: "authentik default OAuth Mapping: OpenID 'groups'"
         attrs:
           description: Groups membership for downstream role mapping
-          scope: groups
-          expand: true
+          scope_name: groups
           expression: |-
             {
               "groups": [

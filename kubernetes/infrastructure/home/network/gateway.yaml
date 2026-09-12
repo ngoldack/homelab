@@ -20,6 +20,12 @@ kind: Gateway
 metadata:
   name: public
   namespace: network
+  labels:
+    # THE filter key for external-dns --gateway-label-filter lives on the
+    # Gateway object, not the generated Service (infrastructure.labels below
+    # only reach the Service — the first cut of this scheme matched zero
+    # Gateways and sync-policy deleted every public record: learned live).
+    dns.ngoldack.de/scope: internal
   annotations:
     # The target external-dns publishes for every hostname on every HTTPRoute
     # attached to this Gateway.

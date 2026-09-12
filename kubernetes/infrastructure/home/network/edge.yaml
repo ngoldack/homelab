@@ -39,6 +39,8 @@ kind: Gateway
 metadata:
   name: edge
   namespace: network
+  labels:
+    dns.ngoldack.de/scope: public
 spec:
   gatewayClassName: cilium
   infrastructure:

@@ -6,8 +6,10 @@ resources:
   - postgres-credentials.sops.yaml
   - postgres.yaml
   - secret.sops.yaml
-  - outpost-api.sops.yaml
+  - oidc-grafana.sops.yaml
   - seed.yaml
   - helmrelease.yaml
+  - outpost-config.yaml
+  - outpost-token.yaml
   - outpost.yaml
   - httproutes.yaml

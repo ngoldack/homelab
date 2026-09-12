@@ -43,20 +43,22 @@ spec:
       containers:
         - name: proxy
           # ghcr.io/goauthentik/proxy — the current Rust proxy outpost
-          # (multi-arch, arm64 confirmed; the old transparent-Envoy image is
-          # gone). Default entrypoint launches the launcher, which
-          # self-registers against the server API with AUTHENTIK_TOKEN and
-          # pulls its provider bindings; adding apps later changes the
-          # blueprint, not this file.
+          # (multi-arch, arm64 confirmed; the old transparent-Envoy python
+          # image is gone). The launcher authenticates with AUTHENTIK_TOKEN
+          # — the token of the Outpost's own service user, minted lazily
+          # server-side and republished into authentik-outpost-live by the
+          # outpost-token CronJob (see outpost-token.yaml). Until that Secret
+          # exists this pod sits in CreateContainerConfigError; the CronJob
+          # converges within 15m, or run it by hand.
           image: ghcr.io/goauthentik/proxy:2026.8.2
           envFrom:
-            # authentik's manual-k8s-outpost contract: AUTHENTIK_HOST (API
-            # the outpost polls), AUTHENTIK_HOST_BROWSER (where browsers are
-            # redirected for login), AUTHENTIK_TOKEN (SA token, pinned by the
-            # seed blueprint from the very same secret). No free-form env
-            # vars invented — this secret IS the configuration.
+            # Static half (AUTHENTIK_HOST / HOST_BROWSER / INSECURE) is a
+            # ConfigMap; only the token is secret material, and the cluster
+            # generates it.
+            - configMapRef:
+                name: authentik-outpost-config
             - secretRef:
-                name: authentik-outpost-api
+                name: authentik-outpost-live
           ports:
             - name: proxy
               containerPort: 9000

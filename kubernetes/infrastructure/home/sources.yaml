@@ -94,8 +94,11 @@ spec:
   interval: 2h
   url: https://zotregistry.dev/helm-charts
 ---
-# Consumed by authentik/ — the identity provider. The chart repo lives on
-# authentik's own infra (code.goauthentik.io), not ghcr pages.
+# Consumed by authentik/ — the identity provider. NOTE the domain: the
+# chart repo is charts.goauthentik.io (GitHub Pages); code.goauthentik.io
+# is the source forge and has NO DNS record — Flux surfaced this as
+# "no such host" while local helm still "worked" off a pre-existing repo
+# entry, which is exactly how the wrong URL survives a laptop-only test.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
@@ -103,7 +106,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://code.goauthentik.io/charts/public
+  url: https://charts.goauthentik.io
 ---
 # Consumed by valkey-operator/ — the official valkey-io operator chart.
 # Standing rule: datastores come through their operator (CNPG for Postgres,

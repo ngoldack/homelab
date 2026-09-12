@@ -56,9 +56,18 @@ spec:
         - name: blueprints
           configMap:
             name: authentik-blueprints
+        # The seed blueprint reads the Grafana OIDC client secret via !File.
+        # It MUST NOT land under /blueprints: authentik walks that tree for
+        # *.yml and would try to parse the secret as a blueprint.
+        - name: seed-secrets
+          secret:
+            secretName: authentik-oidc-grafana
       volumeMounts:
         - name: blueprints
           mountPath: /blueprints
+        - name: seed-secrets
+          mountPath: /secrets
+          readOnly: true
     server:
       replicas: 1
       nodeSelector:

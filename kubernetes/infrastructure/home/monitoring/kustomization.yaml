@@ -3,3 +3,35 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - httproute.yaml
+
+# One ConfigMap per vendored dashboard. The Grafana sidecar (enabled in
+# helmrelease.yaml) watches every namespace for ConfigMaps carrying
+# grafana_dashboard: "1" and drops their contents into Grafana's provisioning
+# directory — so this is the whole wiring; no operator, no CRDs.
+#
+# disableNameSuffixHash is on because the sidecar keys off the label, not the
+# name, and a hash-suffixed name churns on every content change for no benefit.
+configMapGenerator:
+  - name: grafana-dashboard-node-exporter-full
+    files: [dashboards/node-exporter-full.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+  - name: grafana-dashboard-victoriametrics
+    files: [dashboards/victoriametrics.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+  - name: grafana-dashboard-vmagent
+    files: [dashboards/vmagent.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+  - name: grafana-dashboard-vmalert
+    files: [dashboards/vmalert.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+
+generatorOptions:
+  disableNameSuffixHash: true

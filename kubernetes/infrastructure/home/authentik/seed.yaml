@@ -10,6 +10,13 @@ data:
     version: 1
     metadata:
       name: homelab-edge-ingress
+    # context keeps the long default-mapping names on single lines so the
+    # !Find flow nodes stay under the 120-char lint limit
+    context:
+      sm_openid: "authentik default OAuth Mapping: OpenID 'openid'"
+      sm_profile: "authentik default OAuth Mapping: OpenID 'profile'"
+      sm_email: "authentik default OAuth Mapping: OpenID 'email'"
+      sm_groups: "authentik default OAuth Mapping: OpenID 'groups'"
     entries:
       # ---------- headlamp behind the edge outpost ----------
       - model: authentik_core.application
@@ -44,6 +51,23 @@ data:
           providers:
             - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
       # ---------- grafana via OIDC (app federates, no outpost) ----------
+      # authentik ships NO groups scope mapping (verified live: the default
+      # set is openid/profile/email/proxy-outpost/entitlements/...); define
+      # one so Grafana's role_attribute_path sees membership.
+      - model: authentik_providers_oauth2.scopemapping
+        state: present
+        identifiers:
+          name: authentik default OAuth Mapping: OpenID 'groups'
+        attrs:
+          description: Groups membership for downstream role mapping
+          scope: groups
+          expand: true
+          expression: |-
+            {
+              "groups": [
+                group.name for group in request.user.ak_groups.all()
+              ]
+            }
       - model: authentik_providers_oauth2.oauth2provider
         state: present
         identifiers:
@@ -55,10 +79,10 @@ data:
           redirect_uris:
             - https://grafana.ngoldack.de/login/generic_oauth
           property_mappings:
-            - !Find [authentik_providers_oauth2.scopemapping, [name, scope|openid]]
-            - !Find [authentik_providers_oauth2.scopemapping, [name, scope|profile]]
-            - !Find [authentik_providers_oauth2.scopemapping, [name, scope|email]]
-            - !Find [authentik_providers_oauth2.scopemapping, [name, scope|groups]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]

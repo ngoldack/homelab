@@ -211,7 +211,7 @@ spec:
           auth_url: https://authentik.ngoldack.de/application/o/authorize/
           token_url: https://authentik.ngoldack.de/application/o/token/
           api_url: https://authentik.ngoldack.de/application/o/userinfo/
-          scopes: openid profile email
+          scopes: openid profile email groups
           email_attribute_path: email
           # authentik puts group NAMES in the token (groups_on_token_claims);
           # grafana-admins group members get the Admin role, everyone else

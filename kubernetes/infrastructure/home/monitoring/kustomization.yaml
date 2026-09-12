@@ -13,6 +13,7 @@ resources:
 # name, and a hash-suffixed name churns on every content change for no benefit.
 configMapGenerator:
   - name: grafana-dashboard-node-exporter-full
+    namespace: monitoring
     files: [dashboards/node-exporter-full.json]
     options:
       labels:
@@ -29,6 +30,7 @@ configMapGenerator:
         # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-victoriametrics
+    namespace: monitoring
     files: [dashboards/victoriametrics.json]
     options:
       labels:
@@ -45,6 +47,7 @@ configMapGenerator:
         # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmagent
+    namespace: monitoring
     files: [dashboards/vmagent.json]
     options:
       labels:
@@ -61,6 +64,7 @@ configMapGenerator:
         # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmalert
+    namespace: monitoring
     files: [dashboards/vmalert.json]
     options:
       labels:

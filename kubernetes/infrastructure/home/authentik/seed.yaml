@@ -4,29 +4,9 @@ metadata:
   name: authentik-blueprints
   namespace: authentik
 data:
-  # .yaml suffix is mandatory: the chart only discovers keys ending in .yaml.
+  # .yaml suffix is mandatory: the chart only
+  # discovers keys ending in .yaml.
   00-homelab.yaml: |
-    # authentik seed blueprint — CURRENT schema (version/entries), validated
-    # field-by-field against the 2026.8.2 blueprint schema and the models source:
-    #   * providers are created as their concrete models directly
-    #     (authentik_providers_proxy.proxyprovider / authentik_providers_oauth2.oauth2provider);
-    #     there is no separate core.provider wrapper entry any more.
-    #   * authorization flows live ON THE PROVIDER now (the application has no
-    #     authorization_flow field in this version).
-    #   * the proxy provider's mode enum is [proxy, forward_single, forward_domain]
-    #     (proxy_endpoint_type/auth_method/append_app_url are legacy).
-    #   * Outpost is a single model (type: proxy), managed: null = we own the
-    #     Deployment via Flux, so authentik's launcher never touches it; it has NO
-    #     service_account field — the server lazily creates the service user
-    #     ak-outpost-<uuid> + its API token on first access. That token is
-    #     fetched by the outpost-token CronJob via `ak manage shell` and written
-    #     to the authentik-outpost-live Secret; this blueprint cannot pre-set it
-    #     (the uuid embeds in the identifier, and only the server knows it).
-    #   * !Secret does NOT exist in the tag set (docs + source: !Find/!KeyOf/
-    #     !File/!Env/!Condition/...). Grafana's OIDC client secret therefore
-    #     arrives via !File from the sops-decrypted Secret mounted at /secrets
-    #     in the server pod (helmrelease.yaml volumes) — NOT inside /blueprints,
-    #     which authentik walks recursively for *.yml files.
     version: 1
     metadata:
       name: homelab-edge-ingress
@@ -49,11 +29,8 @@ data:
           internal_host: http://headlamp-headlamp.headlamp.svc.cluster.local/
           external_host: https://headlamp.ngoldack.de/
           cookie_domain: ngoldack.de
-          authorization_flow: >-
-            !Find [authentik_flows.flow,
-            [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: >-
-            !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
       - model: authentik_outposts.outpost
         state: present
         identifiers:
@@ -62,9 +39,8 @@ data:
           type: proxy
           managed: null
           providers:
-            - >-
-              !Find [authentik_providers_proxy.proxyprovider,
-              [name, headlamp-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
+      # ---------- grafana via OIDC (app federates, no outpost) ----------
       - model: authentik_providers_oauth2.oauth2provider
         state: present
         identifiers:
@@ -80,11 +56,8 @@ data:
             - !Find [authentik_providers_oauth2.scopemapping, [name, scope|profile]]
             - !Find [authentik_providers_oauth2.scopemapping, [name, scope|email]]
             - !Find [authentik_providers_oauth2.scopemapping, [name, scope|groups]]
-          authorization_flow: >-
-            !Find [authentik_flows.flow,
-            [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: >-
-            !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
       - model: authentik_core.application
         state: present
         identifiers:
@@ -93,6 +66,4 @@ data:
           name: grafana
           meta_name: Grafana
           meta_launch_url: https://grafana.ngoldack.de/
-          provider: >-
-            !Find [authentik_providers_oauth2.oauth2provider,
-            [name, grafana-oidc]]
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, grafana-oidc]]

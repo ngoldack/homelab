@@ -81,3 +81,15 @@ metadata:
 spec:
   interval: 2h
   url: https://andrcuns.github.io/charts
+---
+# Consumed by registry/ — Zot, the cluster's own OCI registry. Its own Flux
+# Kustomization so image-builds/ can depend on the registry being up before a
+# build tries to push to it.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: zot
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://zotregistry.dev/helm-charts

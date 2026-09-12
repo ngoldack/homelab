@@ -1,0 +1,18 @@
+# Zot — the cluster's own OCI registry.
+#
+# No PodSecurity exemption here, deliberately. Zot is an ordinary unprivileged
+# HTTP server: no host mounts, no namespaces to nest, nothing baseline
+# forbids. It inherits Talos's cluster-wide "baseline" default and that is
+# correct — unlike ../buildkit/, which genuinely needs the exemption and says
+# why. If this namespace ever starts needing one, that is a signal something
+# is wrong, not a step to take.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry
+  labels:
+    # Lets registry.${CLUSTER_DOMAIN}'s HTTPRoute attach to the public Gateway
+    # in ../network/. The Gateway's allowedRoutes selector requires this exact
+    # label; without it the route is silently rejected with NotAllowedByListeners
+    # rather than failing to apply.
+    gateway.ngoldack.de/public-ingress: "true"

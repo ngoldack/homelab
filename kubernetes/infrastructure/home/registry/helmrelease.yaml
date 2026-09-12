@@ -1,0 +1,168 @@
+# Zot — the cluster's own OCI registry, at registry.${CLUSTER_DOMAIN}.
+#
+# WHY ZOT AND NOT HARBOR
+#
+# Harbor is the obvious name, and it is the wrong size for this cluster. Its
+# chart renders nine workloads — core, database (its own Postgres), redis,
+# registry, portal, jobservice, nginx, trivy, exporter — and the features that
+# justify them (projects with per-team RBAC, replication policies, quotas,
+# robot accounts, retention rules) are multi-tenant org features. Nothing here
+# has tenants. Zot is one Deployment with no database and no cache tier, and
+# it is an OCI-spec reference implementation rather than a Docker-registry
+# descendant.
+#
+# distribution/distribution (registry:3) was the other candidate — equally
+# small, but no UI, no useful authorization model, and no upstream sync. Zot
+# costs nothing extra over it and can grow into a pull-through cache for
+# docker.io later, which is the one feature likely to be wanted next.
+#
+# WHY IT EARNS ITS PLACE, beyond "self-hosted is nice"
+#
+# It removes a credential rather than adding one. The ../buildkit/ builder was
+# otherwise going to need a GitHub classic PAT with write:packages living in
+# the cluster, and GHCR packages are private on first push, so the P100 node
+# would then have needed an imagePullSecret too. Pushing to a registry this
+# cluster owns means the only credential is one generated locally, and it
+# never leaves the repo.
+#
+# TLS IS FREE HERE, AND THAT MATTERS MORE THAN IT LOOKS
+#
+# registry.${CLUSTER_DOMAIN} is covered by the existing Let's Encrypt wildcard
+# in ../network/certificate.yaml. So containerd on every node gets a publicly
+# valid certificate with NO Talos machine.registries configuration, no CA to
+# distribute, and no node config apply or reboot. A registry on a self-signed
+# cert or a bare IP would have needed all three. The name resolves only in
+# local DNS, so nothing is actually reachable from the internet.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: zot
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: zot
+      version: "0.1.124"
+      sourceRef:
+        kind: HelmRepository
+        name: zot
+      interval: 1h
+  targetNamespace: registry
+  releaseName: zot
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # The chart defaults to NodePort, which would open :3xxxx on all five
+    # nodes including the Hetzner ingress node. Everything reaches this through
+    # the Gateway instead.
+    service:
+      type: ClusterIP
+      port: 5000
+
+    # Note what persistence: true below actually does — it switches the chart
+    # from a Deployment to a StatefulSet with a volumeClaimTemplate
+    # (deployment.yaml is guarded by `if not .Values.persistence`). That is
+    # why there is no strategy/Recreate setting here: strategy is a Deployment
+    # field and would be silently ignored. The StatefulSet's default
+    # OrderedReady management already serialises pod replacement, which is
+    # what a ReadWriteOnce blob store needs.
+    replicaCount: 1
+
+    # Native Gateway API support — no Ingress controller involved. Attaches to
+    # the same Gateway and listener as Immich (../immich/httproute.yaml);
+    # https-apex is the listener for *.${CLUSTER_DOMAIN}, as opposed to
+    # https-wildcard which serves *.svc.${CLUSTER_DOMAIN}.
+    httproute:
+      enabled: true
+      parentRefs:
+        - name: public
+          namespace: network
+          sectionName: https-apex
+      hostnames:
+        - registry.${CLUSTER_DOMAIN}
+
+    # Switches the chart to a StatefulSet (see replicaCount above) and
+    # dynamically provisions the blob store via a volumeClaimTemplate. The
+    # resulting PVC is named <pvc.name>-<statefulset>-<ordinal>, i.e.
+    # zot-pvc-zot-0.
+    persistence: true
+    pvc:
+      create: true
+      storage: 100Gi
+      storageClassName: truenas-fast-nfs-registry-zot
+      # Plural, and a list — the chart's key is accessModes. A singular
+      # accessMode would be silently ignored rather than rejected.
+      accessModes:
+        - ReadWriteOnce
+
+    # The htpasswd file from secret.sops.yaml. Using externalSecrets rather
+    # than the chart's own mountSecret/secretFiles keeps the bcrypt hash in a
+    # sops-encrypted file instead of inline in this HelmRelease.
+    externalSecrets:
+      - secretName: zot-htpasswd
+        mountPath: /secret
+
+    mountConfig: true
+    configFiles:
+      config.json: |-
+        {
+          "distSpecVersion": "1.1.1",
+          "storage": {
+            "rootDirectory": "/var/lib/registry",
+            "gc": true,
+            "gcDelay": "1h",
+            "gcInterval": "24h",
+            "dedupe": false
+          },
+          "http": {
+            "address": "0.0.0.0",
+            "port": "5000",
+            "readTimeout": "600s",
+            "writeTimeout": "600s",
+            "auth": {
+              "htpasswd": {
+                "path": "/secret/htpasswd"
+              }
+            },
+            "accessControl": {
+              "repositories": {
+                "**": {
+                  "anonymousPolicy": ["read"]
+                }
+              },
+              "adminPolicy": {
+                "users": ["buildkit"],
+                "actions": ["read", "create", "update", "delete"]
+              }
+            }
+          },
+          "log": {
+            "level": "info"
+          },
+          "extensions": {
+            "ui": {
+              "enable": true
+            },
+            "search": {
+              "enable": true
+            }
+          }
+        }
+
+    # Keep it on the LAN. The Hetzner ingress node cannot reach the NAS, so a
+    # pod scheduled there could never mount the blob store.
+    nodeSelector:
+      topology.homelab/site: home
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 2Gi

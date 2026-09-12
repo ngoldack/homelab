@@ -15,6 +15,8 @@ resources:
   - talos-backup
   # headlamp only. NOT network or external-dns: those are applied by their own
   # Flux Kustomization (clusters/home/network.yaml) so their CRD ordering can be
-  # expressed, and network/kustomization.yaml already includes ../external-dns —
-  # listing it here too is a duplicate-resource-id build failure.
+  # expressed, and network/kustomization.yaml now genuinely does include
+  # ../external-dns — listing it here too is a duplicate-resource-id build
+  # failure. (It did not include it until the DNS rework; this comment
+  # described an intent, not the state.)
   - headlamp

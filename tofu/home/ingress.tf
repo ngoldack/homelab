@@ -307,6 +307,6 @@ resource "talos_machine_configuration_apply" "cloud_worker" {
 }
 
 output "cloud_ingress_ipv4" {
-  description = "Public IPv4 of each ingress node. external-dns publishes this as the target for Gateway hostnames (Cilium never populates Gateway.status.addresses in host-network mode)."
+  description = "Public IPv4 of each ingress node. NOT a DNS target any more: ingress moved to the LAN VIP 10.30.0.200 when gatewayAPI.hostNetwork was turned off, and external-dns publishes that instead, via the external-dns.alpha.kubernetes.io/target annotation on the Gateway. Kept only as a record of the address the firewall rules are written against."
   value       = { for name, ip in hcloud_primary_ip.cloud : name => ip.ip_address }
 }

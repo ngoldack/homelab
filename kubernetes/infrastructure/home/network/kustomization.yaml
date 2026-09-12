@@ -17,3 +17,9 @@ resources:
   - clusterissuer.yaml
   - certificate.yaml
   - secret.sops.yaml
+  # This line was MISSING while the comment above claimed it was here, so
+  # external-dns was dead code — present in the repo, applied by nothing, and
+  # still configured for the retired cloud-ingress design. Every DNS record
+  # was being typed into UniFi by hand instead. Keep this entry and that
+  # comment in agreement.
+  - ../external-dns

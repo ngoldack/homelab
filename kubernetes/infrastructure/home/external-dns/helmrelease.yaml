@@ -1,7 +1,34 @@
-# external-dns creates/updates Hetzner DNS A records for Gateway HTTPRoute
-# hostnames under svc.{domain}, so each app's route resolves to the cloud
-# ingress automatically. Scoped by domainFilters so it cannot touch records
-# outside this cluster's naming convention.
+# external-dns — publishes an A record for every hostname on every HTTPRoute
+# attached to the public Gateway, into the PUBLIC Hetzner zone for
+# ${CLUSTER_DOMAIN}.
+#
+# WHY PUBLIC DNS FOR A LAN-ONLY SERVICE
+#
+# Nothing here is reachable from the internet: every record points at
+# 10.30.0.200, an RFC1918 address on the cluster VLAN. What public DNS buys is
+# that the NAME resolves the same way no matter which resolver the client
+# happens to use.
+#
+# That is the actual bug this replaces. UniFi local DNS records only work for
+# clients querying the UniFi resolver, so a phone or browser doing DNS-over-
+# HTTPS silently bypassed them — which is why Encrypted DNS had to be turned
+# OFF on the UDM to make immich.${CLUSTER_DOMAIN} resolve at all. With the
+# records in the public zone that constraint disappears: DoH clients, UniFi
+# Teleport, and anything on the LAN all get the same answer, and Encrypted DNS
+# can go back on.
+#
+# Verified empirically before adopting this, because the docs do not say:
+# Hetzner accepts an A record pointing at 10.30.0.200 (HTTP 201), and both
+# 1.1.1.1 and 8.8.8.8 return it — no resolver-side rebinding filtering.
+#
+# THE COST, stated plainly: service hostnames and the internal VIP become
+# publicly enumerable. The wildcard certificate in ./certificate.yaml keeps
+# individual names out of Certificate Transparency logs, so this is a real
+# reduction in privacy, not a no-op. It buys resolver independence. If that
+# trade stops being worth it, the alternative is
+# home-operations/external-dns-unifi-webhook, which writes the same records to
+# UniFi instead — same GitOps model, private names, but back to being
+# resolver-dependent.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -12,18 +39,36 @@ spec:
   chart:
     spec:
       chart: external-dns
-      version: "1.15.2"
+      # Was 1.15.2 (app 0.15.x) while this directory was dead code. The
+      # Hetzner webhook below now speaks the new Hetzner Cloud API, and the
+      # webhook provider protocol has moved on with it, so this tracks a
+      # current chart rather than the one the cloud-era config was pinned to.
+      version: "1.22.0"
       sourceRef:
         kind: HelmRepository
         name: external-dns
       interval: 1h
   targetNamespace: network
+  releaseName: external-dns
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
   values:
-    # "hetzner" is not a built-in provider in external-dns 0.15.x (app
-    # version of chart 1.15.2) — it was moved out to the separate
-    # webhook-provider pattern. This runs the maintained community webhook
-    # (github.com/mconfalonieri/external-dns-hetzner-webhook) as a sidecar;
-    # bump webhook.image.tag deliberately, same as any other chart version.
+    # "hetzner" is not a built-in provider — it lives in the separate webhook
+    # sidecar pattern. This runs the maintained community webhook.
+    #
+    # IMPORTANT, and the reason this could be adopted at all: Hetzner RETIRED
+    # the legacy DNS API. https://dns.hetzner.com/api/v1/zones now answers 301
+    # to the console's HTML, not to a new API path, so any client still
+    # pointed there gets a web page instead of JSON. The zone now lives in the
+    # main Cloud API (api.hetzner.cloud/v1/zones). Webhook v1.0.2 depends on
+    # hetznercloud/hcloud-go/v2 v2.46.0, which carries zone.go and
+    # zone_rrset.go — i.e. it is already migrated. Check this before bumping:
+    # a webhook built against the old API will fail in a confusing way.
     provider:
       name: webhook
       webhook:
@@ -36,17 +81,59 @@ spec:
               secretKeyRef:
                 name: hetzner-dns-token
                 key: api-token
+        # The webhook runs as a sidecar and the chart adds no probes for it by
+        # default, so a wedged webhook would leave the controller silently
+        # unable to publish anything while the pod still reported Ready.
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-webhook
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http-webhook
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+
     sources:
-      # gateway-httproute only. The `service` source was safe when this ran on
-      # a separate, nearly-empty cloud cluster; it is not safe now that this is
-      # the ONE cluster. With policy: sync below, `service` would make
-      # external-dns consider every annotated Service in the whole cluster —
-      # including anything later deployed to the LAN nodes — a candidate for
-      # public DNS records. Publishing is an explicit act: create an HTTPRoute.
+      # gateway-httproute ONLY. The `service` source is deliberately absent:
+      # with policy: sync below it would make every annotated Service in the
+      # cluster a candidate for a public record. Publishing stays an explicit
+      # act — create an HTTPRoute, and label its namespace for the Gateway.
       - gateway-httproute
-    # Only manage records under svc.{domain} — nothing else in the zone.
+
+    # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from
+    # the retired cloud-ingress design; services now live directly under the
+    # apex (immich.${CLUSTER_DOMAIN}, registry.${CLUSTER_DOMAIN}). This still
+    # bounds external-dns to this one zone.
     domainFilters:
-      - svc.${CLUSTER_DOMAIN}
-    txtOwnerId: ${CLUSTER_NAME:-home-talos}
+      - ${CLUSTER_DOMAIN}
+
+    # TXT ownership registry. txtPrefix is NOT optional here: without it the
+    # ownership TXT is created at the same name as the A record it tracks,
+    # which collides. %{record_type} keeps one TXT per record type.
+    registry: txt
+    txtOwnerId: ${CLUSTER_NAME}
+    txtPrefix: "reg-%{record_type}."
+
+    # sync (not upsert-only) so deleting an HTTPRoute removes its record
+    # instead of leaving a name resolving to a service that no longer exists.
+    # This is safe for the rest of the zone because external-dns will only
+    # delete records it owns — ones carrying a matching reg-* TXT with this
+    # txtOwnerId. At adoption time the zone contained nothing but NS and SOA,
+    # neither of which external-dns manages.
     policy: sync
     interval: 1m
+
+    # Keep it on the LAN nodes with everything else that is not ingress.
+    nodeSelector:
+      topology.homelab/site: home
+
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

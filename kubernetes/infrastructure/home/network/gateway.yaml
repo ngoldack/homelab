@@ -10,11 +10,11 @@ metadata:
 # reaching home workloads used to be impossible and ClusterMesh was on the
 # table at all.)
 #
-# Envoy binds 80/443 only on the node labelled node.homelab/role=ingress,
-# enforced by Cilium's gatewayAPI.hostNetwork.nodes selector in
-# tofu/home/cilium.tf — NOT by this manifest. That selector fails OPEN: if it
-# ever stops matching, Envoy binds 443 on every LAN node instead. Verify with:
-#   nmap -p 443 10.30.0.10 10.30.0.21 10.30.0.22 10.30.0.23   # must be silent
+# Envoy does NOT run host-network any more. gatewayAPI.hostNetwork.enabled is
+# false in tofu/home/cilium.tf; the listener is an ordinary LoadBalancer
+# Service given a fixed VIP by Cilium LB-IPAM, announced on the LAN by
+# l2announcements. So there is no node-selector that can fail open, and the
+# old `nmap -p 443` check for stray binds no longer means anything.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -22,9 +22,26 @@ metadata:
   namespace: network
   annotations:
     # Ask Cilium's LB-IPAM for this exact address out of the pool in
-    # lb-ipam.yaml, rather than whatever it hands out next. The VIP is what
-    # local DNS points at, so it has to be stable across a Gateway recreate.
+    # lb-ipam.yaml, rather than whatever it hands out next. The VIP has to be
+    # stable across a Gateway recreate because it is what every DNS record
+    # published for this cluster points at.
     lbipam.cilium.io/ips: "10.30.0.200"
+    # The target external-dns publishes for every hostname on every HTTPRoute
+    # attached to this Gateway.
+    #
+    # This annotation is not belt-and-braces — it is how the value is actually
+    # resolved. external-dns's gateway source takes targets from
+    # Gateway.status.addresses ONLY when no target annotation is present
+    # (source/gateway.go: overrides = TargetsFromTargetAnnotation(gw.Annotations),
+    # and Status.Addresses is consulted only `if len(override) == 0`). Setting
+    # it here makes publication deterministic instead of dependent on Cilium
+    # populating Gateway status — which it historically did not do at all in
+    # host-network mode (cilium/cilium#42786).
+    #
+    # Note --default-targets does NOT do this job: its help text limits it to
+    # "the crd source (DNSEndpoint resources with empty targets)", so it is
+    # silently ignored by the gateway-httproute source.
+    external-dns.alpha.kubernetes.io/target: "10.30.0.200"
 spec:
   gatewayClassName: cilium
   listeners:

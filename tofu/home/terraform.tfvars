@@ -16,7 +16,6 @@ network = {
     cp-main             = "10.30.0.10"
     wk-main-efficiency  = "10.30.0.21"
     wk-main-performance = "10.30.0.22"
-    wk-main-media       = "10.30.0.23"
   }
 }
 
@@ -42,23 +41,21 @@ proxmox_nodes = {
     max_cpu_cores = 24
     cpu_threads   = 32
     cpu_model     = "i9-13900HX"
-    # Minimal host reserve: 2 GiB RAM + 2 efficiency threads for the host OS
-    # (headless, ARC capped on-host).
+    # Host OS reservation (user policy): 2 GiB RAM floor of hard reserve +
+    # the ZFS ARC cap (~1 GiB) + headroom => 4 GiB, and 2 efficiency threads
+    # for the host itself (headless).
     #
-    # This reserve used to be razor-thin, and it eventually bit. With the fleet
-    # allocating 92 of the 94 usable GiB, wk-main-performance stopped starting
-    # at all: Proxmox failed the task with "QEMU exited with code 1", which is
-    # what a host unable to hand back the requested memory looks like once ZFS
-    # ARC has grown into the free space.
-    #
-    # The follow-up this comment used to defer has now happened —
-    # wk-main-performance went from 64 to 48 GiB — so the fleet totals 76 GiB
-    # and roughly 18 GiB is genuinely free for the host OS and ARC. These 2 GiB
-    # are now a floor with real slack above them, rather than the only thing
-    # between the host and an OOM. Keep it that way: check the fleet total
-    # against max_memory_gb before growing any node's memory.
+    # This reserve used to be razor-thin, and it eventually bit: the fleet
+    # allocating 92 of the 94 usable GiB stopped wk-main-performance booting
+    # at all ("QEMU exited with code 1" = the host cannot hand back the
+    # memory once ZFS ARC has grown into the free space). The consolidation
+    # (two workers) sized the fleet at 86 GiB of the 90 allocatable, so the
+    # host keeps ~8 GiB of REAL slack above this floor. Keep it that way:
+    # check the fleet total against max_memory_gb before growing any node's
+    # memory — an inflated ceiling here doesn't fail loudly, it just quietly
+    # under-counts what the host needs for itself.
     reserved = {
-      memory = 2
+      memory = 4
       cpu    = { class = "efficiency", count = 2 }
     }
     # big.LITTLE: 8 P-cores (HT) = threads 0-15, 16 E-cores (no HT) = 16-31.
@@ -81,13 +78,19 @@ proxmox_nodes = {
 }
 
 nodes = {
-  # Control plane on E-cores (efficiency class). Efficiency usable = 16-2 = 14.
+  # Control plane on E-cores (efficiency class). Efficiency usable =
+  # 16 threads - 2 host-reserved = 14: cp-main(4) + wk-main-efficiency(10)
+  # = 14, fully used, deliberately (the AR900i has no spare E-cores).
   cp-main = {
-    host       = "pmx-main"
-    vm_id      = 103
-    cpu_cores  = 4
-    cpu_class  = "efficiency"
-    memory     = 4096
+    host      = "pmx-main"
+    vm_id     = 103
+    cpu_cores = 4
+    cpu_class = "efficiency"
+    # 6 GiB: etcd + apiserver + scheduler/controller-manager + the Talos
+    # runtime itself, with room for an apiserver burst. Raised from 4 in the
+    # two-worker consolidation; fleet total stays inside the allocatable
+    # budget (6 + 32 + 48 = 86 of 90).
+    memory     = 6144
     disk_size  = 32
     talos_role = "controlplane"
     # Tailscale, control-plane only: an out-of-band admin path to the Talos
@@ -101,53 +104,47 @@ nodes = {
     # are derived automatically.
   }
 
-  # General-purpose worker. Shares E-cores with cp-main and wk-main-media.
-  # cp-main(4) + wk-main-efficiency(6) + wk-main-media(4) = 14 = fully used.
-  # Shrunk from 10 threads / 24 GiB to make room for wk-main-media: the host
-  # was already at 100% thread allocation, so a fourth VM had to be carved out
-  # of somewhere, and the AI worker's P-cores and 64 GiB are the whole point of
-  # that node. No longer carries workload/media — that moved with the iGPU.
+  # THE general worker: carries everything that is neither nvidia-pinned nor
+  # control-plane, and owns the Intel UHD 770 iGPU for QuickSync/VAAPI
+  # (consolidated here from the retired wk-main-media node — exactly two
+  # workers now). All remaining E-class threads: 16 - 2 host - 4 cp = 10.
+  #
+  # It is deliberately NOT NoSchedule-tainted: it is the only node general
+  # workloads can run on, and a taint here would force a toleration onto
+  # every deployment in the cluster while isolating nothing (a taint is only
+  # meaningful when there is somewhere else to go). QuickSync workloads
+  # PULL themselves here via the labels instead — hardware/igpu is derived
+  # automatically from the hostpci mapping (see local.node_labels_derived in
+  # main.tf), so the scheduling contract is: selector hardware/igpu + the
+  # workload/media capability label, no toleration needed.
   wk-main-efficiency = {
     host      = "pmx-main"
     vm_id     = 104
-    cpu_cores = 6
+    cpu_cores = 10
     cpu_class = "efficiency"
-    memory    = 16384
+    # 32 GiB: this node now hosts the whole general fleet (immich server +
+    # ML, authentik, zot, vmsingle, grafana, ...) — the consolidation
+    # absorbs wk-main-media's 8 and takes more of the freed budget, because
+    # post-consolidation RAM demand concentrates HERE, not on the P100 box.
+    memory    = 32768
     disk_size = 48
 
     talos_role = "worker"
 
-    node_labels = {
-      "node.kubernetes.io/instance-type" = "worker"
-    }
-  }
-
-  # Dedicated media/transcode worker — owns the Intel UHD 770 iGPU for
-  # QuickSync. Deliberately small: a hardware transcode runs almost entirely in
-  # the iGPU's fixed-function block, so the vCPUs only feed it and demux/mux.
-  # E-cores are the right class for exactly that reason; the P-cores stay with
-  # the AI worker.
-  wk-main-media = {
-    host      = "pmx-main"
-    vm_id     = 106
-    cpu_cores = 4
-    cpu_class = "efficiency"
-    memory    = 8192
-    # Headroom for transcode scratch space, matching the general worker.
-    disk_size = 48
-
-    talos_role = "worker"
-
-    # i915 only — the kernel driver + firmware for the iGPU. The VAAPI
-    # userspace libraries (libva, intel-media-driver) belong in whichever
-    # container does the transcoding, together with a /dev/dri passthrough;
-    # there is no host-side VAAPI extension for Talos (siderolabs/intel-vaapi
-    # was removed from the catalog entirely). Merges with the cluster-wide
-    # nfs-utils / nvme-cli / qemu-guest-agent defaults.
+    # i915 (kernel driver + firmware) for the passed-through UHD 770 — moved
+    # with the iGPU from wk-main-media. The VAAPI userspace (libva,
+    # intel-media-driver) belongs in whichever CONTAINER transcodes, mounted
+    # with /dev/dri; Talos has no host-side VAAPI extension (the old
+    # siderolabs/intel-vaapi was removed from the catalog entirely).
     extensions = [
       "siderolabs/i915",
     ]
 
+    # The VGA-arbitration history matters here: an iGPU passthrough guest
+    # with an emulated display present can hang at boot (this bit
+    # wk-main-media exactly once). main.tf's vga rule — serial0 whenever
+    # hostpci is set — is what keeps this safe; do not re-add `std` to
+    # passthrough nodes.
     hostpci = [
       {
         device = "intel-igpu"
@@ -156,47 +153,44 @@ nodes = {
       },
     ]
 
-    # Keep generic workloads off the only node with QuickSync. Media pods
-    # tolerate dedicated=media (applied by a Flux Job, not Talos — see
-    # kubernetes/infrastructure/home/node-taints/); this
-    # node.kubernetes.io/instance-type label is what that Job selects on.
     node_labels = {
-      "node.kubernetes.io/instance-type" = "media-worker"
+      "node.kubernetes.io/instance-type" = "worker"
       "workload/media"                   = "true"
     }
   }
 
-  # Dedicated AI/inference worker — 48GB RAM for models plus runtime overhead,
-  # and the x16 P100. Pinned to all 8 P-cores (16 threads).
-  # The Intel iGPU moved to wk-main-media: this node is single-purpose now, so
-  # inference cannot starve a transcode (or vice versa) and either capability
-  # can be rebooted without taking the other down.
+  # Dedicated AI/inference worker — 48 GiB for models plus runtime overhead,
+  # the x16 P100, and ALL 8 P-cores (16 threads, unpinned host reserve — the
+  # P-class carries no host work).
+  #
+  # 48 GiB, not 64: the VM stopped starting at 64 ("QEMU exited with code 1"
+  # = allocation failure — see the host reserved block above). It is NOT
+  # raised in the consolidation despite the new budget, because llama.cpp
+  # offload fits (27B-Q4 weights ~17 GiB + KV + runtime), boot reliability
+  # at this size is proven, and the post-consolidation RAM demand grew on
+  # the GENERAL node, not here.
+  # Kept in sync with the live VM, which was resized by hand first: without
+  # this line the next apply would push it straight back to 64 and break the
+  # node again.
+  # Fleet total: 6 (cp) + 32 (eff) + 48 (perf) = 86 GiB of 90 allocatable.
   wk-main-performance = {
     host      = "pmx-main"
     vm_id     = 105
     cpu_cores = 16
     cpu_class = "performance"
-    # 48 GiB, down from 64. The VM stopped starting at 64: Proxmox failed the
-    # task with "QEMU exited with code 1", which is what a failure to allocate
-    # looks like — the host has 94 GiB usable and the fleet was asking for 92
-    # of it, leaving nothing for the host OS once ZFS ARC had grown. At 48 the
-    # fleet totals 76 GiB (4 + 16 + 8 + 48), leaving ~18 GiB of real headroom.
-    # Kept in sync with the live VM, which was resized by hand first: without
-    # this line the next apply would push it straight back to 64 and break the
-    # node again.
-    memory      = 49152
-    disk_size   = 96
-    talos_role  = "worker"
-    gpu         = true
-    gpu_vram_gb = 16
+
+    memory     = 49152
+    disk_size  = 96
+    talos_role = "worker"
+    gpu        = true
     # NVIDIA driver + container toolkit for the P100. Pascal (cc 6.0) needs the
     # proprietary/production-branch driver — the open kernel modules support
     # Turing+ (cc 7.5+) only. Known-good host driver is 580.159.04 (CUDA 13.0),
     # so pin the 580 LTS extension variants, not the newer `production` (595).
     # These merge with the cluster-wide nfs-utils/nvme-cli/qemu-guest-agent
-    # defaults. No siderolabs/i915 here any more — it went to wk-main-media
-    # along with the iGPU, which also makes this node's boot image
-    # meaningfully smaller and keeps an i915 regression away from inference.
+    # defaults. No siderolabs/i915 here — the iGPU lives on the efficiency
+    # worker, which also keeps this node's boot image smaller and any i915
+    # regression away from inference.
     extensions = [
       "siderolabs/nonfree-kmod-nvidia-lts",
       "siderolabs/nvidia-container-toolkit-lts",
@@ -208,10 +202,11 @@ nodes = {
         rombar = true
       }
     ]
-    # Tainted dedicated=ai (applied by a Flux Job, not Talos — see
-    # kubernetes/infrastructure/home/node-taints/), not dedicated=gpu: this
-    # node serves one role now that the iGPU moved to wk-main-media, so the
-    # role-named taint is the clearer contract. This
+    # Tainted dedicated=nvidia (applied by a Flux Job, not Talos — see
+    # kubernetes/infrastructure/home/node-taints/): the taint names the
+    # capability it gates (CUDA/P100 workloads carry the matching
+    # toleration), replacing the old role-name "ai" now the iGPU workload
+    # lives on the efficiency worker. This
     # node.kubernetes.io/instance-type label is what that Job selects on.
     node_labels = {
       "node.kubernetes.io/instance-type" = "gpu-worker"

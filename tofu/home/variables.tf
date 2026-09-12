@@ -193,7 +193,7 @@ variable "service_cidr" {
 }
 
 variable "nodes" {
-  description = "Talos nodes for the home cluster, keyed by node name (VMs are named \"<cluster>-<name>\"). Each node declares its vCPU count (cpu_cores) and a cpu_class (\"performance\"/\"efficiency\") selecting which host core class it is pinned to — tofu assigns the actual threads deterministically. Alternatively set an explicit cpu_affinity string to bypass class-based assignment. Static IPs live in the SOPS secret, keyed by the same node names (network.node_ips)."
+  description = "Talos nodes for the home cluster, keyed by node name (VMs are named \"<cluster>-<name>\"). Each node declares its vCPU count (cpu_cores) and a cpu_class (\"performance\"/\"efficiency\") selecting which host core class it is pinned to — tofu assigns the actual threads deterministically. Alternatively set an explicit cpu_affinity string to bypass class-based assignment. Static IPs live in the plaintext network.node_ips map (terraform.tfvars), keyed by the same node names."
   type = map(object({
     host = optional(string)
     # Pin the Proxmox VM ID rather than letting it auto-assign. Without this,
@@ -229,30 +229,46 @@ variable "nodes" {
     # kubernetes/infrastructure/home/node-taints/.
   }))
   default = {
+    # Kept as a minimal working shape, not the deployed shape —
+    # terraform.tfvars overrides everything. Synced with the two-worker
+    # consolidation so defaults never drift into a fleet that cannot pass
+    # the host capacity validations (E-class has 14 usable threads: cp 4 +
+    # eff 10; fleet memory 6 + 32 + 48 = 86 <= 90 allocatable).
     cp-main = {
       host       = "pmx-main"
-      cpu_cores  = 2
+      cpu_cores  = 4
       cpu_class  = "efficiency"
-      memory     = 4096
+      memory     = 6144
       disk_size  = 32
       talos_role = "controlplane"
     }
     wk-main-efficiency = {
       host       = "pmx-main"
-      cpu_cores  = 6
+      cpu_cores  = 10
       cpu_class  = "efficiency"
-      memory     = 24576
+      memory     = 32768
       disk_size  = 48
       talos_role = "worker"
+      # QuickSync/VAAPI lives here (iGPU passthrough + i915 driver after the
+      # media-node consolidation). See terraform.tfvars for the full contract.
+      extensions = ["siderolabs/i915"]
+      hostpci = [
+        {
+          device = "intel-igpu"
+          pcie   = true
+          rombar = true
+        },
+      ]
       node_labels = {
         "node.kubernetes.io/instance-type" = "worker"
+        "workload/media"                   = "true"
       }
     }
     wk-main-performance = {
       host        = "pmx-main"
-      cpu_cores   = 6
+      cpu_cores   = 16
       cpu_class   = "performance"
-      memory      = 65536
+      memory      = 49152
       disk_size   = 96
       talos_role  = "worker"
       gpu         = true

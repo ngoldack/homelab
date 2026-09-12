@@ -278,6 +278,19 @@ data "talos_machine_configuration" "worker" {
     each.value.gpu ? [
       yamlencode({
         machine = {
+          # Talos ships with unprivileged user namespaces OFF as a
+          # hardening default (user.max_user_namespaces=0) — and that is
+          # what wedges rootless buildkitd here: it refuses to start with
+          # "/proc/sys/user/max_user_namespaces needs to be set to
+          # non-zero". Rootless is the deliberate posture for a builder
+          # that eats arbitrary Dockerfiles, so the kernel limit is raised
+          # instead, on this node only (the builder's home). Note the key
+          # is machine.sysctls on pre-1.14 Talos (docs, "User Namespaces"
+          # guide); the singular sysctl form is the v1.14 SysctlConfig
+          # document, and the provider rejects it here — learned live.
+          sysctls = {
+            "user.max_user_namespaces" = "15000"
+          }
           kernel = {
             modules = [
               { name = "nvidia" },

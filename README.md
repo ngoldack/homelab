@@ -106,40 +106,46 @@ network:
     cp-main: 10.30.0.10
     wk-main-efficiency: 10.30.0.21
     wk-main-performance: 10.30.0.22
-    wk-main-media: 10.30.0.23
 ```
 
 ### Home node roles and capacity
 
 `pmx-main` (i9-13900HX: 8 P-cores/16 threads = "performance", 16 E-cores =
-"efficiency", 96 GiB) is allocated to 100% by design. The host reserve is
-2 GiB plus 2 efficiency threads, leaving 14 efficiency threads, 16 performance
-threads and 94 GiB usable:
+"efficiency", 96 GiB installed / 94 GiB usable) runs a **deliberately
+consolidated two-worker fleet**: every VM that is not the P100 box shares one
+general-purpose worker.
 
 | node | class | threads | RAM | passthrough | taint |
 | --- | --- | --- | --- | --- | --- |
-| `cp-main` | efficiency | 4 (18–21) | 4 GiB | — | — |
-| `wk-main-efficiency` | efficiency | 6 (22–27) | 16 GiB | — | — |
-| `wk-main-media` | efficiency | 4 (28–31) | 8 GiB | Intel UHD 770 iGPU | `dedicated=media` |
-| `wk-main-performance` | performance | 16 (0–15) | 64 GiB | Tesla P100 | `dedicated=ai` |
+| `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
+| `wk-main-efficiency` | efficiency | 10 (all remaining E) | 32 GiB | Intel UHD 770 iGPU | — (general node) |
+| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | Tesla P100 | `dedicated=nvidia` |
 
-Efficiency threads sum to exactly 14/14 and memory to 92 GiB, leaving ~2 GiB
-headroom. Because the host is fully allocated, **adding a node means taking
-capacity from an existing one** — `wk-main-media` was carved out of
-`wk-main-efficiency`, not out of the AI worker, whose P-cores and 64 GiB are
-that node's entire purpose.
+Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
+86 GiB of the 90 allocatable, so the host really keeps ~8 with ARC capped at
+1 GiB). E-threads sum to exactly 14/14 — cp 4 + worker 10 — **adding another
+node means taking capacity from an existing one**.
 
-The two GPUs are deliberately on **separate** workers. Each node then has one
-role and one taint, so a transcode cannot be starved by an inference job and
-either capability can be rebooted without taking the other down; it also keeps
-`i915` out of the AI node's boot image and the NVIDIA driver out of the media
-node's. The media worker is intentionally small: a QuickSync transcode runs
-almost entirely in the iGPU's fixed-function block, so its vCPUs only feed it
-and demux/mux — which is also why E-cores are the right class for it.
+Design of the consolidation:
 
-Consolidating them back onto one worker would free ~4 threads and 8 GiB of VM
-overhead, and is the sensible move only if the host stops being the
-constraint (e.g. a second Proxmox host joins).
+* The efficiency worker is **untainted on purpose**: it is the only node
+  general workloads can run on, so a NoSchedule there would demand a
+  toleration from every deployment and isolate nothing. QuickSync consumers
+  PULL onto it by capability label — `hardware/igpu: Intel-UHD-Graphics-770`
+  (derived by tofu from the `intel-igpu` hostpci mapping) plus
+  `workload/media` — e.g. Immich's machine-learning component.
+* The P100 worker keeps a hard `dedicated=nvidia:NoSchedule` (applied by the
+  node-taints Flux Job, selected on `instance-type=gpu-worker`); only
+  inference and the builder tolerate it. It stays at 48 GiB because that is
+  the proven-bootable size (64 GiB starved the host — see the tfvars
+  comment), and llama.cpp offload fits; post-consolidation RAM demand grows
+  on the general node, not here.
+* BuildKit is rootless, so the P100 node's machine config raises
+  `user.max_user_namespaces` via `machine.sysctls` (Talos ships it at 0 as
+  a hardening default; rootless buildkitd refuses to start otherwise).
+* VGA-arbitration hazard is handled by the vga rule in `main.tf`: any node
+  with hostpci gets `serial0` (no emulated display) — the iGPU-passthrough
+  guest once hung at boot with `std` + passed VGA decode concurrently.
 
 Each node in the `nodes` map in `terraform.tfvars` is declared individually
 (name, host, `cpu_cores`, optional `cpu_affinity` pin, memory, disk, role).

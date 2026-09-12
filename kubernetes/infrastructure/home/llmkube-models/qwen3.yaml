@@ -25,11 +25,11 @@ spec:
   # and should happen exactly once.
   prefetch: true
   # The prefetch Job has to be able to land on the GPU node, which carries
-  # dedicated=ai:NoSchedule.
+  # dedicated=nvidia:NoSchedule.
   prefetchTolerations:
     - key: dedicated
       operator: Equal
-      value: ai
+      value: nvidia
       effect: NoSchedule
   hardware:
     accelerator: cuda
@@ -59,14 +59,14 @@ spec:
   # ../llmkube/helmrelease.yaml.
   image: ghcr.io/ggml-org/llama.cpp:server-cuda12
   # The P100 box is the only node with a GPU, and it is reserved for this:
-  # instance-type selects it, the toleration gets past dedicated=ai:NoSchedule,
+  # instance-type selects it, the toleration gets past dedicated=nvidia:NoSchedule,
   # and without the toleration the pod would sit Pending forever with no error.
   nodeSelector:
     hardware/gpu.model: Tesla-P100
   tolerations:
     - key: dedicated
       operator: Equal
-      value: ai
+      value: nvidia
       effect: NoSchedule
   # 8k to start. Context is the other consumer of VRAM besides weights, and
   # with ~2.8GB spare the KV cache is what will run out first — raise this only

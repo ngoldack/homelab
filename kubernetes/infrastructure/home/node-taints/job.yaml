@@ -1,27 +1,33 @@
-# Applies the two node taints Talos itself can never self-apply (see
-# rbac.yaml's comment: Kubernetes' NodeRestriction admission plugin forbids a
-# node from setting its own taints, confirmed on every node this repo has
-# ever tainted, brand-new ones included). This is the one thing in this repo
-# that runs `kubectl` directly rather than going through tofu or a native
-# Kubernetes resource — because nothing else CAN set a taint here. Expressing
-# it as a Flux-managed Job keeps it fully reproducible: no operator ever runs
-# this by hand, Flux applies it as part of a normal reconcile.
+# Applies the node taint Talos itself can never self-apply (see rbac.yaml's
+# comment: Kubernetes' NodeRestriction admission plugin forbids a node from
+# setting its own taints, confirmed on every node this repo has ever tainted,
+# brand-new ones included). This is the one thing in this repo that runs
+# `kubectl` directly rather than going through tofu or a native Kubernetes
+# resource — because nothing else CAN set a taint here. Expressing it as a
+# Flux-managed Job keeps it fully reproducible: no operator ever runs this by
+# hand, Flux applies it as part of a normal reconcile.
 #
 # Selects nodes by label, not by name: Talos assigns each node a random
 # generated hostname at install time (there is no stable node name to hard-
 # code), but node.kubernetes.io/instance-type is deterministic — set by tofu
 # from each node's own declared role (see tofu/home/terraform.tfvars).
 #
+# ONE taint since the two-worker consolidation: dedicated=nvidia on the P100
+# box. The efficiency worker is deliberately UNTAINTED — it is the only node
+# general workloads can run on, so a taint there would demand tolerations
+# from everything and isolate nothing; QuickSync workloads PULL themselves
+# onto it via hardware/igpu / workload/media labels instead. The old
+# dedicated=ai taint on the same node is replaced in place: same key, same
+# effect, --overwrite swaps the value. The old dedicated=media taint died
+# with its node.
+#
 # Idempotent (--overwrite) and safe to re-run: a Job only actually executes
-# once per unique name, so on a fresh bootstrap this runs exactly once, sets
-# both taints, and is done. If a node is ever replaced, this Job's own spec
-# doesn't need to change — deleting and letting the Kustomization recreate it
-# (or bumping its name) re-applies the same idempotent taint to whichever
-# node now carries that label.
+# once per unique name. Bumped to -4 (Job specs are immutable; the rename is
+# what makes Flux recreate it; prune removes the -3 predecessor).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: node-taints-3
+  name: node-taints-4
   namespace: kube-system
 spec:
   backoffLimit: 3
@@ -30,12 +36,10 @@ spec:
       serviceAccountName: node-taints
       restartPolicy: OnFailure
       # rancher/kubectl is a distroless-style image (no /bin/sh), so this
-      # runs kubectl directly as each container's entrypoint rather than a
-      # shell script — an initContainer for the first taint (initContainers
-      # run sequentially, one per completion) and the main container for the
-      # second, with no shell dependency anywhere.
-      initContainers:
-        - name: taint-gpu
+      # runs kubectl directly as the container's entrypoint — no shell
+      # dependency anywhere.
+      containers:
+        - name: taint-nvidia
           image: rancher/kubectl:v1.36.2
           command: ["kubectl"]
           args:
@@ -43,16 +47,5 @@ spec:
             - nodes
             - -l
             - node.kubernetes.io/instance-type=gpu-worker
-            - dedicated=ai:NoSchedule
-            - --overwrite
-      containers:
-        - name: taint-media
-          image: rancher/kubectl:v1.36.2
-          command: ["kubectl"]
-          args:
-            - taint
-            - nodes
-            - -l
-            - node.kubernetes.io/instance-type=media-worker
-            - dedicated=media:NoSchedule
+            - dedicated=nvidia:NoSchedule
             - --overwrite

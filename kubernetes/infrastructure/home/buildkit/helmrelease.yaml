@@ -90,14 +90,15 @@ spec:
 
     # Scheduling. wk-main-performance is the only node that can host this:
     #   cp-main             32 GiB disk, control plane — excluded on both counts
-    #   wk-main-efficiency  48 GiB disk,  6 E-cores
-    #   wk-main-media       48 GiB disk,  4 E-cores
-    #   wk-main-performance 96 GiB disk, 16 P-threads
-    # A 48 GiB node cannot hold a 40 GiB emptyDir alongside Talos and its image
-    # cache, and an nvcc build on 4-6 E-cores would take hours.
+    #   wk-main-efficiency  48 GiB disk, 10 E-cores, 32 GiB RAM
+    #   wk-main-performance 96 GiB disk, 16 P-threads, 48 GiB RAM
+    # A 48 GiB node cannot hold a 40 GiB emptyDir alongside Talos and its
+    # image cache, and an nvcc build on E-cores would take hours. (The
+    # dedicated media worker this list used to carry is consolidated into
+    # wk-main-efficiency.)
     #
     # The honest cost: this is the P100 inference node, carrying
-    # dedicated=ai:NoSchedule, so the toleration below is what lets the builder
+    # dedicated=nvidia:NoSchedule, so the toleration below is what lets the builder
     # land there and a build WILL compete with llama.cpp for CPU. Builds are
     # occasional and the resource limit caps the damage; run one when the model
     # is idle. The CPU request is small so the pod is nearly free while idle —
@@ -107,7 +108,7 @@ spec:
     tolerations:
       - key: dedicated
         operator: Equal
-        value: ai
+        value: nvidia
         effect: NoSchedule
 
     resources:

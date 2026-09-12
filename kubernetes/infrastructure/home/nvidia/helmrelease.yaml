@@ -43,8 +43,8 @@ spec:
   targetNamespace: nvidia-device-plugin
   values:
     runtimeClassName: nvidia
-    # Run only on the AI worker and tolerate its dedicated=ai taint so the
-    # DaemonSet can schedule there. The value is "Tesla-P100", not "Tesla P100":
+    # Run only on the P100 worker and tolerate its dedicated=nvidia taint so
+    # the DaemonSet can schedule there. The value is "Tesla-P100", not "Tesla P100":
     # Kubernetes label values may not contain spaces, so tofu sanitises the
     # free-text model string before Talos applies it (see local.hw_label_values
     # in tofu/home/main.tf). A space here is not merely a mismatch — it is an
@@ -54,7 +54,7 @@ spec:
     tolerations:
       - key: dedicated
         operator: Equal
-        value: ai
+        value: nvidia
         effect: NoSchedule
     # Clear the chart's default nodeAffinity. It requires one of
     # feature.node.kubernetes.io/pci-10de.present,

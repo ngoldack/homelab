@@ -258,25 +258,22 @@ spec:
                   memory: 1Gi
                 limits:
                   memory: 8Gi
-      # The media worker, NOT the P100 box. The P100 is reserved for LLM
-      # inference, so Immich's CLIP and face-recognition models run here
-      # instead. This node carries dedicated=media:NoSchedule, and without the
-      # matching toleration the pod silently stays Pending forever rather than
-      # reporting an error.
+      # The general worker, NOT the P100 box — the P100 is reserved for LLM
+      # inference, and since the two-worker consolidation this node also owns
+      # the Intel UHD 770 iGPU (hostpci mapping intel-igpu + siderolabs/i915
+      # in tofu/home/terraform.tfvars). hardware/igpu is derived by tofu from
+      # that mapping; selecting on the CAPABILITY (not a taint) is the
+      # contract: the node carries no NoSchedule taint, so no toleration is
+      # needed and nothing else is locked out of it.
       #
-      # Inference is on CPU for now. This node is the Intel box, so OpenVINO
-      # acceleration is available as a follow-up — it needs the
-      # -openvino image variant plus access to /dev/dri, which in turn needs
-      # either an Intel device plugin or a hostPath with the namespace's
-      # PodSecurity relaxed. Deliberately not bundled into this change.
+      # Inference is on CPU for now. OpenVINO/QSV acceleration is the
+      # follow-up this label contract exists for: swap to the -openvino
+      # image variant plus /dev/dri access, which in turn needs either an
+      # Intel device plugin or a hostPath with the namespace's PodSecurity
+      # relaxed. Deliberately not bundled into the consolidation.
       defaultPodOptions:
         nodeSelector:
-          node.kubernetes.io/instance-type: media-worker
-        tolerations:
-          - key: dedicated
-            operator: Equal
-            value: media
-            effect: NoSchedule
+          hardware/igpu: Intel-UHD-Graphics-770
       persistence:
         # Model cache. The chart defaults this to an emptyDir, which means
         # re-downloading several GB of CLIP/face models on every pod restart.

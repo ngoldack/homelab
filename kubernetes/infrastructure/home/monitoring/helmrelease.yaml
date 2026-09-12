@@ -213,7 +213,7 @@ spec:
     # Runs on every node, including the arm64 Hetzner ingress node. Its own
     # chart default toleration is {effect: NoSchedule, operator: Exists} with
     # NO key, which tolerates every NoSchedule taint in this cluster —
-    # dedicated=ingress, dedicated=ai, dedicated=media and the control-plane
+    # dedicated=ingress, dedicated=nvidia and the control-plane
     # taint alike. So it is deliberately left at defaults and must NOT be given
     # a nodeSelector: pinning it to the home site would silently drop the
     # ingress node's OS metrics, and adding per-taint tolerations would be

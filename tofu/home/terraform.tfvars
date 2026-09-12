@@ -14,7 +14,7 @@ network = {
   nameservers   = ["10.30.0.1", "1.1.1.1"]
   node_ips = {
     cp-main             = "10.30.0.10"
-    wk-main-efficiency  = "10.30.0.21"
+    wk-main-efficiency  = "10.30.0.23"
     wk-main-performance = "10.30.0.22"
   }
 }

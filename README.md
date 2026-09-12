@@ -818,10 +818,29 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   Proxmox's own Console tab would otherwise freeze on the last framebuffer
   frame — pointing the console at the serial port keeps it live for every
   node, not just the one with PCIe passthrough.
-- **Headlamp** has no public route by default (its pod ServiceAccount is
-  bound to `cluster-admin`, and no OIDC provider is configured) — reach it via
-  `kubectl -n headlamp port-forward`. Re-enable `httpRoute` only after wiring
-  up `config.oidc.*` with a real identity provider.
+- **Headlamp**'s ServiceAccount is bound to `cluster-admin` and the app has
+  no native OIDC: it is reachable from the LAN directly (like every internal
+  hostname) but the EDGE path must route it through the authentik outpost —
+  `headlamp/httproute-edge.yaml` is held out of the Kustomization until the
+  external-dns `--gateway-label-filter` rollout is confirmed (see "Edge
+  ingress" for the ordering rationale).
+- **Split DNS is not flipped yet**: the public zone still answers every
+  hostname with the LAN VIP, so internet clients cannot find the edge
+  Gateway (reachable today only via `--resolve`). The remaining sequence,
+  in order: (1) stand up the internal resolver — in-cluster Unbound pinned
+  to a `lan`-pool address with `guillomep/external-dns-unbound-webhook`
+  (or the maintained `home-operations/external-dns-unifi-webhook` writing
+  UniFi dns-policy records directly) driven by a second external-dns
+  instance scoped `--gateway-label-filter=dns.ngoldack.de/scope=internal`;
+  (2) conditional-forward the zone from the UniFi gateway to the resolver
+  (FORWARD_DOMAIN is API-manageable); (3) flip the PUBLIC instance to
+  scope=public + the edge target so the zone answers the Hetzner address.
+  LAN clients whose DoH bypasses the router keep working the whole way —
+  they simply take the edge path (one WAN hairpin + authentik login)
+  instead of the direct VIP; enforcing LAN DNS (per-VLAN DoH blocks, or
+  publishing self-hosted DoH + RFC 9463 DNR) is an optimization, not a
+  correctness requirement. Mobile clients on IPv6-only cells need the
+  Hetzner primary IPv6 + AAAA published by the public instance only.
 - **Insecure TLS to the Proxmox API** (`insecure = true` by default) trusts
   Proxmox's typical self-signed certificate; if you've issued a real one,
   set `insecure = false` per host in `proxmox_nodes`.

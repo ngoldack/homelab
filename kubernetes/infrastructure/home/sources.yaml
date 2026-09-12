@@ -93,3 +93,26 @@ metadata:
 spec:
   interval: 2h
   url: https://zotregistry.dev/helm-charts
+---
+# Consumed by authentik/ — the identity provider. The chart repo lives on
+# authentik's own infra (code.goauthentik.io), not ghcr pages.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: authentik
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://code.goauthentik.io/charts/public
+---
+# Consumed by valkey-operator/ — the official valkey-io operator chart.
+# Standing rule: datastores come through their operator (CNPG for Postgres,
+# valkey-operator for Valkey), never a bare Deployment.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: valkey
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://valkey.io/valkey-helm

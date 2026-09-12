@@ -14,6 +14,7 @@ resources:
   - lb-ipam.yaml
   - l2-announcement.yaml
   - gateway.yaml
+  - edge.yaml
   - clusterissuer.yaml
   - certificate.yaml
   - secret.sops.yaml

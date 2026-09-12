@@ -28,3 +28,8 @@ resources:
   - registry.yaml
   - buildkit.yaml
   - image-builds.yaml
+  # Identity provider + edge authorizer. valkey-operator before authentik
+  # (CRD-before-CR); authentik additionally dependsOn network for the edge
+  # Gateway its routes attach to.
+  - valkey-operator.yaml
+  - authentik.yaml

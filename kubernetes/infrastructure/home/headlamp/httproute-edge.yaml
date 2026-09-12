@@ -1,0 +1,26 @@
+# Headlamp behind authentik on the EDGE path only — the internal path keeps
+# its direct, auth-free route (httproute.yaml), which the namespace's LAN DNS
+# answer selects. This is the file headlamp's own SECURITY NOTE anticipated:
+# cluster-admin-bound headlamp gets identity-gated before it gets a public
+# answer. Backend is the edge outpost, not headlamp itself: the outpost checks
+# the session, then proxies straight to headlamp's Service over the mesh.
+#
+# The cross-namespace reference is pre-authorized by the ReferenceGrant in
+# ../authentik/httproutes.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: headlamp-edge
+  namespace: headlamp
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - headlamp.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000

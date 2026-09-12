@@ -1,0 +1,28 @@
+# Authentik's cache/broker store: Valkey via the official valkey-operator,
+# per the standing rule that every new datastore goes through its operator
+# (CNPG for Postgres, valkey-operator here).
+#
+# The operator only speaks cluster mode (`cluster-enabled: yes` is hard-coded
+# in its pod config) — there is no standalone topology. shards: 1 makes the
+# single node own all 16384 slots, so a non-cluster-aware client (authentik's
+# redis-py) never sees a MOVED redirect and SELECT 0 is legal. That is the
+# whole compat story; anything wanting DB indexes >0 or cross-key
+# transactions on multiple slots would need a different store.
+#
+# valkey-operator is explicitly pre-production (v0.6.0, v1alpha1 may change)
+# — accepted for a cache/broker whose data is disposable; a wipe costs
+# re-logins, not state.
+#
+# The operator creates the headless Service this references as
+# "valkey-<name>" on 6379 (verified in its controller:
+# headlessServiceName = "valkey-" + cluster.Name). No password — the
+# operator's auth surface is ACL-based via a separate ValkeyACL CR; flat
+# network trust inside the cluster VLAN, same posture as immich-valkey.
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: redis
+  namespace: authentik
+spec:
+  shards: 1
+  replicas: 0

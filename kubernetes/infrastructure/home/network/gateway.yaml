@@ -21,11 +21,6 @@ metadata:
   name: public
   namespace: network
   annotations:
-    # Ask Cilium's LB-IPAM for this exact address out of the pool in
-    # lb-ipam.yaml, rather than whatever it hands out next. The VIP has to be
-    # stable across a Gateway recreate because it is what every DNS record
-    # published for this cluster points at.
-    lbipam.cilium.io/ips: "10.30.0.200"
     # The target external-dns publishes for every hostname on every HTTPRoute
     # attached to this Gateway.
     #
@@ -38,12 +33,34 @@ metadata:
     # populating Gateway status — which it historically did not do at all in
     # host-network mode (cilium/cilium#42786).
     #
+    # KEY MIGRATION: as of external-dns v0.22.0 (chart 1.22.0, which the
+    # HelmRelease here now runs) the default annotation prefix flipped to
+    # external-dns.kubernetes.io/ with NO fallback to the alpha prefix — the
+    # alpha key here would be silently ignored and publication would fall back
+    # to status.addresses. The GA key is authoritative now.
+    #
     # Note --default-targets does NOT do this job: its help text limits it to
     # "the crd source (DNSEndpoint resources with empty targets)", so it is
     # silently ignored by the gateway-httproute source.
-    external-dns.alpha.kubernetes.io/target: "10.30.0.200"
+    external-dns.kubernetes.io/target: "10.30.0.200"
 spec:
   gatewayClassName: cilium
+  # Propagated by Cilium onto the generated Service — this is the label the
+  # L2 announcement policy and external-dns's --gateway-label-filter select
+  # on. scope=internal: this Gateway answers on the LAN VIP; the edge one
+  # (edge.yaml) carries scope=public and is excluded from both.
+  infrastructure:
+    labels:
+      dns.ngoldack.de/scope: internal
+  # The supported static-address channel (verified in the 1.19/1.20 gateway
+  # controller: spec.addresses merges into the Service's
+  # io.cilium/lb-ipam-ips annotation). The old `lbipam.cilium.io/ips` here on
+  # top-level metadata was NEVER read by the controller — the .200 allocation
+  # only looked stable because it is the lan pool's first free address. Same
+  # IP, real mechanism now.
+  addresses:
+    - type: IPAddress
+      value: 10.30.0.200
   listeners:
     - name: https-wildcard
       protocol: HTTPS

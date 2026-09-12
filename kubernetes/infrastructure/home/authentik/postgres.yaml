@@ -1,0 +1,37 @@
+# Authentik's Postgres, CloudNativePG like every other relational store here.
+#
+# The app role/database are named authentik (not the CNPG default "app") and
+# the password comes from OUR secret (postgres-credentials.sops.yaml) via
+# bootstrap.initdb.secret — nothing is auto-generated, so the same literal
+# password serves both this secret and AUTHENTIK_POSTGRESQL__PASS in
+# secret.sops.yaml. If the two ever drift, django fails auth at startup
+# loudly; that is the safer failure mode than a silently rotating secret.
+#
+# NFS again mirrors the immich-database tradeoff (see that file): the
+# block-class (nvmeof) path is still unusable cluster-wide, so PG waits on
+# NFS with the same caveats, smaller footprint.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: authentik-database
+  namespace: authentik
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: authentik
+      owner: authentik
+      secret:
+        name: authentik-database-credentials
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  storage:
+    size: 5Gi
+    storageClass: truenas-fast-nfs
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

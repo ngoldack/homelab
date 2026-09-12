@@ -1,0 +1,84 @@
+# Seed blueprints — authentik imports everything under /blueprints at startup
+# and re-applies on server boot, so this is the declarative config source
+# (no UI, no API scripting).
+#
+# Objects: ServiceAccount + pinned-token (initial_token must equal
+# proxy-token.sops.yaml's TOKEN literal), the headlamp Application + proxy
+# Provider pair, and the manually-managed Outpost record (managed=null keeps
+# authentik's k8s controller off our Flux-owned outpost Deployment forever).
+#
+# First-app scope: headlamp ONLY. Immich/Grafana/Zot move here per-app later;
+# each is Provider+Application+route — the Outpost picks up providers via the
+# providers list below.
+#
+# NOTE: model names/fields below target the 2026.8.x API; `ak blueprints
+# validate` inside the server pod is the authority — fix mismatches there
+# first, then mirror to this ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprints
+  namespace: authentik
+data:
+  00-edge.yaml: |
+    v1:
+      goauthentik.core.models.ServiceAccount:
+        create: true
+        identifiers:
+          name: edge-outpost
+        attributes:
+          name: edge-outpost
+      goauthentik.core.models.Token:
+        create: true
+        identifiers:
+          service_account: !Find [goauthentik.core.models.ServiceAccount, [name, edge-outpost]]
+          intent: authorization
+          name: edge-outpost-token
+        attributes:
+          service_account: !Find [goauthentik.core.models.ServiceAccount, [name, edge-outpost]]
+          intent: authorization
+          name: edge-outpost-token
+          initial_token: !Secret [authentik-outpost-api, TOKEN]
+          long_lived: true
+      goauthentik.core.models.Application:
+        create: true
+        identifiers:
+          slug: headlamp
+        attributes:
+          name: headlamp
+          meta_icon: fa-solid:binoculars
+          meta_name: Headlamp (edge)
+          launch_url: https://headlamp.ngoldack.de/
+          authorization_flow: !Find
+            - goauthentik.flows.models.FlowExecutor
+            - [name, default-provider-authorization-implicit-consent]
+      goauthentik.core.models.Provider:
+        create: true
+        identifiers:
+          name: headlamp-proxy
+        attributes:
+          name: headlamp-proxy
+          provider_type: goauthentik.io/providers/proxy
+      goauthentik.providers.proxy.models.ProxyProvider:
+        create: true
+        identifiers:
+          provider: !Find [goauthentik.core.models.Provider, [name, headlamp-proxy]]
+        attributes:
+          provider: !Find [goauthentik.core.models.Provider, [name, headlamp-proxy]]
+          internal_host: http://headlamp-headlamp.headlamp.svc.cluster.local/
+          host: headlamp.ngoldack.de
+          proxy_endpoint_type: forward_plain
+          auth_method: basic
+          append_app_url: false
+      goauthentik.outposts.models.Outpost:
+        create: true
+        identifiers:
+          name: edge-outpost
+        attributes:
+          name: edge-outpost
+          type: proxy
+          managed: null
+          enabled: true
+          service_account: !Find [goauthentik.core.models.ServiceAccount, [name, edge-outpost]]
+          providers:
+            - !Find [goauthentik.core.models.Provider, [name, headlamp-proxy]]

@@ -1,24 +1,21 @@
 # homelab
 
-Talos + Cilium homelab, split across two independent clusters: a Proxmox
-**home** cluster and a Hetzner Cloud **cloud** edge cluster that is the
-sole public ingress point. Both are provisioned with OpenTofu and run
-Flux for GitOps.
+A Talos + Cilium homelab: **one** Kubernetes cluster spanning two sites —
+Proxmox **home** VMs on the LAN, plus a single Hetzner Cloud worker joined
+over Talos KubeSpan. Provisioned with OpenTofu, run by Flux for GitOps.
+Services are reached on a LAN LoadBalancer VIP that Cilium announces with
+ARP; DNS for it lives in the public Hetzner zone.
 
 - Proxmox hosts declared as a map (`proxmox_nodes`)
-- Talos clusters provisioned via OpenTofu (hand-rolled for home, the
-  `hcloud-talos/talos/hcloud` registry module for cloud)
-- Kubernetes bootstrapped with Cilium
+- Talos cluster provisioned via OpenTofu (hand-rolled, including the
+  Hetzner ingress worker — no registry module)
+- Kubernetes bootstrapped with Cilium, owned by tofu
 - Secrets stored with SOPS + age
-- Flux used as the GitOps layer for everything except each cluster's CNI/CCM
+- Flux used as the GitOps layer for everything except the CNI
 
-## v1 goal
-
-Create a Talos Kubernetes cluster on Proxmox using OpenTofu, with independent
-Proxmox hosts declared as a map (`proxmox_nodes`) — currently just `pmx-main`
-— each with its own API endpoint, storage pool and bridge. A second,
-independent OpenTofu root stands up a public Hetzner Cloud edge cluster that
-terminates all internet-facing traffic.
+There used to be a second, independent Hetzner Cloud edge cluster acting
+as the sole public ingress point. It was destroyed (commit `bf444f7`);
+its former ingress role is now the LAN VIP described above.
 
 ## Repository layout
 
@@ -31,26 +28,30 @@ terminates all internet-facing traffic.
 ├── Taskfile.yml
 ├── kubernetes/
 │   ├── clusters/
-│   │   ├── home/             # Flux Kustomization CRs for the home cluster
-│   │   └── cloud/             # Flux Kustomization CRs for the cloud cluster
+│   │   └── home/             # Flux Kustomization CRs for the cluster
 │   └── infrastructure/
-│       ├── home/              # cilium, nvidia, truenas-csi
-│       └── cloud/              # cert-manager, network, external-dns,
-│                                 gateway-api-crds, headlamp
+│       └── home/              # cert-manager, network (two Gateways: `public`
+│                              # on the LAN VIP, `edge` on the Hetzner IP;
+│                              # LB-IPAM, L2 announcements), external-dns,
+│                              # nvidia, truenas-csi, registry (Zot), buildkit,
+│                              # image-builds, immich, cnpg-operator,
+│                              # valkey-operator, authentik (+ edge outpost),
+│                              # llmkube, monitoring, headlamp,
+│                              # talos-backup, node-taints
 └── tofu/
-    ├── home/                  # Proxmox + Talos, hand-rolled
-    │   ├── main.tf            # Proxmox VMs, ISOs, Image Factory schematics
-    │   ├── talos.tf           # Talos machine secrets/configs
-    │   ├── providers.tf       # local state encryption + providers
-    │   ├── variables.tf / terraform.tfvars
-    │   ├── outputs.tf
-    │   ├── secrets.tf         # loads secret.sops.yaml
-    │   └── secret.sops.yaml
-    └── cloud/                 # Hetzner Cloud + Talos
-        ├── cloud.tf           # hcloud-talos/talos/hcloud module call
-        ├── providers.tf
+    └── home/                  # Proxmox + Talos + Hetzner ingress, hand-rolled
+        ├── main.tf            # Proxmox VMs, ISOs, Image Factory schematics
+        ├── talos.tf           # Talos machine secrets/configs
+        ├── ingress.tf         # the Hetzner KubeSpan worker (var.cloud_nodes)
+        ├── cilium.tf          # tofu-owned Cilium helm_release
+        ├── gateway-api-crds.tf# CRDs owned by tofu (ordering fix, see below)
+        ├── providers.tf       # s3 state backend + providers
+        ├── state-backend.tf   # the state bucket itself
+        ├── backups.tf         # the etcd-backup bucket itself
+        ├── flux-bootstrap.tf  # flux-system ns + sops-age Secret
         ├── variables.tf / terraform.tfvars
-        ├── secrets.tf
+        ├── outputs.tf
+        ├── secrets.tf         # loads secret.sops.yaml
         └── secret.sops.yaml
 ```
 
@@ -66,8 +67,11 @@ terminates all internet-facing traffic.
 - `kubectl`
 - `flux`
 - `helm` (only if you want to render/inspect charts locally before they reconcile)
-- access to the Proxmox host, for the home cluster
-- a Hetzner Cloud account + API token, for the cloud cluster
+- access to the Proxmox host, for the LAN nodes
+- a Hetzner Cloud account + API token, for the ingress worker, Object
+  Storage (state + etcd backups) and the public DNS zone
+- a Tailscale account + auth key, as the out-of-band admin path
+- `yamllint` (optional; used by `task lint:yaml`)
 
 ## Network layout
 
@@ -81,6 +85,7 @@ networks deliberately avoid 10.x so they can never collide with LAN ranges:
 | vms                  | 3000 | 10.30.0.0/24    | Talos VMs (primary NIC, tagged on vmbr0)  |
 | k8s pods (internal)  | –    | 172.20.0.0/16   | pod CIDR, cluster-internal only           |
 | k8s svc (internal)   | –    | 172.21.0.0/16   | service CIDR, cluster-internal only       |
+| svc VIP (vms VLAN)   | 3000 | 10.30.0.200–.250 | LAN LoadBalancer IPs, Cilium L2-announced |
 
 Proxmox host NICs are trunk ports: untagged on management (VLAN 20),
 tagged 2010/3000. Talos VMs get a single virtio NIC on the host's VM bridge
@@ -143,16 +148,17 @@ without an entry fall back to DHCP. If `cpu_affinity` is set, it must span
 exactly `cpu_cores` host cores (e.g. `cpu_cores = 6` with
 `cpu_affinity = "18-23"`).
 
-The cloud cluster's internal networking (172.30.0.0/16, subdivided into
-node/pod/service ranges) is configured directly in `tofu/cloud/cloud.tf` and
-does not overlap the home cluster's 172.20.0.0/16 / 172.21.0.0/16.
+The Hetzner ingress worker is a member of the same cluster, so there is
+only one set of pod/service CIDRs — cross-site traffic rides Talos KubeSpan
+(WireGuard) underneath. Its public IP serves the KubeSpan mesh and the
+Tailscale admin path only; service traffic terminates on the LAN VIP (see
+"Ingress").
 
 ## Secret handling
 
-This repo uses SOPS + age for local secret encryption. Keep credentials and the
-OpenTofu state passphrases in `tofu/home/secret.sops.yaml` and
-`tofu/cloud/secret.sops.yaml`; non-secret configuration belongs in each root's
-`terraform.tfvars`.
+This repo uses SOPS + age for local secret encryption. Keep credentials and
+the OpenTofu state passphrase in `tofu/home/secret.sops.yaml`; non-secret
+configuration belongs in `tofu/home/terraform.tfvars`.
 
 1. Generate a local age key:
 
@@ -166,9 +172,8 @@ age-keygen -o age.key
 
 ```bash
 task sops:edit FILE=tofu/home/secret.sops.yaml
-task sops:edit FILE=tofu/cloud/secret.sops.yaml
-task sops:edit FILE=kubernetes/infrastructure/cloud/cert-manager/secret.sops.yaml
-task sops:edit FILE=kubernetes/infrastructure/cloud/network/secret.sops.yaml
+task sops:edit FILE=kubernetes/infrastructure/home/cert-manager/secret.sops.yaml
+task sops:edit FILE=kubernetes/infrastructure/home/network/secret.sops.yaml
 ```
 
 The last two hold Hetzner credentials for cert-manager's DNS-01 solver and
@@ -176,7 +181,7 @@ external-dns respectively. Hetzner unified DNS zone management into the
 Cloud API in November 2025 (the old standalone DNS Console can no longer
 even create zones), so both now take the **same credential type** — a
 Hetzner Cloud API token (console.hetzner.com) — and this repo reuses the
-same `hcloud_api_token` value already in `tofu/cloud/secret.sops.yaml` for
+same `hcloud_api_token` value already in `tofu/home/secret.sops.yaml` for
 both:
 
 | Secret | Consumer | Credential type |
@@ -185,9 +190,9 @@ both:
 | `network/secret.sops.yaml` (`hetzner-dns-token`, key `api-token`) | `external-dns-hetzner-webhook` | Hetzner Cloud API token (same value) |
 
 If you'd rather scope DNS access to a separate, narrower token than the one
-OpenTofu uses for server/network management, create a second Cloud API token
-and use that instead — nothing requires reusing the exact same value, it's
-just what this repo does by default.
+OpenTofu uses for the ingress worker and Object Storage, create a second
+Cloud API token and use that instead — nothing requires reusing the exact
+same value, it's just what this repo does by default.
 
 `sops:edit` is the preferred workflow because SOPS creates and removes its
 temporary plaintext copy itself. For a persistent local working copy, decrypt
@@ -196,15 +201,15 @@ only to an ignored `*.local.yaml` file, then encrypt it back into the tracked
 
 ```bash
 task sops:decrypt \
-  FILE=tofu/cloud/secret.sops.yaml \
-  OUTPUT=tofu/cloud/secret.local.yaml
+  FILE=tofu/home/secret.sops.yaml \
+  OUTPUT=tofu/home/secret.local.yaml
 
 # Edit the ignored local file, then atomically replace only the encrypted file.
 task sops:encrypt \
-  SOURCE=tofu/cloud/secret.local.yaml \
-  FILE=tofu/cloud/secret.sops.yaml
+  SOURCE=tofu/home/secret.local.yaml \
+  FILE=tofu/home/secret.sops.yaml
 
-rm tofu/cloud/secret.local.yaml
+rm tofu/home/secret.local.yaml
 ```
 
 The Taskfile rejects plaintext paths that do not end in `.local.yaml` or
@@ -230,47 +235,32 @@ Use `task sops:check:all` to verify every encrypted OpenTofu and Kubernetes
 file decrypts. Use `task sops:updatekeys:all` after changing `.sops.yaml`; it
 rewrites all encrypted files using the current recipient rules.
 
-`.sops.yaml` scopes two separate recipient sets: the `tofu/` rule (your local
-key + CI) and the broader `kubernetes/` rule (your local key, CI, and both
-clusters' Flux age keys — `home-flux.age.key` / `cloud-flux.age.key`). Both
-clusters' Flux keys can currently decrypt **every** Kubernetes secret in the
-repo, including the other cluster's — home's Flux can read cloud's Hetzner
-DNS credentials and vice versa. If you want per-cluster secret isolation,
-split the `kubernetes/` rule into `kubernetes/infrastructure/home/.*\.sops\.yaml$`
-and `kubernetes/infrastructure/cloud/.*\.sops\.yaml$` path_regexes with
-distinct recipient lists, then `task sops:updatekeys:all`.
+`.sops.yaml` scopes two recipient sets: the `tofu/home/` rule (your two
+personal keys — `age.key` plus the backup identity) and the broader
+`kubernetes/` rule, which adds `home-flux.age.key`, the identity the
+in-cluster `sops-age` Secret carries for kustomize-controller. tofu files are
+only ever decrypted locally, so Flux's key is deliberately absent from that
+rule. There is no CI recipient any more: nothing outside the cluster and the
+operator decrypts anything. Print the remaining recipients with
+`task sops:keys:local:public` / `task sops:keys:home-flux:public`.
 
-CI's `ci.age.key` is a recipient in the `kubernetes/` rule, meant for a CI
-workflow to `task sops:check:all` on every push — but as of now, **no such CI
-workflow exists** (see "Validation" below); this recipient is provisioned but
-unused. Print its public recipient with:
+`tofu/home/secret.sops.yaml` holds, in one place: the state-encryption
+passphrase, the Hetzner Object Storage keys (the root owns both its state
+bucket and the etcd-backup bucket — see "Remote encrypted state" and
+"Talos etcd backups"), the Tailscale auth key, the HCloud API token (ingress
+worker + DNS credentials), the Cilium WireGuard API CA, the Proxmox API
+token and root@pam password, `home_talosconfig` (see "Talos etcd backups"),
+and `talos_backup_age_private_key` — the private half of the age identity
+the backup CronJob encrypts snapshots with; only its public key lives in
+the cluster (pinned in the CronJob manifest), so a stolen cluster cannot
+decrypt its own backups.
 
-```bash
-task sops:keys:ci:public
-```
-
-`ci.age.key` is *also* a recipient on the `tofu/(home|cloud)` rule — pushed as
-the single `SOPS_AGE_KEY` GitHub Actions secret
-(`gh secret set SOPS_AGE_KEY < ci.age.key`), it's what lets
-`talos-etcd-backup.yml` decrypt everything it needs straight from these same
-files at runtime, rather than duplicating individual values into separate
-GitHub secrets (see "Talos etcd backups" below).
-
-Both `tofu/home/secret.sops.yaml` and `tofu/cloud/secret.sops.yaml` now hold
-the same shape of keys — each root owns its own etcd backup bucket and its
-own state bucket (see "Remote encrypted state" below), so each needs its own
-`hetzner_object_storage_access_key`/`_secret_key` and its own
-`tailscale_auth_key` (home's `cp-main` and both cloud nodes all join the same
-tailnet, for the etcd-backup workflow — see "Talos etcd backups"). Each also
-carries a `<cluster>_talosconfig` key (its own exported talosconfig content)
-and, home only, the two Proxmox credentials.
 
 ## OpenTofu flow
 
-The Home and Cloud roots are fully independent: `tofu/home` manages Proxmox
-and the Home Talos cluster; `tofu/cloud` manages the Hetzner Cloud edge
-cluster. Run whichever root's init/plan/apply you need — they don't call
-each other.
+There is a single root, `tofu/home`. It manages the Proxmox VMs, the Talos
+cluster they host, and the Hetzner Cloud ingress worker that joins it —
+one cluster, two sites, one tofu apply.
 
 ### Minimizing Proxmox host (OS) memory reservation
 
@@ -309,42 +299,32 @@ task tofu:home:plan
 task tofu:home:apply
 ```
 
-The Cloud root, independently:
-
-```bash
-export SOPS_AGE_KEY_FILE="$PWD/age.key"
-task tofu:cloud:init
-task tofu:cloud:plan
-task tofu:cloud:apply
-```
-
-`task tofu:cloud:apply` provisions, in one apply: the ARM64 Talos Image
-Factory snapshot, the HCloud network/firewall/servers (via
-`hcloud-talos/talos/hcloud`), Talos bootstrap, Cilium and the HCloud
-cloud-controller-manager (both applied once as raw manifests and left
-permanently under tofu's ownership — see "Cloud ingress" below), Cloud's own
-etcd backup bucket, and everything Flux needs before it can bootstrap (the
+`tofu/home` owns everything: the Proxmox VMs, the Talos
+cluster, the Hetzner ingress worker (`ingress.tf`, keyed off
+`var.cloud_nodes` — empty by default, so a LAN-only bootstrap works), the
+tofu-owned Cilium release, both S3 buckets this cluster needs (state +
+etcd backups), and everything Flux needs before it can bootstrap (the
 `flux-system` namespace and `sops-age` Secret — see "Flux bootstrap" below).
 
-`task tofu:home:apply` is the same story on the Home side: Proxmox VMs, Talos
-bootstrap, Cilium (tofu-owned here too, not just adopted by Flux — see "Flux
-bootstrap"), Home's own etcd backup bucket, and the same `flux-system`
-namespace/`sops-age` Secret pair.
+`task tofu:home:apply` provisions, in one apply: Proxmox VMs from
+Image-Factory-built media, Talos bootstrap, the Gateway API CRDs and
+Cilium (tofu owns both — see "Flux bootstrap" and "Ingress"), the KubeSpan
+peering config that lets the LAN nodes reach the ingress worker through
+NAT, the Object Storage buckets, and the `flux-system` namespace/`sops-age`
+Secret pair.
 
-**Cost note:** once Cilium's Gateway API integration creates the public
-Gateway's backing `Service` (type `LoadBalancer`), the HCloud
-cloud-controller-manager provisions a real, billed Hetzner Load Balancer for
-it automatically — this happens the moment Flux applies
-`kubernetes/infrastructure/cloud/network/gateway.yaml`, not as a visible line
-in any `tofu plan`.
+**Cost note:** the only billed pieces are the ingress worker itself (a
+`cax11`), the reserved primary IP, and the two Object Storage buckets.
+There is **no** Hetzner Load Balancer any more — the public Gateway is
+backed by a LAN VIP from `CiliumLoadBalancerIPPool`, not a CCM-provisioned
+`LoadBalancer`, since Cilium's L2 announcement hands out addresses itself.
 
 ## Remote encrypted state
 
-Each root stores its state in its **own** dedicated Hetzner Object Storage
-bucket (`home-tofu-state-<random>` / `cloud-tofu-state-<random>`, via an `s3`
-backend block pointed at Hetzner's S3-compatible endpoint) — never shared,
-never local. State is still encrypted the same way as before the move: AES-GCM
-with a distinct SOPS-encrypted PBKDF2 passphrase per root. OpenTofu's
+The root stores its state in a dedicated Hetzner Object Storage bucket
+(`home-tofu-state-<random>`, via an `s3` backend block pointed at Hetzner's
+S3-compatible endpoint) — never shared, never local. State is encrypted
+AES-GCM with a SOPS-encrypted PBKDF2 passphrase. OpenTofu's
 `encryption { state {...} }` block operates on the state document itself,
 before/after it's handed to whichever backend stores the bytes — moving from
 local disk to a remote bucket needed **no change** to that block at all.
@@ -362,7 +342,7 @@ export SOPS_AGE_KEY_FILE="$PWD/age.key"
 ```
 
 Each root's own state bucket is itself a tofu-managed resource
-(`state-backend.tf`), which means bootstrapping either root from nothing has
+(`state-backend.tf`), which means bootstrapping the root from nothing has
 a real chicken-and-egg step: the bucket a backend points at has to exist
 *before* that backend can be initialized against it. Resolved with a one-time,
 two-step sequence per root — after that, `task tofu:*:init` behaves like any
@@ -380,7 +360,7 @@ tofu -chdir=tofu/home apply \
 task tofu:home:init  # or: tofu -chdir=tofu/home init -migrate-state
 ```
 
-Repeat for `tofu/cloud`. Hetzner's endpoint has real, repeatable
+Hetzner's endpoint has real, repeatable
 eventual-consistency lag on a brand-new bucket (read-after-create, not just
 write-after-create) — if step 1 or 2 fails right after the bucket is created,
 wait a short while and retry rather than assuming something is misconfigured;
@@ -398,32 +378,30 @@ The Terraform inputs are intentionally minimal and are centered on:
 
 ## Flux bootstrap
 
-Both clusters come out of `tofu apply` fully ready for `flux bootstrap` —
+The cluster comes out of `tofu apply` fully ready for `flux bootstrap` —
 nothing manual left to do first. This was not always true, and the two things
 that used to require it are worth understanding:
 
-**Cilium.** Home has no built-in CNI (Talos ships with none), and Flux's own
-controllers can't schedule anything without a working CNI — so *something*
-has to install Cilium before Flux ever runs. Cloud always solved this by
-having tofu own Cilium permanently (`deploy_cilium = true` in the
-`hcloud-talos` module, applied as raw manifests, never Flux-managed). Home now
-does the exact same thing (`tofu/home/cilium.tf`, a plain `helm_release`
-resource) — both clusters get their CNI from `tofu apply`, and neither has a
-`kubernetes/infrastructure/*/cilium/` Flux HelmRelease at all, since there's
-nothing left for Flux to adopt.
+**Cilium.** Talos ships with no CNI, and Flux's own controllers can't
+schedule anything without a working one — so *something* has to install
+Cilium before Flux ever runs. The cluster solves this by having tofu own
+Cilium permanently (`tofu/home/cilium.tf`, a plain `helm_release` resource,
+never Flux-managed) — the CNI comes from `tofu apply`, and there is no
+`kubernetes/infrastructure/home/cilium/` Flux HelmRelease at all, since
+there's nothing left for Flux to adopt.
 
 **The `sops-age` Secret.** Flux needs this Secret to exist in `flux-system`
 before it can decrypt anything (`cluster-vars`, `cert-manager`'s DNS
-credentials, etc.). Both roots now create it directly
-(`tofu/*/flux-bootstrap.tf`: a `kubernetes_namespace` for `flux-system` + a
-`kubernetes_secret` populated from that cluster's own `*-flux.age.key`) —
+credentials, etc.). The root creates it directly
+(`tofu/home/flux-bootstrap.tf`: a `kubernetes_namespace` for `flux-system` +
+a `kubernetes_secret` populated from `home-flux.age.key`) —
 `flux bootstrap` is idempotent against a pre-existing namespace/secret, so it
 just finds both already there.
 
 Both are wired through `kubernetes`/`helm` providers configured directly from
 `talos_cluster_kubeconfig`'s own resource attributes (the same
 resource-attribute-backed provider pattern the vendored `hcloud-talos` module
-already uses internally for its own post-bootstrap providers) — so these
+already used internally for its own post-bootstrap providers) — so these
 resources only get created once the cluster is actually up and its kubeconfig
 is known, in the right order, automatically.
 
@@ -435,15 +413,6 @@ KUBECONFIG=kubeconfig-home.yaml flux bootstrap github \
   --repository=<your-repo> \
   --branch=main \
   --path=kubernetes/clusters/home \
-  --personal
-```
-
-```bash
-KUBECONFIG=kubeconfig-cloud.yaml flux bootstrap github \
-  --owner=<your-user> \
-  --repository=<your-repo> \
-  --branch=main \
-  --path=kubernetes/clusters/cloud \
   --personal
 ```
 
@@ -462,19 +431,22 @@ anything by hand.
 
 ## Minimal cluster contents
 
-- **Home**: Proxmox VM provisioning, Talos machine secrets/configs, an
-  Image-Factory-built boot image per node's resolved extension set, Cilium
-  (tofu-owned, same as Cloud — see "Flux bootstrap"), a Flux-managed Job that
-  applies the two node taints Talos itself can never self-apply (see
-  "Known limitations"), the NVIDIA device plugin (AI worker only),
-  TrueNAS-CSI storage classes. Three distinct extension sets are in play — a
-  shared base, base + `i915` for the media worker, and base + the NVIDIA
-  driver/toolkit for the AI worker — so each node boots the smallest image
-  that serves it.
-- **Cloud**: `hcloud-talos/talos/hcloud`-provisioned HCloud network/firewall/
-  servers, Cilium + HCloud CCM (owned by tofu, not Flux — see "Cloud
-  ingress"), cert-manager + the Hetzner DNS webhook, the Gateway API CRDs,
-  the public Gateway, external-dns, Headlamp (internal-only by default).
+- **tofu-owned**: Proxmox VM provisioning, the Hetzner ingress worker, Talos
+  machine secrets/configs, an Image-Factory-built boot image per node's
+  resolved extension set, the Gateway API CRDs, Cilium (see "Flux
+  bootstrap"), and both Object Storage buckets (state + etcd backups).
+  Four distinct extension sets are in play — a shared base, base + `i915`
+  for the media worker, base + the NVIDIA driver/toolkit for the AI worker,
+  and a minimal tailscale-only set for the ingress worker — so each node
+  boots the smallest image that serves it.
+- **Flux-owned**: everything else — cert-manager + the Hetzner DNS webhook,
+  the `network` namespace (public Gateway on the LAN VIP, LB-IPAM pool,
+  L2 announcements, wildcard Certificate), external-dns, the node-taints
+  Job (see "Known limitations"), the NVIDIA device plugin (AI worker only),
+  TrueNAS-CSI storage classes, Zot (the cluster's own OCI registry), an
+  in-cluster BuildKit builder + image-builds, CNPG operator + Immich,
+  LLMKube (Qwen on the P100), the monitoring stack, Headlamp, and the
+  Talos etcd-backup CronJob.
 
 ### System extensions: the ISO is not enough
 
@@ -516,35 +488,44 @@ The storage classes therefore use `reclaimPolicy: Retain` and `forceDelete: "fal
 
 ## Topology
 
-Two independent Talos clusters, not one cluster spanning two sites:
+One Talos cluster spanning two sites — not two clusters:
 
-- **home**: `pmx-main` (Proxmox, private IPs, control plane + workers)
-- **cloud**: a Hetzner Cloud Talos control plane + worker with a public IP —
-  the sole public ingress point
+- **home**: `pmx-main` (Proxmox, private IPs): control plane + three
+  workers (efficiency, media/iGPU, AI/P100)
+- **Hetzner site**: a single `cax11` worker with a public IP, joined to the
+  LAN control plane over Talos KubeSpan. No control plane, no second etcd.
 
-Home's node-to-node traffic uses Talos KubeSpan (WireGuard mesh) purely for
-transport encryption — it does not carry pod-to-pod traffic (that stays with
-Cilium's own VXLAN overlay; see `advertiseKubernetesNetworks` in
-`tofu/home/talos.tf`). Cloud does not use KubeSpan. There is currently no
-cross-cluster networking (no ClusterMesh, no shared private addressing) —
-each cluster is reached and operated independently.
+LAN node-to-node traffic uses KubeSpan purely for transport encryption — it
+does not carry pod-to-pod traffic (that stays with Cilium's own VXLAN
+overlay; see `advertiseKubernetesNetworks` in `tofu/home/talos.tf`). For the
+Hetzner worker KubeSpan *is* the underlay: all four LAN nodes sit behind one
+NAT and cannot accept inbound, so they dial out to it and UDP 51820 must stay
+open on its firewall (see `tofu/home/ingress.tf`). There is no ClusterMesh —
+with one cluster there is nothing to mesh with.
+
+Services are reached on a LAN LoadBalancer VIP (`10.30.0.200`, pinned on the
+Gateway, from the pool in
+`kubernetes/infrastructure/home/network/lb-ipam.yaml`), ARP-announced by
+Cilium's L2 announcements restricted to `topology.homelab/site=home` — the
+Hetzner worker is on a different L2 segment and can never answer for it,
+which is also why Envoy no longer runs host-network there (see "Ingress").
 
 ## Validation
 
-Before deployment, check the structure:
+Before pushing, check the structure:
 
 ```bash
-tofu fmt -check -recursive tofu
-task tofu:home:validate
-task tofu:cloud:validate
-kustomize build kubernetes/clusters/home
-kustomize build kubernetes/clusters/cloud
-yamllint .
+task check   # yamllint + tofu fmt + kustomize builds + sops decrypt
 ```
 
-There is currently no CI workflow that runs these checks automatically (the
-only workflow in `.github/workflows/` is the etcd backup cron) — running them
-locally before pushing is on you for now.
+which is the aggregate of `task lint:yaml`, `task lint:tofu`,
+`task lint:kustomize` and `task sops:check:all`. Add
+`task tofu:home:validate` when you touch the tofu tree.
+
+There is no CI — no workflow runs any of this automatically; running
+`task check` locally before pushing is on you for now. (The former GitHub
+Actions etcd-backup workflow was the last one and is gone; see "Talos etcd
+backups".)
 
 Common workflows are wrapped in the Taskfile (`task --list`):
 
@@ -557,11 +538,12 @@ Common workflows are wrapped in the Taskfile (`task --list`):
 | `task sops:encrypt SOURCE=<local> FILE=<file>` | Atomically encrypt a working copy       |
 | `task sops:check:all`                   | Verify every encrypted file decrypts     |
 | `task sops:updatekeys:all`              | Rekey every encrypted file               |
-| `task tofu:home:init` / `plan` / `apply` / `destroy` | Home OpenTofu lifecycle |
-| `task tofu:cloud:init` / `plan` / `apply` / `destroy` | Cloud OpenTofu lifecycle |
-| `task kubeconfig:home:export` / `task kubeconfig:cloud:export` | Write cluster-specific kubeconfigs |
-| `task talosconfig:home:export` / `task talosconfig:cloud:export` | Write cluster-specific talosconfigs |
-| `task talos-backup:home:bucket` / `task talos-backup:cloud:bucket` | Print the generated backup bucket names |
+| `task tofu:home:init` / `plan` / `apply` / `destroy` | OpenTofu lifecycle        |
+| `task kubeconfig:home:export`           | Write the cluster kubeconfig             |
+| `task talosconfig:home:export`          | Write the cluster talosconfig            |
+| `task talos-backup:home:bucket`         | Print the generated backup bucket name   |
+| `task lint:yaml` / `lint:tofu` / `lint:kustomize` | Structure checks           |
+| `task check`                            | Run all of the above                     |
 
 ---
 
@@ -576,230 +558,243 @@ This repo intentionally stays small and opinionated:
 
 If you need to add a workload later, add it in a single, purpose-built layer rather than reintroducing broader platform scaffolding.
 
-## Cloud ingress
+## Ingress
 
-Home and Cloud are independent Kubernetes clusters, each operated on its own
-(there is no cross-cluster networking yet — see "Topology"). Cloud has one
-schedulable control plane and one worker, both public-IP HCloud nodes, and is
-the only public edge. Cloud nodes run the `siderolabs/tailscale` Talos system
-extension; add a reusable or ephemeral Tailscale auth key as
-`tailscale_auth_key` in the encrypted `tofu/cloud/secret.sops.yaml` before the
-first apply — the key is passed to Talos as `TS_AUTHKEY` and never committed
-in plaintext.
+Public names, LAN-only path: services are addressed by a LoadBalancer VIP on
+the cluster VLAN, announced with ARP by Cilium, and the **public** Hetzner
+zone publishes A records pointing at that RFC1918 address. Nothing is
+reachable from the internet — what public DNS buys is resolver independence
+(DoH clients, UniFi Teleport and plain LAN clients all get the same answer;
+this is what killed the old "turn Encrypted DNS off on the UDM" workaround).
+The stated cost: service hostnames and the internal VIP are publicly
+enumerable. The wildcard certificate keeps individual names out of CT logs,
+so it is a real privacy reduction, not a no-op — the alternative is
+publishing into UniFi local DNS again (resolver-dependent).
 
-Public traffic path:
+Traffic path:
 
 ```text
-client → Hetzner DNS → A record → Hetzner Load Balancer (auto-provisioned
-       by hcloud-ccm for the Gateway's Service)
-       → Cilium Gateway (envoy) :443, TLS = Let's Encrypt wildcard
-  → HTTPRoute → ClusterIP Service → pod
+client → Hetzner DNS (public zone) → A record → LAN VIP (10.30.0.200)
+   → Cilium Gateway (Envoy pod on a home node) :443
+   → HTTPRoute → ClusterIP Service → pod
 ```
 
-- TLS is terminated on the Gateway with a single wildcard cert
-  (`*.svc.<domain>` + `svc.<domain>`) issued by cert-manager via Let's Encrypt
-  **DNS-01** through `cert-manager-webhook-hetzner`.
-- external-dns creates per-app A records from Gateway HTTPRoutes, scoped to
-  `svc.<domain>` so it cannot touch unrelated DNS. It runs the
-  `external-dns-hetzner-webhook` sidecar (external-dns 0.15.x dropped the
-  built-in Hetzner provider).
+- Envoy is an ordinary **pod**, not a host-network bind:
+  `gatewayAPI.hostNetwork.enabled` is `false` in `tofu/home/cilium.tf`. It
+  used to be on, binding 443 on the Hetzner worker — from that host network
+  namespace Envoy could not reach pods on the LAN nodes at all (every Immich
+  request 503'd with a healthy backend), and it crossed the WAN twice for a
+  service in the same room as the client. The flag is global with no
+  per-Gateway override: turning it back on breaks the VIP.
+- `externalTrafficPolicy: Local` (also in `cilium.tf`): cilium-envoy runs on
+  every node including the Hetzner one; under `Cluster` policy the
+  VIP-receiving node load-balanced across all Envoys and roughly one request
+  in five landed on the Hetzner one — which answers 503 for the same
+  host-netns reason. `Local` also preserves the client source IP.
+- The VIP is allocated by `CiliumLoadBalancerIPPool`
+  (`network/lb-ipam.yaml`, `10.30.0.200-250`), pinned to `.200` on the
+  Gateway via `lbipam.cilium.io/ips` because every published DNS record
+  points at it, and announced by `CiliumL2AnnouncementPolicy`
+  (`network/l2-announcement.yaml`) restricted to
+  `topology.homelab/site=home` — the Hetzner worker sits on a different L2
+  segment and could never answer ARP for it. Leadership is per-service and
+  Lease-backed, so the VIP fails over between home nodes. (The old
+  `nmap -p 443` "no stray binds" check is meaningless since Envoy stopped
+  using host networking.)
+- TLS terminates on the Gateway with wildcard certs (`*.svc.<domain>`,
+  `*.<domain>` and the apex) issued by cert-manager via Let's Encrypt
+  **DNS-01** through `cert-manager-webhook-hetzner`. The webhook targets the
+  **new** Hetzner Cloud DNS API (`api.hetzner.cloud/v1/zones`) — the legacy
+  `dns.hetzner.com` endpoint now 301s to HTML, so any client still pointed
+  there gets a web page instead of JSON.
+- external-dns (`infrastructure/home/external-dns/`) publishes an A record
+  per hostname on every HTTPRoute attached to the Gateway, via the
+  `external-dns-hetzner-webhook` sidecar (also migrated to the new API —
+  check the pinned webhook version carries `hcloud-go/v2` zone support
+  before bumping). Scoped to the zone apex, `gateway-httproute` source only
+  (no `service` source: publishing stays an explicit act), `policy: sync`
+  with a `reg-*` TXT ownership registry so deleting an HTTPRoute removes its
+  record while touching nothing else in the zone.
 - Only namespaces labeled `gateway.ngoldack.de/public-ingress=true` may
-  attach an HTTPRoute to the public Gateway — nothing is labeled by default,
-  so label a namespace explicitly to expose a workload:
-  `kubectl label namespace <ns> gateway.ngoldack.de/public-ingress=true`.
+  attach an HTTPRoute to the public Gateway — nothing is labeled by default.
+- The Hetzner worker keeps a public firewall rule for 443 and runs Cilium's
+  Envoy DaemonSet pod like every node, but since hostNetwork is off nothing
+  binds its public 443 any more — see "Known limitations".
 
-### Cilium and the HCloud CCM are owned by tofu, permanently
+### Cilium is owned by tofu, permanently
 
-Talos starts with no CNI, so `tofu/cloud/cloud.tf` bootstraps Cilium and the
-HCloud CCM by rendering their charts and applying the manifests directly
-(`kubectl_manifest`, `apply_only = true`) — not via a real Helm release. This
-is deliberate and permanent, not a bootstrap-then-handoff step: those
-manifests carry no Helm ownership metadata, so a Flux `HelmRelease` over the
-same objects in `kube-system` would fail its own install with an ownership
-conflict (`invalid ownership metadata`). There is accordingly **no** Flux
-`HelmRelease` for Cilium or the CCM on the cloud cluster.
+Talos starts with no CNI, so `tofu/home/cilium.tf` installs Cilium as a real
+`helm_release` during `tofu apply` — before Flux exists, since Flux's own
+controllers cannot schedule until a CNI does. This is deliberate and
+permanent: there is **no** Flux `HelmRelease` for Cilium. To upgrade, bump
+`cilium_version` / `cilium_values` in `tofu/home/cilium.tf` and re-apply;
+Flux manages every other workload but never touches `kube-system`'s CNI.
 
-To upgrade either, bump `cilium_version` / `hcloud_ccm_version` (or
-`cilium_values`) in `tofu/cloud/cloud.tf` and re-apply — same as any other
-tofu-managed resource. Flux still manages every other cloud workload
-(cert-manager, external-dns, headlamp, the Gateway/HTTPRoutes, the Gateway
-API CRDs); it just never touches `kube-system`'s CNI/CCM.
+The Gateway API CRDs are also tofu-owned (`tofu/home/gateway-api-crds.tf`,
+a vendored chart, with `helm_release.cilium` `depends_on` it). That is the
+fix for the failure that ate a whole cluster here: `cilium-operator` probes
+for the Gateway API CRDs exactly once at startup and treats a miss as
+permanent, and on the old cloud cluster the Flux-owned CRDs landed ~24
+minutes after the operator started — so the Gateway silently never became
+Accepted while every Kustomization stayed green. Same-graph ordering now
+holds on a from-scratch rebuild, and `gatewayAPI.gatewayClass.create` is set
+to the string `"true"` explicitly because client-side rendering can never
+satisfy the chart's `"auto"` capability check. There must be exactly **one**
+owner of these CRDs: a second owner doing server-side apply with prune can
+cascade-delete every Gateway and HTTPRoute.
 
-**Known gap — Gateway API needs two manual steps, and timing does not fix it.**
-The Gateway API CRDs are installed by Flux
-(`kubernetes/infrastructure/cloud/gateway-api-crds/`), not by `tofu apply`, so
-Cilium is always installed before they exist. Two independent consequences,
-both confirmed against the live cluster:
+The vendored bundle and the Cilium chart are a **lockstep pair**: Cilium
+1.20's operator unconditionally indexes `TLSRoute` **v1** and its Gateway API
+support requires Gateway API **v1.6.1 minimum** (the mirror image of the
+1.19.5-era crash, where the operator indexed `TLSRoute` v1alpha2 and died when
+a newer standard bundle dropped it). The **experimental channel** is now
+mandatory, not a matter of taste: it is the only v1.6.1 bundle that still
+serves `TLSRoute` v1alpha2 (installing v1.6 *standard* orphans any v1alpha2
+objects in etcd), and the `ExternalAuth` HTTPRoute filter (GEP-1494) that
+Cilium 1.20 implements — the edge-authz hook the authentik plan uses — exists
+only there. Against standard-channel CRDs the API server **silently prunes**
+the filter field and a route meant to be protected reconciles **unprotected**.
+Bump one without the other and the operator crash returns; the chart's
+`Chart.yaml` records the full reasoning, including why the standard→experimental
+swap lands before the bundle's new `safe-upgrades` admission policy exists to
+object.
 
-1. **The operator's CRD probe is one-shot.** `cilium-operator` checks for the
-   Gateway API CRDs once at startup; a missing CRD is treated as a
-   non-transient error, so it marks the controller degraded and reports
-   `Enabled: false` for the lifetime of the process. Bootstrapping Flux
-   "promptly" does not help — the operator never re-probes. After
-   `gateway-api-crds` reconciles you must restart it explicitly:
-   `kubectl -n kube-system rollout restart deployment/cilium-operator`.
-2. **No `GatewayClass` is ever rendered.** The `hcloud-talos` module renders
-   Cilium client-side via `data "helm_template"`, so the chart's
-   `gatewayClass.create: "auto"` capability check cannot see the cluster and
-   never fires (`kind: GatewayClass` appears zero times in tofu state). Set
-   `gatewayAPI.gatewayClass.create = "true"` in `cilium_values` explicitly —
-   but only once the CRDs are present, or the manifest apply fails.
+### Edge ingress: split-horizon with authentik
 
-Until both are done, `kubernetes/infrastructure/cloud/network/gateway.yaml`
-(`gatewayClassName: cilium`) never becomes Accepted and gets no address, so
-external-dns publishes nothing. Note this fails *silently*: the `network`
-Kustomization's `wait: true` still reports Ready, because kstatus treats a
-custom resource with an empty status as Current.
+Same hostnames, two paths — the answer a client gets decides which:
+
+| Client | Resolves to | Path |
+| ------ | ----------- | ---- |
+| LAN / UniFi Teleport | `10.30.0.200` (LAN VIP) | internal Gateway (`public`) → app pod. No auth hop, no WAN. |
+| Internet | `2.28.31.116` (Hetzner primary IP) | edge Gateway → cilium-envoy on the ingress node → authentik edge outpost (session check; login redirects to the portal) → home pod over KubeSpan. |
+
+Pieces: `network/edge.yaml` (cloud LB-IPAM pool + second Gateway — the
+datapath already exists, only the VIP registration is new), the
+`authentik/` stack (server+worker on CNPG+valkey-operator at home, Rust
+proxy outpost pinned to the Hetzner node via `nodeSelector`/toleration),
+per-Gateway namespace labels (`public-ingress` vs `edge-ingress`), and
+external-dns instance scoping via `--gateway-label-filter` so an edge route
+can never overwrite an internal record. Edge exposure per app = its own
+edge HTTPRoute (see `headlamp/httproute-edge.yaml`); authentik resources are
+seeded declaratively from `/blueprints` (`authentik/seed.yaml`).
+
+DNS today still answers every client with the LAN VIP (public zone);
+flipping the public records to the edge address — and standing up the
+internal override (Unbound or UniFi webhook) — is the deliberate last step,
+which is why edge routes are held back until the filter ships first.
 
 ## Talos etcd backups
 
-`.github/workflows/talos-etcd-backup.yml` uploads Home and Cloud
-control-plane etcd snapshots daily to separate Hetzner Object Storage
-buckets, running in GitHub Actions rather than inside either cluster so Talos
-administrative credentials are never exposed to cluster workloads.
+`kubernetes/infrastructure/home/talos-backup/` runs the official
+`ghcr.io/siderolabs/talos-backup` image as an in-cluster CronJob
+(daily 03:17 Europe/Berlin, `concurrencyPolicy: Forbid`) that snapshots etcd
+and uploads it to the `home-talos-etcd-<suffix>` Object Storage bucket
+(created by tofu, `tofu/home/backups.tf`).
 
-Both jobs run on ordinary GitHub-hosted `ubuntu-24.04` runners — **no
-self-hosted runner**. Each job joins the tailnet at runtime via
-`tailscale/github-action`, using the same `tailscale_auth_key` tofu uses to
-enroll actual cluster nodes, then reaches its control plane over its tailnet
-hostname rather than a public IP. This is what makes a GitHub-hosted runner
-viable for the Home job at all (its Talos API is on a private LAN) and sidesteps
-Cloud's firewall entirely (`:50000` there is restricted to a single source IP —
-see "Known limitations" — which the tailnet path never touches). It's why
-`cp-main` carries the `siderolabs/tailscale` extension too, not just Cloud's
-nodes.
+This replaced `.github/workflows/talos-etcd-backup.yml`, which never produced
+a single successful backup. Its fatal defect was environmental: every CI run
+joined the tailnet as a **new** ephemeral device needing manual admin-console
+approval, so it could never run unattended. In-cluster removes the tailnet
+hop entirely — the CronJob reaches the local Talos API directly, with no node
+IP or hostname to keep in sync, and is pinned to the home site
+(`topology.homelab/site: home`) since the 2 GiB Hetzner worker has no business
+holding two full snapshots in scratch space.
 
-Every credential either job needs (Hetzner Object Storage keys, each cluster's
-talosconfig, the Tailscale auth key) is decrypted at runtime from the same
-sops-encrypted files tofu itself reads
-(`tofu/home/secret.sops.yaml`/`tofu/cloud/secret.sops.yaml`), via a single
-`SOPS_AGE_KEY` repository secret — `ci.age.key`'s private key, added as a
-recipient in `.sops.yaml` specifically for this. Nothing is duplicated into
-separate per-value GitHub secrets; there is exactly one secret to manage
-(`gh secret set SOPS_AGE_KEY < ci.age.key`), and rotating it is the same
-`sops updatekeys` + re-push as rotating any other recipient.
+Authentication is Talos-native, not copied credentials: a
+`ServiceAccount.talos.dev` (Talos's own service-account CRD) issues the pod a
+short-lived talosconfig mounted at
+`/var/run/secrets/talos.dev/config` — `TALOS_HOME=/tmp` + `TALOSCONFIG` are
+set explicitly because the binary's path resolution dies when `$HOME` is
+unset. Only the S3 credentials are a SOPS Secret
+(`talos-backup-s3-credentials`).
 
-Each cluster's talosconfig is stored as a value inside its own sops file too
-(`home_talosconfig` / `cloud_talosconfig`) — a one-time export
-(`tofu output -raw <cluster>_cluster_talosconfig`, `sops --set`) that only
-needs redoing if that cluster's Talos machine secrets are ever regenerated
-from scratch (they carry `prevent_destroy`, so this is rare). Each job's `TALOS_TAILNET_HOST` env var is the target node's Tailscale IP
-(`talosctl -n <ip> get addresses`, the `tailscale0` interface) rather than
-its hostname — deliberately, so the workflow doesn't depend on the tailnet
-having MagicDNS enabled, which can't be verified from outside it. That IP is
-stable for the life of the node's tailnet registration, and only needs
-updating if a node is ever removed from the tailnet and rejoins as a new
-device (a from-scratch reinstall, most likely).
+Snapshots are **age-encrypted before upload** — the cluster has no
+secrets-at-rest encryption, so a raw etcd snapshot contains every Secret in
+plaintext. The private half of that age identity is deliberately NOT in the
+cluster (that would defeat the purpose): it lives in
+`tofu/home/secret.sops.yaml` as `talos_backup_age_private_key` and is
+required to restore. The CronJob manifest pins only the public key. Objects
+land as `etcd-<UTC timestamp>.snapshot`.
 
-The workflow removes its temporary talosconfig and etcd snapshot before
-either job finishes, and fails fast (`: "${VAR:?...}"` guards) on a missing
-secret rather than a confusing several-seconds-later parse error.
-
-**Before either job can succeed, a newly-joined tailnet device needs manual
-approval in the Tailscale admin console** (`machineAuthorized`), exactly like
-any new node — this includes `cp-main` the first time it joins. Reusing the
-same reusable auth key for CI runs as for real node enrollment is a
-deliberate simplification: mark that key **Ephemeral** in the Tailscale admin
-console so CI-joined devices clean themselves up after each run, rather than
-accumulating as permanent tailnet members.
-
-Hetzner Cloud's OpenTofu provider does not manage Object Storage buckets. This
-repository uses the maintained AWS provider against Hetzner's S3-compatible API
-to create both etcd backup buckets *and* both roots' own state buckets (see
-"Remote encrypted state"). Before the first apply of either root, create an
-Object Storage access key in the Hetzner Console for `fsn1`, then add its
-values to **both** `tofu/home/secret.sops.yaml` and
-`tofu/cloud/secret.sops.yaml` — each root owns its own etcd backup bucket now
-(`home_talos_backups` lives in `tofu/home`, not `tofu/cloud` — it moved
-there because it's Home's data, and Home has its own AWS-provider access
-anyway for its own state bucket):
+Hetzner Cloud's OpenTofu provider does not manage Object Storage buckets, so
+the root uses the maintained AWS provider against Hetzner's S3-compatible
+API — for the backup bucket *and* the state bucket (see "Remote encrypted
+state"). Before the first apply, create an Object Storage access key for
+`fsn1` in the Hetzner Console and put it in `tofu/home/secret.sops.yaml`:
 
 ```yaml
 hetzner_object_storage_access_key: <access-key>
 hetzner_object_storage_secret_key: <secret-key>
 ```
 
-Every bucket (both etcd backup buckets, both state buckets) is versioned and
-protected with `prevent_destroy`. None has a lifecycle/expiration policy:
-`aws_s3_bucket_lifecycle_configuration` cannot be applied against Hetzner's
-S3-compatible endpoint (a confirmed upstream provider bug — see the comment
-above `home_talos_backups` in `tofu/home/backups.tf`), so objects accumulate
-forever until one is set manually via the Hetzner Console or
-`aws s3api put-bucket-lifecycle-configuration`.
+Both buckets are versioned and `prevent_destroy`. Neither has a
+lifecycle/expiration policy: `aws_s3_bucket_lifecycle_configuration` cannot
+be applied against Hetzner's endpoint (a confirmed upstream provider bug —
+see the comment above `home_talos_backups` in `tofu/home/backups.tf`), so
+snapshots accumulate forever until a policy is set manually via the Hetzner
+Console or `aws s3api put-bucket-lifecycle-configuration`.
 
-Provision everything and export each cluster's Talos configuration:
-
-```bash
-export SOPS_AGE_KEY_FILE="$PWD/age.key"
-task tofu:home:init
-task tofu:home:apply
-task tofu:cloud:init
-task tofu:cloud:apply
-task talosconfig:home:export
-task talosconfig:cloud:export
-```
-
-Add each cluster's own talosconfig into its own sops file (a one-time step,
-only needed again if that cluster's Talos machine secrets are ever
-regenerated from scratch):
-
-```bash
-sops --set '["home_talosconfig"] '"$(python3 -c 'import json,sys;print(json.dumps(open("talosconfig-home.yaml").read()))')" \
-  tofu/home/secret.sops.yaml
-sops --set '["cloud_talosconfig"] '"$(python3 -c 'import json,sys;print(json.dumps(open("talosconfig-cloud.yaml").read()))')" \
-  tofu/cloud/secret.sops.yaml
-```
-
-Set the single `SOPS_AGE_KEY` GitHub Actions repository secret (see "Secret
-handling") and use **Run workflow** for the initial snapshot. Each bucket
-stores objects named `etcd-<UTC timestamp>.snapshot`.
 
 ### Bootstrap order
 
-1. Add a Hetzner Cloud API token to the `cert-manager` and `network`
+1. Populate `tofu/home/secret.sops.yaml`: state passphrase, Object Storage
+   keys, `hcloud_api_token`, `tailscale_auth_key`, the Proxmox API token and
+   root@pam password (see "Secret handling" and "Talos etcd backups").
+2. Add the same Hetzner Cloud API token to the `cert-manager` and `network`
    encrypted Secrets (see the table in "Secret handling") — reuse
-   `tofu/cloud/secret.sops.yaml`'s `hcloud_api_token`, or a separate,
+   `tofu/home/secret.sops.yaml`'s `hcloud_api_token`, or a separate,
    narrower-scoped token if you'd rather not share one.
-2. Add a Tailscale auth key to **both** `tofu/home/secret.sops.yaml` and
-   `tofu/cloud/secret.sops.yaml` as `tailscale_auth_key`.
-3. Add a root@pam password for `pmx-main` to `tofu/home/secret.sops.yaml` as
-   `proxmox_pmx-main_root_password` (needed for `cpu.affinity`, which Proxmox
-   rejects from any API-token-authenticated request).
-4. Bootstrap each root's own remote state bucket (see "Remote encrypted
-   state"), then `task tofu:home:apply` and `task tofu:cloud:apply` — this
-   brings up both clusters fully, including Cilium and the `sops-age` Secret
-   Flux needs (see "Flux bootstrap"). Nothing manual in between.
-5. Bootstrap Flux independently at `kubernetes/clusters/home` and
-   `kubernetes/clusters/cloud` (see "Flux bootstrap" — no pre-steps needed).
-6. On Cloud, after the `gateway-api-crds` Kustomization reconciles, run
-   `kubectl -n kube-system rollout restart deployment/cilium-operator` — the
-   operator only probes for the Gateway API CRDs once, at startup, and will
-   otherwise leave its Gateway controller disabled forever. See the "Known
-   gap" note above; this step is required, not a precaution. (This is the
-   one other place this repo runs `kubectl` directly instead of through tofu
-   or Flux — restarting a Deployment isn't expressible as a resource to
-   converge toward, only as an action to take once, after a specific event.)
+3. Bootstrap the root's remote state bucket (see "Remote encrypted
+   state"), then `task tofu:home:apply` — this brings up the whole cluster:
+   LAN VMs, the Hetzner ingress worker (skip by leaving `cloud_nodes = {}`),
+   Cilium, and the `sops-age` Secret Flux needs (see "Flux bootstrap").
+   Nothing manual in between.
+4. Bootstrap Flux at `kubernetes/clusters/home` (see "Flux bootstrap" — no
+   pre-steps needed).
+5. Export the talosconfig and store it in the sops file for backup
+   restores:
+
+   ```bash
+   task talosconfig:home:export
+   sops --set '["home_talosconfig"] '"$(python3 -c 'import json,sys;print(json.dumps(open("talosconfig-home.yaml").read()))')" \
+     tofu/home/secret.sops.yaml
+   ```
+
+   (The CronJob itself does not need this — it gets its talosconfig from the
+   Talos `ServiceAccount` — but `talosctl` restore drills do.)
 
 ### Verification
 
-- Cloud: `kubectl --context cloud get nodes` shows both nodes Ready.
-- Home: `kubectl --context home get nodes` shows all nodes Ready, and
-  `kubectl -n kube-system get pods -l k8s-app=cilium` shows tofu's own Cilium
-  release healthy.
-- Both: `flux get all` shows every Kustomization/HelmRelease Ready, and
-  `kubectl -n kube-system get job node-taints` (Home) shows `Complete`.
-- Certificate: `kubectl get certificate -n network` shows `wildcard-svc-tls` Ready.
-- Gateway: `kubectl get gateway -n network public` shows Programmed with an address.
-- DNS: `kubectl logs -n network deploy/external-dns` and `dig app.ns.svc.<domain>` → the Load Balancer's IP.
-- TLS end-to-end: `curl -v https://<app>.<ns>.svc.<domain>` presents the Let's Encrypt cert.
+- `kubectl --context home get nodes` shows all five nodes Ready (four LAN +
+  the Hetzner worker), and `kubectl -n kube-system get pods -l k8s-app=cilium`
+  shows tofu's own Cilium release healthy.
+- `flux get all` shows every Kustomization/HelmRelease Ready, and
+  `kubectl -n kube-system get job node-taints` shows `Complete`.
+- KubeSpan: `talosctl -n <lan-ip> get meshconfig` lists the ingress peer as
+  `Ready` — the three LAN-to-Hetzner peerings are dial-out only.
+- Certificate: `kubectl get certificate -n network` shows the wildcard
+  Ready.
+- Gateway: `kubectl get gateway -n network public` shows Programmed with
+  `10.30.0.200`.
+- DNS: `kubectl logs -n network deploy/external-dns` and
+  `dig <app>.<domain>` → `10.30.0.200` (from any resolver, DoH included —
+  that's the point).
+- TLS end-to-end: `curl -v https://<app>.<domain>` from the LAN presents the
+  Let's Encrypt cert.
+
 
 ## Known limitations / follow-ups
 
-- **Talos/node upgrades**: `hcloud-talos/talos/hcloud` sets
-  `lifecycle { ignore_changes = [user_data, image, iso] }` on cloud's servers,
-  so bumping `talos_version` alone does not upgrade running nodes — use
-  `talosctl upgrade` / `talosctl upgrade-k8s` for in-place upgrades, per the
-  module's own operational guidance.
+- **Talos/node upgrades**: bumping `talos_version` regenerates machine configs
+  and images but does not upgrade running nodes in place — use
+  `talosctl upgrade` / `talosctl upgrade-k8s`. On the Hetzner worker,
+  `hcloud_server` sets `lifecycle { ignore_changes = [user_data, image] }`
+  precisely so a config edit never REPLACES the server (the initial config
+  rides on `user_data` at first boot; every later push goes through
+  `talos_machine_configuration_apply` proxied over KubeSpan). A new
+  schematic means a deliberate `tofu apply -replace` / reinstall from the
+  new installer image — extensions are install-time only (see "System
+  extensions").
 - **Firmware/chipset**: every home VM uses `machine = "q35"` + `bios = "ovmf"`
   (with the required `efi_disk`), deliberately uniform across the fleet
   rather than only on the PCIe-passthrough node. Every VM also gets a
@@ -816,20 +811,27 @@ stores objects named `etcd-<UTC timestamp>.snapshot`.
   Proxmox's typical self-signed certificate; if you've issued a real one,
   set `insecure = false` per host in `proxmox_nodes`.
 - **Registry rate limiting**: some Hetzner IP ranges hit container registry
-  rate limits; if image pulls start failing on the cloud cluster, this is a
-  known cause.
-- **`tofu plan` is never clean for `tofu/cloud`, and applying it disturbs the
-  control-plane VIP.** The module hard-codes `alias_ips = []` on the
-  control-plane server (`server.tf`, citing
-  `hetznercloud/terraform-provider-hcloud#650`), but Talos claims the VIP
-  `172.30.1.100` — `cidrhost(node_ipv4_cidr, 100)`, the internal control-plane
-  endpoint — on that same private interface at runtime through the Hetzner API.
-  Neither side yields, so every plan shows an in-place server diff wanting to
-  strip the alias. Applying it *does* strip the VIP until Talos re-claims it,
-  briefly breaking the internal control-plane endpoint. Nothing in this repo
-  can fix it without forking the module, so: treat a non-empty cloud plan as
-  expected, read the diff before applying, and expect a short VIP gap on any
-  cloud apply.
+  rate limits; if image pulls start failing on the Hetzner worker, this is a
+  known cause — another reason build output goes to the in-cluster Zot
+  registry rather than GHCR.
+- **No `tofu plan` should show drift on the Hetzner worker any more.** The
+  old `tofu/cloud` root was permanently dirty: the `hcloud-talos` module
+  hard-coded `alias_ips = []` while Talos claimed the control-plane VIP on
+  that interface at runtime (`hetznercloud/terraform-provider-hcloud#650`),
+  so every plan wanted to strip it and applying briefly broke the
+  endpoint. The destroyed root is gone, and the hand-rolled `ingress.tf`
+  has no equivalent — a non-empty plan here is now a real finding, not
+  noise to read past.
+- **Vestigial bits on the ingress worker** (candidates for a follow-up
+  cleanup, deliberately left because touching them is a live apply on a
+  `NoSchedule`-tainted node nothing depends on): the firewall's public 443
+  rule and its "sole public entry point" comment in `ingress.tf` predate
+  hostNetwork being turned off — nothing binds that port any more; and
+  `cp-main` still carries `siderolabs/tailscale` for the retired GitHub
+  Actions backup job, which is now just an admin path. The two old
+  `cloud-*` Object Storage buckets (state + etcd backups, both verifiably
+  empty) were also left in place: deletion is irreversible and they cost
+  nothing.
 - **Talos can never self-apply a node taint — this repo doesn't use
   `machine.nodeTaints` at all any more.** Talos does not pass taints through
   kubelet's `--register-with-taints`; `k8s.NodeApplyController` patches
@@ -856,8 +858,8 @@ stores objects named `etcd-<UTC timestamp>.snapshot`.
   (should show `Complete`). Symptom of something actually wrong: a node
   that's `Ready` but has only the five stock `kubernetes.io/*` labels.
 - **A new tailnet device needs manual approval before it's reachable at
-  all.** Every node running the `siderolabs/tailscale` extension (both cloud
-  nodes, and `cp-main` for the etcd-backup workflow) sits in `ext-tailscale`'s
+  all.** Every node running the `siderolabs/tailscale` extension (the
+  Hetzner ingress worker, and `cp-main`) sits in `ext-tailscale`'s
   restart-forever loop — `talosctl -n <ip> logs ext-tailscale` shows
   `machineAuthorized=false`, `NeedsMachineAuth` — until you approve it in the
   Tailscale admin console. This is unrelated to whether the auth key itself

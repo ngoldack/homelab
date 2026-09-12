@@ -1,0 +1,40 @@
+# valkey-operator, control plane only — ValkeyCluster CRs live beside their
+# owning app (see ../authentik/valkey.yaml), same split as cnpg-operator.
+#
+# v0.6.0, v1alpha1: the operator is explicitly pre-production upstream. That
+# is acceptable because the only workload here is authentik's disposable
+# cache/broker; the CRD-before-CR ordering guarantee is provided by the
+# valkey-operator Kustomization that authentik.yaml dependsOn, and the chart
+# installs the CRDs with the release (Flux applies them before this
+# HelmRelease reports ready).
+#
+# The chart's namespace default is valkey-operator-system (matches
+# namespace.yaml); releaseName keeps object names stable regardless.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: valkey-operator
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: valkey-operator
+      version: "0.6.0"
+      sourceRef:
+        kind: HelmRepository
+        name: valkey
+      interval: 2h
+  targetNamespace: valkey-operator-system
+  releaseName: valkey-operator
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # LAN nodes — control plane, nothing site=cloud is allowed to host.
+    nodeSelector:
+      topology.homelab/site: home

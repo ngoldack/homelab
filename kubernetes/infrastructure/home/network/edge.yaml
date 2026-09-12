@@ -1,0 +1,82 @@
+# The edge half of split-horizon: the Hetzner worker's public IPv4 as a second
+# Gateway front. This is the "client -> hetzner -> authz -> tunnel -> server"
+# path from the design — reachability into home is NOT added here, it already
+# exists (KubeSpan + Cilium's eBPF LB maps on every node); what this file adds
+# is the VIP registration that makes publicIP:443 land on the local envoy pod.
+#
+# Mechanics (all verified against cilium v1.19.7/v1.20 source + docs):
+#   * The eBPF datapath only intercepts LB traffic on IPs that appear in a
+#     Service's status.loadBalancer.ingress — so the public IP must come from
+#     LB-IPAM, and LB-IPAM only allocates from a pool: hence the `cloud` pool
+#     with this exact /32, scoped by serviceSelector so nothing else can grab
+#     it (and so it can never be allocated from the LAN pool's range).
+#   * spec.addresses (v1.6.1 CRDs) is the supported static-address channel in
+#     1.20; the metadata `lbipam.cilium.io/ips` annotation the old gateway used
+#     is NOT read by the 1.19/1.20 gateway controller.
+#   * The cilium-envoy DaemonSet runs on the Hetzner node, so
+#     externalTrafficPolicy=Local resolves to the local envoy pod; envoy
+#     reaches home pods over the mesh at MTU 1370. Client source IP survives
+#     via TPROXY. No proxy-protocol, no extra hop.
+#   * The hcloud firewall's 443/TCP-in rule (tofu/home/ingress.tf) stops being
+#     vestigial the moment this reconciles.
+#
+# NOT exposed yet by DNS design: the public zone still answers 10.30.0.200
+# (the existing external-dns instance is filtered to exclude scope=public).
+# Edge reachability is proven via --resolve until the public-instance flip.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: cloud
+spec:
+  serviceSelector:
+    matchLabels:
+      dns.ngoldack.de/scope: public
+  blocks:
+    - cidr: 2.28.31.116/32
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: network
+spec:
+  gatewayClassName: cilium
+  infrastructure:
+    labels:
+      dns.ngoldack.de/scope: public
+  addresses:
+    - type: IPAddress
+      value: 2.28.31.116
+  listeners:
+    # Mirrors the internal Gateway's listener pair; same wildcard cert (DNS-01
+    # issuance is address-independent, so one secret serves both VIPs).
+    - name: https-wildcard
+      protocol: HTTPS
+      port: 443
+      hostname: "*.svc.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          # Separate opt-in label from the internal Gateway: exposing a
+          # namespace INTERNALLY and on the EDGE are independent decisions.
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/edge-ingress: "true"
+    - name: https-apex
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/edge-ingress: "true"

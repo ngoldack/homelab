@@ -6,6 +6,10 @@ metadata:
     # Required before httproute.yaml can attach to the public Gateway. Despite
     # the label name this is LAN-only: the hostname exists solely in local DNS.
     gateway.ngoldack.de/public-ingress: "true"
+    # Separate gate for the edge Gateway (Hetzner VIP): headlamp is reachable
+    # there only through the authentik outpost — see httproute-edge.yaml and
+    # the SECURITY NOTE in httproute.yaml, which this satisfies.
+    gateway.ngoldack.de/edge-ingress: "true"
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease

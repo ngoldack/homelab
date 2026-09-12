@@ -1,0 +1,27 @@
+# EDGE routes — deliberately NOT in kustomization.yaml yet.
+#
+# These objects are the unit external-dns's gateway-httproute source turns
+# into published records (routes, not Gateways, produce endpoints). Shipping
+# them before the `--gateway-label-filter` rollout on the external-dns
+# deployment could flip names like headlamp.ngoldack.de in the PUBLIC zone
+# from the LAN VIP to the Hetzner address. Once the filter is verified live,
+# register this file in kustomization.yaml and ship.
+#
+# authentik.ngoldack.de on the edge: the portal must be reachable for
+# external login redirects; no outpost in front — the portal IS the auth.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik-edge
+  namespace: authentik
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - authentik.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: authentik-server
+          port: 80

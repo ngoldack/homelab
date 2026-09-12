@@ -1,0 +1,45 @@
+# Internal-path routes + cross-namespace grant for authentik.
+#
+# The split-horizon rule in one line: a hostname lands on the edge Gateway
+# (authenticated) only if an EDGE HTTPRoute exists for it (httproutes-edge.yaml,
+# held out of the Kustomization until the external-dns scoping filter is
+# confirmed deployed — see external-dns/helmrelease.yaml); routes on this
+# Gateway stay auth-free because nothing in front of them consults authentik.
+#
+# authentik's LAN route is the portal itself — reachable, unauthenticated-by-
+# proxy, on the internal path exactly like every other app.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik-internal
+  namespace: authentik
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - authentik.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: authentik-server
+          port: 80
+---
+# The edge headlamp route (../headlamp/httproute-edge.yaml) references
+# authentik-proxy across the namespace boundary. A grant with no route using
+# it is inert, so it can ship early.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-edge-routes-to-authentik
+  namespace: authentik
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: headlamp
+  to:
+    - group: ""
+      kind: Service
+      name: authentik-proxy

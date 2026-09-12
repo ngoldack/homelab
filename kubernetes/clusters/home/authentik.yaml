@@ -1,0 +1,39 @@
+# Authentik + the edge outpost. wait:false: first boot runs django migrations
+# against a cold CNPG initdb (can exceed 10m) and the outpost on the Hetzner
+# node pulls from ghcr over WAN; a slow-but-healthy rollout must not be
+# retried from the top (same reasoning as immich.yaml).
+#
+# dependsOn is the full CRD/ordering contract:
+#   cnpg-operator  — Cluster CR
+#   valkey-operator — ValkeyCluster CR
+#   network        — the edge Gateway + cloud IPAM pool this namespace's
+#                    routes parentRef, and the sops path that decrypts this
+#                    directory's *.sops.yaml (decryption is per-Kustomization,
+#                    but the Gateway must exist before routes attach cleanly)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: authentik
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/authentik
+  prune: true
+  wait: false
+  timeout: 20m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+    - name: valkey-operator
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

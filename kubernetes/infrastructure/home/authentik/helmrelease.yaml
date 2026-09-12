@@ -1,0 +1,81 @@
+# Authentik — identity provider + edge authorizer. SERVER and WORKER live at
+# home (they need Postgres/Valkey, which live here); the public-facing slice is
+# the separate outpost Deployment (outpost.yaml), not this release.
+#
+# Config is 100% in secret.sops.yaml via authentik.existingSecret — the chart's
+# typed values block is ignored wholesale when that is set, which is deliberate:
+# one sops file holds every AUTHENTIK_* knob, matching how this repo treats
+# tofu/home/secret.sops.yaml.
+#
+# First boot runs django migrations against CNPG — can exceed 10 minutes with a
+# cold 5Gi initdb; hence wait:false on the owning Flux Kustomization and a
+# generous HelmRelease timeout.
+#
+# The blueprint ConfigMap (seed.yaml) is mounted at /blueprints/ — authentik
+# imports and applies anything there at startup, idempotently. That is the
+# declarative seeding path: proxy provider + application + outpost record +
+# service-account token, no manual UI clicks, no API scripting.
+#
+# Pin: 2026.8.2 (current stable line; 2026.8.0/8.2 had known outpost bugs
+# #25485/#26014 — watch, this is the version the research was done against).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 20m
+  chart:
+    spec:
+      chart: authentik
+      version: "2026.8.2"
+      sourceRef:
+        kind: HelmRepository
+        name: authentik
+      interval: 2h
+  targetNamespace: authentik
+  releaseName: authentik
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    authentik:
+      existingSecret:
+        secretName: authentik-config
+    # global.*, not server.*: the chart exposes volumes/volumeMounts only at
+    # the global level (verified against the 2026.8.2 values structure) —
+    # these land on server AND worker; blueprint import is a server-side
+    # startup action, the duplicate worker mount is inert.
+    global:
+      volumes:
+        - name: blueprints
+          configMap:
+            name: authentik-blueprints
+      volumeMounts:
+        - name: blueprints
+          mountPath: /blueprints
+    server:
+      replicas: 1
+      nodeSelector:
+        topology.homelab/site: home
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          memory: 1536Mi
+    worker:
+      replicas: 1
+      nodeSelector:
+        topology.homelab/site: home
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 1Gi

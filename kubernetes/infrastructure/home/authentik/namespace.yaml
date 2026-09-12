@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authentik
+  labels:
+    # Both Gateway gates: `public-ingress` so the internal route can attach to
+    # the LAN VIP Gateway, `edge-ingress` so the portal + outpost routes can
+    # attach to the Hetzner Gateway. See network/gateway.yaml + edge.yaml.
+    gateway.ngoldack.de/public-ingress: "true"
+    gateway.ngoldack.de/edge-ingress: "true"

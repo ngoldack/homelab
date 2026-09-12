@@ -34,13 +34,6 @@ tasks:
         test -f "{{.AGE_KEY_FILE}}"
         age-keygen -y "{{.AGE_KEY_FILE}}"
 
-  sops:keys:ci:public:
-    desc: Print the CI age recipient; add ci.age.key to CI as SOPS_AGE_KEY
-    cmds:
-      - |
-        test -f ci.age.key
-        age-keygen -y ci.age.key
-
   sops:keys:home-flux:public:
     desc: Print the Home Flux age recipient
     cmds:
@@ -285,3 +278,30 @@ tasks:
         vars:
           TOFU_DIR: tofu/home
           TOFU_ARGS: output -raw home_talos_backup_bucket
+
+  lint:yaml:
+    desc: Lint all YAML with yamllint (honors .yamllint ignores)
+    cmds:
+      - yamllint .
+
+  lint:tofu:
+    desc: Check OpenTofu formatting (no files written)
+    cmds:
+      - tofu fmt -check -recursive tofu/home
+
+  lint:kustomize:
+    desc: Build every kustomization under kubernetes/ to catch reference errors
+    cmds:
+      - |
+        set -eu
+        for k in $(git ls-files 'kubernetes/**/kustomization.yaml'); do
+          kustomize build "$(dirname "$k")" >/dev/null
+        done
+
+  check:
+    desc: Run all local validations (yamllint, tofu fmt, kustomize builds, sops decrypt)
+    cmds:
+      - task: lint:yaml
+      - task: lint:tofu
+      - task: lint:kustomize
+      - task: sops:check:all

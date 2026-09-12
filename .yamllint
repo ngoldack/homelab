@@ -10,6 +10,10 @@ ignore: |
   # Generated Talos/Kubernetes client config output (gitignored, machine-written).
   kubeconfig*.yaml
   talosconfig*.yaml
+  # Regenerated verbatim by `flux bootstrap`/`flux install` — never hand-edited.
+  **/gotk-components.yaml
+  # Vendored upstream Gateway API CRD manifest (chart template content, not ours).
+  tofu/**/charts/**
 
 rules:
   line-length:

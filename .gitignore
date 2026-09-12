@@ -47,9 +47,7 @@ talosconfig
 kubeconfig.yaml
 talosconfig.yaml
 kubeconfig-home.yaml
-kubeconfig-cloud.yaml
 talosconfig-home.yaml
-talosconfig-cloud.yaml
 *.kubeconfig
 *.talosconfig
 *.kubeconfig.yaml

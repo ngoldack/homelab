@@ -128,8 +128,12 @@ resource "hcloud_firewall" "cloud" {
     source_ips  = ["0.0.0.0/0", "::/0"]
   }
 
-  # Public HTTPS. This node is the cluster's sole public entry point; Envoy
-  # binds 443 here via Cilium's Gateway API host-network mode.
+  # Public HTTPS. VESTIGIAL: written when this node was the cluster's public
+  # edge with Envoy binding 443 in its host namespace via Cilium's
+  # gatewayAPI.hostNetwork. That mode is off now (services ride the LAN VIP —
+  # see tofu/home/cilium.tf and README "Ingress"), so nothing binds 443 here
+  # any more. The rule is kept until an explicit decision is made to drop
+  # it; removing it is a live firewall edit, not a docs change.
   rule {
     description = "Public HTTPS ingress"
     direction   = "in"

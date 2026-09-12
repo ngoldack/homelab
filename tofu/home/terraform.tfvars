@@ -90,9 +90,11 @@ nodes = {
     memory     = 4096
     disk_size  = 32
     talos_role = "controlplane"
-    # Tailscale, control-plane only: lets the etcd-backup GitHub Actions job
-    # reach this node's Talos API (:50000) from a GitHub-hosted runner over
-    # the tailnet, instead of needing a self-hosted runner with LAN access.
+    # Tailscale, control-plane only: an out-of-band admin path to the Talos
+    # API (:50000) that works from anywhere without touching LAN or the
+    # KubeSpan mesh. (Originally added for the GitHub Actions etcd-backup
+    # job; that job is gone — backups are now an in-cluster CronJob — but
+    # the admin path is kept. See README "Known limitations".)
     # See local.tailscale_config_patch in talos.tf for the TS_AUTHKEY wiring.
     extensions = ["siderolabs/tailscale"]
     # node_labels omitted: role, topology.zone, cpu model/cores and memory.gb

@@ -3,5 +3,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - pki.yaml
+  # Push credential for ../registry/ (Zot). Generated locally — no GitHub PAT
+  # is involved anywhere in this pipeline.
   - registry-secret.sops.yaml
   - helmrelease.yaml

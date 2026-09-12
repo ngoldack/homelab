@@ -89,13 +89,18 @@ spec:
             # The point of the whole exercise. Overrides the Dockerfile's
             # ARG CUDA_DOCKER_ARCH="86;90", which no Pascal card can run.
             - --opt=build-arg:CUDA_DOCKER_ARCH=60
-            - --output=type=image,name=ghcr.io/ngoldack/ik-llama-server:sm60-3bb386e,push=true
+            # Pushes to the cluster's own Zot (../registry/), not GHCR. The
+            # hostname resolves via local DNS to the Gateway VIP and is
+            # covered by the existing Let's Encrypt wildcard, so both this
+            # push and containerd's later pull get a valid certificate with no
+            # trust configuration anywhere.
+            - --output=type=image,name=registry.ngoldack.de/ik-llama-server:sm60-3bb386e,push=true
             # mode=max exports every intermediate layer, not just the final
             # ones, so a rebuild after a source bump reuses the CUDA toolchain
             # layers. This registry cache — not the pod's emptyDir — is what
             # makes the builder disposable.
-            - --export-cache=type=registry,ref=ghcr.io/ngoldack/ik-llama-server:buildcache,mode=max
-            - --import-cache=type=registry,ref=ghcr.io/ngoldack/ik-llama-server:buildcache
+            - --export-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache
             # Readable in `kubectl logs`; the default tty renderer emits
             # cursor-control escapes that make a log file unusable.
             - --progress=plain
@@ -118,7 +123,7 @@ spec:
             secretName: buildctl-client-tls
         - name: docker
           secret:
-            secretName: ghcr-credentials
+            secretName: registry-credentials
             # DOCKER_CONFIG points at a DIRECTORY and the file inside it must
             # be named config.json, but a kubernetes.io/dockerconfigjson Secret
             # stores it under the key .dockerconfigjson — hence the rename.

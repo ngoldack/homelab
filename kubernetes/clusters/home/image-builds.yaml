@@ -21,6 +21,9 @@ spec:
   wait: false
   dependsOn:
     - name: buildkit
+    # The push target. A build that finishes and then cannot push has burned
+    # an hour of CPU for nothing.
+    - name: registry
   sourceRef:
     kind: GitRepository
     name: flux-system

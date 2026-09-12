@@ -21,7 +21,10 @@ resources:
   # LLM inference on the P100. Split so the CRs wait for the operator's CRDs.
   - llmkube.yaml
   - llmkube-models.yaml
-  # In-cluster image builder, and the one-shot Jobs that drive it. Split so a
-  # long-running or failed build cannot hold up the builder's own reconcile.
+  # The cluster's own OCI registry, the in-cluster image builder, and the
+  # one-shot Jobs that drive it. Three Kustomizations rather than one so a
+  # long-running or failed build cannot hold up the builder or the registry,
+  # and so image-builds can wait on both being ready.
+  - registry.yaml
   - buildkit.yaml
   - image-builds.yaml

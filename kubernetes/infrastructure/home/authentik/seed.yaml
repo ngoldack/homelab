@@ -76,7 +76,8 @@ data:
           client_type: confidential
           client_secret: !File /secrets/client_secret
           redirect_uris:
-            - https://grafana.ngoldack.de/login/generic_oauth
+            - matching_mode: strict
+              url: https://grafana.ngoldack.de/login/generic_oauth
           property_mappings:
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]

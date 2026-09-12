@@ -75,7 +75,7 @@ spec:
           containers:
             - name: publish
               image: ghcr.io/goauthentik/server:2026.8.2
-              command: ["/ak"]
+              command: ["/lifecycle/ak"]
               args:
                 - manage
                 - shell

@@ -106,19 +106,21 @@ spec:
 
     # SCOPING for split-horizon: this instance must IGNORE the edge Gateway.
     # Edge hostnames deliberately duplicate internal ones (same app names on
-    # two VIPs); without this filter the gateway-httproute source would merge
+    # two VIPs); without scoping, the gateway-httproute source would merge
     # endpoints from both Gateways and flip records like
     # headlamp.ngoldack.de to the Hetzner address the moment any edge route
-    # exists. Today it still publishes every name to the public zone with the
-    # LAN VIP target — the existing design — and the `!=public` selector is
-    # written so it also matches label-less Gateways. The internal-DNS
-    # instance (Unbound/UniFi webhook, next step) carries the inverse filter;
-    # a future public-edge instance carries scope=public and the
-    # external-dns.kubernetes.io/target annotation already set on edge.yaml.
-    # --gateway-label-filter is not a first-class chart value in 1.22.0, so
-    # it rides via extraArgs.
+    # exists. The filter is POSITIVE (scope=internal) because external-dns
+    # v0.22.0's --gateway-label-filter parser rejects `!=` outright — the
+    # container dies at startup with: `"!=" is not a valid label selector
+    # operator` (learned live; the chart happily renders it). Consequence:
+    # any FUTURE internal Gateway must carry dns.ngoldack.de/scope=internal
+    # or its records silently stop being published. The internal instance
+    # (Unbound/UniFi webhook, next step) carries the same internal filter
+    # against its own provider; a future public-edge instance uses
+    # scope=public plus the external-dns.kubernetes.io/target annotation on
+    # edge.yaml. Not a first-class chart value in 1.22.0 → extraArgs.
     extraArgs:
-      - --gateway-label-filter=dns.ngoldack.de/scope!=public
+      - --gateway-label-filter=dns.ngoldack.de/scope=internal
     # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from
     # the retired cloud-ingress design; services now live directly under the
     # apex (immich.${CLUSTER_DOMAIN}, registry.${CLUSTER_DOMAIN}). This still

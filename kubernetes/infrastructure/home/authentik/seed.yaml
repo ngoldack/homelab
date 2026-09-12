@@ -4,7 +4,8 @@ metadata:
   name: authentik-blueprints
   namespace: authentik
 data:
-  00-homelab.yml: |
+  # .yaml suffix is mandatory: the chart only discovers keys ending in .yaml.
+  00-homelab.yaml: |
     # authentik seed blueprint — CURRENT schema (version/entries), validated
     # field-by-field against the 2026.8.2 blueprint schema and the models source:
     #   * providers are created as their concrete models directly

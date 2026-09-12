@@ -51,11 +51,14 @@ spec:
     # the global level (verified against the 2026.8.2 values structure) —
     # these land on server AND worker; blueprint import is a server-side
     # startup action, the duplicate worker mount is inert.
+    # Chart-native blueprint import (replaces hand-mounting /blueprints —
+    # the entrypoint discovery only keys off *.yaml files mounted by this
+    # block, and doing it by hand silently shipped nothing the first time).
+    blueprints:
+      configMaps:
+        - authentik-blueprints
     global:
       volumes:
-        - name: blueprints
-          configMap:
-            name: authentik-blueprints
         # The seed blueprint reads the Grafana OIDC client secret via !File.
         # It MUST NOT land under /blueprints: authentik walks that tree for
         # *.yml and would try to parse the secret as a blueprint.
@@ -63,8 +66,6 @@ spec:
           secret:
             secretName: authentik-oidc-grafana
       volumeMounts:
-        - name: blueprints
-          mountPath: /blueprints
         - name: seed-secrets
           mountPath: /secrets
           readOnly: true

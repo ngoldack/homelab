@@ -69,15 +69,19 @@ spec:
           restartPolicy: Never
           nodeSelector:
             topology.homelab/site: home
-          envFrom:
-            - secretRef:
-                name: authentik-config
           containers:
             - name: publish
               image: ghcr.io/goauthentik/server:2026.8.2
+              # envFrom is a CONTAINER field; under spec it is silently
+              # pruned by apply and the job runs unconfigured (observed:
+              # "Secret key missing" then a clean-looking exit).
+              envFrom:
+                - secretRef:
+                    name: authentik-config
               command: ["/lifecycle/ak"]
+              # /lifecycle/ak *is* manage.py — "ak manage shell" is a doubled
+              # subcommand (observed: Unknown command 'manage').
               args:
-                - manage
                 - shell
                 - -c
                 - |

@@ -57,7 +57,7 @@ data:
       - model: authentik_providers_oauth2.scopemapping
         state: present
         identifiers:
-          name: authentik default OAuth Mapping: OpenID 'groups'
+          name: "authentik default OAuth Mapping: OpenID 'groups'"
         attrs:
           description: Groups membership for downstream role mapping
           scope: groups

@@ -119,8 +119,14 @@ spec:
     # against its own provider; a future public-edge instance uses
     # scope=public plus the external-dns.kubernetes.io/target annotation on
     # edge.yaml. Not a first-class chart value in 1.22.0 → extraArgs.
+    # --gateway-label-filter is documented as gateway-scoped and the Gateway
+    # objects DO carry dns.ngoldack.de/scope, yet the binary emitted an empty
+    # desired set through the label path (observed live). --gateway-name is
+    # the blunt, unambiguous equivalent for a single-gateway instance:
+    # publish what `public` serves, nothing else. The future public/edge
+    # instance runs --gateway-name=edge against its own provider.
     extraArgs:
-      - --gateway-label-filter=dns.ngoldack.de/scope=internal
+      - --gateway-name=public
     # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from
     # the retired cloud-ingress design; services now live directly under the
     # apex (immich.${CLUSTER_DOMAIN}, registry.${CLUSTER_DOMAIN}). This still

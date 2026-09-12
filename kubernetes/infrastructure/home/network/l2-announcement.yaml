@@ -19,7 +19,12 @@ spec:
   # ARP-answered on ens18. Without this selector the policy announces ALL
   # LoadBalancer IPs of ALL Services, which since edge.yaml exists would
   # include that public address on the LAN segment.
-  servicesSelector:
+  #
+  # Naming, learned live: Cilium 1.20's CRD schema is SINGULAR
+  # serviceSelector — the plural used by 1.19-era docs is rejected
+  # ("field not declared") and failed the whole network Kustomization
+  # dry-run after the 1.20 CRD auto-upgrade.
+  serviceSelector:
     matchLabels:
       dns.ngoldack.de/scope: internal
   nodeSelector:

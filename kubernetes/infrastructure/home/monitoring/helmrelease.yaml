@@ -15,6 +15,14 @@ kind: HelmRelease
 metadata:
   name: victoria-metrics-k8s-stack
   namespace: flux-system
+  annotations:
+    # Nothing in this manifest uses ${VAR} templating any more (root_url is
+    # a literal), and the grafana.ini now carries Grafana's own $__env{...}
+    # interpolation — which Flux's strict envsubst would otherwise try to
+    # resolve and fail the whole Kustomization with "variable not set
+    # (strict mode): __env" (same class of breakage documented on every
+    # dashboard ConfigMap in kustomization.yaml). Opt this release out.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:
   interval: 1h
   timeout: 20m
@@ -187,6 +195,34 @@ spec:
       grafana.ini:
         server:
           root_url: "https://grafana.ngoldack.de"
+        # SSO via authentik (OIDC application seeded in
+        # ../authentik/seed.yaml — client id "grafana", redirect_uri
+        # /login/generic_oauth). The secret arrives through envFromSecret
+        # below; $__env{...} is Grafana's in-INI env interpolation.
+        # auto_login stays OFF: the login page keeps the local admin form,
+        # so a broken OIDC app is never a lockout.
+        auth:
+          oauth_auto_login: false
+        "auth.generic_oauth":
+          enabled: true
+          name: authentik
+          client_id: grafana
+          client_secret: $__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+          auth_url: https://authentik.ngoldack.de/application/o/authorize/
+          token_url: https://authentik.ngoldack.de/application/o/token/
+          api_url: https://authentik.ngoldack.de/application/o/userinfo/
+          scopes: openid profile email
+          email_attribute_path: email
+          # authentik puts group NAMES in the token (groups_on_token_claims);
+          # grafana-admins group members get the Admin role, everyone else
+          # Viewer — deny-by-default, upgrade by group membership.
+          role_attribute_path: "contains(groups[*], 'grafana-admins') && 'Admin' || 'Viewer'"
+          allow_sign_up: true
+      # envFromSecret is the community Grafana chart's documented single-
+      # secret injection; the value mirrors authentik's OAuthProvider
+      # client_secret (both halves generated from one literal — see the two
+      # sops files).
+      envFromSecret: grafana-authentik
       nodeSelector:
         topology.homelab/site: home
       # The sidecar watches for ConfigMaps carrying this label and drops their

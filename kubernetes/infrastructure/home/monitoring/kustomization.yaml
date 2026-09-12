@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - httproute.yaml
+  - grafana-authentik.sops.yaml
 
 # One ConfigMap per vendored dashboard. The Grafana sidecar (enabled in
 # helmrelease.yaml) watches every namespace for ConfigMaps carrying

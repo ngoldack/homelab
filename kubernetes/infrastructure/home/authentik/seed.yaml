@@ -82,3 +82,44 @@ data:
           service_account: !Find [goauthentik.core.models.ServiceAccount, [name, edge-outpost]]
           providers:
             - !Find [goauthentik.core.models.Provider, [name, headlamp-proxy]]
+      # ---- Grafana SSO (OIDC, app-authenticated — no outpost in the path) ----
+      # Grafana federates login itself: its [auth.generic_oauth] config in
+      # ../monitoring/helmrelease.yaml points at this application's
+      # /application/o/grafana/ endpoints. The client secret here is read
+      # from oidc-grafana.sops.yaml (!Secret) — byte-identical to the
+      # monitoring/grafana-authentik.sops.yaml that Grafana envFroms.
+      goauthentik.core.models.Application:
+        create: true
+        identifiers:
+          slug: grafana
+        attributes:
+          name: grafana
+          meta_icon: fa-solid:chart-line
+          meta_name: Grafana
+          launch_url: https://grafana.ngoldack.de/
+          authorization_flow: !Find
+            - goauthentik.flows.models.FlowExecutor
+            - [name, default-provider-authorization-implicit-consent]
+      goauthentik.core.models.Provider:
+        create: true
+        identifiers:
+          name: grafana-oidc
+        attributes:
+          name: grafana-oidc
+          provider_type: goauthentik.io/providers/oauth2
+      goauthentik.providers.oauth2.models.OAuthProvider:
+        create: true
+        identifiers:
+          provider: !Find [goauthentik.core.models.Provider, [name, grafana-oidc]]
+        attributes:
+          provider: !Find [goauthentik.core.models.Provider, [name, grafana-oidc]]
+          client_id: grafana
+          client_secret: !Secret [authentik-oidc-grafana, client_secret]
+          client_type: confidential
+          redirect_uris:
+            - https://grafana.ngoldack.de/login/generic_oauth
+          scopes:
+            - openid
+            - profile
+            - email
+          groups_on_token_claims: true

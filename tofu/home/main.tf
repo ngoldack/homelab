@@ -304,6 +304,23 @@ resource "proxmox_download_file" "talos_iso" {
   # above, so the incoming file never collides with the outgoing one.
   lifecycle {
     create_before_destroy = true
+    # url's UNKNOWN-at-plan re-read must not force a replacement. When the
+    # for_each map of data.talos_image_factory_urls.this loses any key (here:
+    # the default-only extension set retiring with wk-main-media), OpenTofu
+    # re-reads ALL its instances at apply time, so every consumer's url
+    # becomes "known after apply" and this ForceNew attribute plans a
+    # replacement even when the schematic — and therefore the file — is
+    # byte-identical. create_before_destroy then downloads a file whose name
+    # equals the still-present old one, and Proxmox refuses: "File already
+    # exists ... managed by another resource" — the resource colliding with
+    # ITSELF (learned live; it wedged the whole apply). Ignoring url is
+    # safe because file_name is derived from the schematic ID itself: any
+    # REAL image change (extensions, kernel args, overlays) moves the
+    # filename, still triggers the replacement, and lands on a distinct
+    # file — exactly the property the naming comment above wants. url
+    # changes that do NOT move the filename are, by construction, re-reads
+    # of the same image.
+    ignore_changes = [url]
   }
 }
 

@@ -89,7 +89,7 @@ nodes = {
     # 6 GiB: etcd + apiserver + scheduler/controller-manager + the Talos
     # runtime itself, with room for an apiserver burst. Raised from 4 in the
     # two-worker consolidation; fleet total stays inside the allocatable
-    # budget (6 + 32 + 48 = 86 of 90).
+    # budget (6 + 28 + 48 = 82 of 90).
     memory     = 6144
     disk_size  = 32
     talos_role = "controlplane"
@@ -121,12 +121,14 @@ nodes = {
     host      = "pmx-main"
     vm_id     = 104
     cpu_cores = 10
-    cpu_class = "efficiency"
-    # 32 GiB: this node now hosts the whole general fleet (immich server +
-    # ML, authentik, zot, vmsingle, grafana, ...) — the consolidation
-    # absorbs wk-main-media's 8 and takes more of the freed budget, because
-    # post-consolidation RAM demand concentrates HERE, not on the P100 box.
-    memory    = 32768
+    # 28 GiB (was 32 at plan time): first boot of the consolidated fleet
+    # OOM-killed the P100 VM's qemu mid-start (kernel global OOM, 82 GiB of
+    # VM commits + qemu/VFIO overhead + PVE services against 94 physical —
+    # the allocatable arithmetic must leave ~12 GiB of REAL slack, not just
+    # the 4 GiB reserved floor). Still absorbs media's role and nets +4 over
+    # the old split; demand concentration post-consolidation is HERE, but
+    # the host budget binds first.
+    memory    = 28672
     disk_size = 48
 
     talos_role = "worker"
@@ -172,7 +174,7 @@ nodes = {
   # Kept in sync with the live VM, which was resized by hand first: without
   # this line the next apply would push it straight back to 64 and break the
   # node again.
-  # Fleet total: 6 (cp) + 32 (eff) + 48 (perf) = 86 GiB of 90 allocatable.
+  # Fleet total: 6 (cp) + 28 (eff) + 48 (perf) = 82 GiB committed, ~12 GiB real host slack.
   wk-main-performance = {
     host      = "pmx-main"
     vm_id     = 105

@@ -118,11 +118,11 @@ general-purpose worker.
 | node | class | threads | RAM | passthrough | taint |
 | --- | --- | --- | --- | --- | --- |
 | `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
-| `wk-main-efficiency` | efficiency | 10 (all remaining E) | 32 GiB | Intel UHD 770 iGPU | — (general node) |
+| `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | Intel UHD 770 iGPU | — (general node) |
 | `wk-main-performance` | performance | 16 (0–15) | 48 GiB | Tesla P100 | `dedicated=nvidia` |
 
 Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
-86 GiB of the 90 allocatable, so the host really keeps ~8 with ARC capped at
+82 GiB committed, so the host really keeps ~12 with ARC capped at
 1 GiB). E-threads sum to exactly 14/14 — cp 4 + worker 10 — **adding another
 node means taking capacity from an existing one**.
 
@@ -146,6 +146,15 @@ Design of the consolidation:
 * VGA-arbitration hazard is handled by the vga rule in `main.tf`: any node
   with hostpci gets `serial0` (no emulated display) — the iGPU-passthrough
   guest once hung at boot with `std` + passed VGA decode concurrently.
+
+Host prerequisites applied OUTSIDE this repo (recorded here so a rebuilt
+AR900i does not relearn them the hard way): `/etc/systemd/system.conf`
+carries `DefaultLimitMEMLOCK=infinity` — Debian's 8 MiB default OOM-kills
+`vfio_pin_pages` for any passthrough guest (this bit the iGPU VM's first
+boot), and after editing it `systemctl daemon-reexec && systemctl restart
+pvedaemon qmeventd` is required — per-VM scopes inherit the default only
+from a freshly re-exec'd manager.
+
 
 Each node in the `nodes` map in `terraform.tfvars` is declared individually
 (name, host, `cpu_cores`, optional `cpu_affinity` pin, memory, disk, role).

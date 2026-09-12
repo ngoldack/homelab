@@ -1,0 +1,156 @@
+# buildkitd — a long-lived, cluster-internal image builder.
+#
+# Chart choice. moby/buildkit publishes Kubernetes *examples*, not a chart, so
+# there is no upstream Helm option. andrcuns/buildkit-service is a thin,
+# actively-maintained wrapper around exactly those examples (its own README
+# says so) that tracks upstream appVersion closely and exposes the handful of
+# knobs that matter here: rootless, tls.existingSecret, buildkitVolume,
+# nodeSelector/tolerations, resources.
+#
+# The alternatives were looked at and rejected for this cluster:
+#   - seatgeek/buildkit-operator: manages buildkitd *instances* via
+#     BuildkitTemplate/Buildkit CRs. It solves pooling and per-arch fleets —
+#     neither of which exists here — and it still does not run builds, so a
+#     buildctl client Job would be needed anyway. A CRD set for no gain.
+#   - shipwright-io/build: genuinely declarative (Build/BuildRun CRs with a git
+#     source), which is the nicest GitOps shape of the three. It is built on
+#     Tekton, so adopting it means running two operators and two CRD sets to
+#     build one image. Revisit if image builds here ever become plural enough
+#     to justify that.
+#
+# Chart 1.8.0 ships appVersion v0.31.0 (the chart's README on main already
+# mentions v0.33.0, but that is unreleased). image.tag is deliberately left
+# unset: the chart's imageTag helper appends "-rootless" to the appVersion on
+# its own, and hardcoding a tag here would silently drop that suffix.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: buildkit
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: buildkit-service
+      version: "1.8.0"
+      sourceRef:
+        kind: HelmRepository
+        name: andrcuns
+      interval: 1h
+  targetNamespace: buildkit
+  releaseName: buildkit
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Pins the Service and Deployment name. ../image-builds/ dials
+    # tcp://buildkitd:1234 and pki.yaml's SANs are issued for that name, so
+    # this is load-bearing, not cosmetic — the chart's default would be
+    # "buildkit-buildkit-service".
+    fullnameOverride: buildkitd
+
+    # Rootless: UID 1000, no privileged flag, no host mounts. Upstream
+    # recommends it "to minimize the chance of container breakout attacks",
+    # which matters more than usual for a daemon whose entire job is executing
+    # untrusted build steps. The cost is the Unconfined seccomp/apparmor
+    # profile that forces namespace.yaml's PodSecurity exemption.
+    rootless: true
+
+    tls:
+      enabled: true
+      # Issued by cert-manager in pki.yaml. The chart mounts this Secret at
+      # /certs and passes --tlscacert/--tlscert/--tlskey, so buildkitd requires
+      # a client certificate signed by the same CA.
+      existingSecret: buildkitd-server-tls
+
+    # State lives on the NODE's local disk, never on the NAS.
+    #
+    # This is the single most important value in this file. A BuildKit cache is
+    # millions of small random reads and writes — the exact access pattern that
+    # measured 2-8 MB/s against TrueNAS over NFS while diagnosing Immich. A PVC
+    # here would make a CUDA build take longer than it possibly can.
+    #
+    # emptyDir is node-local, so it is fast, but it dies with the pod. That is
+    # an acceptable trade because the DURABLE cache is in the registry
+    # (--export-cache type=registry,mode=max in ../image-builds/): after a pod
+    # restart the first build re-pulls its cache from GHCR instead of redoing
+    # the work. It also means disk is reclaimed by deleting the pod.
+    buildkitVolume:
+      type: emptyDir
+      emptyDir:
+        # Peak for the ik_llama CUDA build is roughly: 11 GiB extracted
+        # nvidia/cuda devel image + ~3 GiB runtime image + source + ~5 GiB of
+        # nvcc objects + exported layers and cache. 40 GiB is headroom on top
+        # of that, and is what bounds the builder's impact on the node.
+        sizeLimit: 40Gi
+
+    # Scheduling. wk-main-performance is the only node that can host this:
+    #   cp-main             32 GiB disk, control plane — excluded on both counts
+    #   wk-main-efficiency  48 GiB disk,  6 E-cores
+    #   wk-main-media       48 GiB disk,  4 E-cores
+    #   wk-main-performance 96 GiB disk, 16 P-threads
+    # A 48 GiB node cannot hold a 40 GiB emptyDir alongside Talos and its image
+    # cache, and an nvcc build on 4-6 E-cores would take hours.
+    #
+    # The honest cost: this is the P100 inference node, carrying
+    # dedicated=ai:NoSchedule, so the toleration below is what lets the builder
+    # land there and a build WILL compete with llama.cpp for CPU. Builds are
+    # occasional and the resource limit caps the damage; run one when the model
+    # is idle. The CPU request is small so the pod is nearly free while idle —
+    # buildkitd uses almost nothing between builds.
+    nodeSelector:
+      node.kubernetes.io/instance-type: gpu-worker
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: ai
+        effect: NoSchedule
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        # 12 of the node's 16 P-threads, leaving 4 for inference during a
+        # build. Note what this does and does not bound: the whole compile is
+        # ONE Dockerfile RUN step, so ninja inside it sees the node's 16 CPUs
+        # and spawns 16 nvcc jobs regardless — the cgroup then throttles them
+        # to 12 cores' worth. That is throttling, not thrashing, and is the
+        # intended behaviour.
+        cpu: "12"
+        # Sized for those concurrent nvcc processes, each of which can hold
+        # 1-2 GiB on ggml-cuda's larger template-heavy .cu files. The node has
+        # 48 GiB and inference does not use most of it (the model sits in the
+        # P100's 16 GiB of VRAM), so 20 GiB is affordable — but this is the
+        # value to lower first if a build ever pressures the node.
+        memory: 20Gi
+
+    buildkitdToml: |
+      [worker.oci]
+        enabled = true
+        # Caps concurrently-executing LLB vertices. It does NOT constrain
+        # ninja/nvcc inside a single RUN step — the CPU limit above is what
+        # does that — but it keeps multi-stage and future multi-image builds
+        # from running every stage at once.
+        max-parallelism = 12
+
+        # Keep the local cache well below the 40Gi emptyDir sizeLimit:
+        # exceeding sizeLimit gets the pod EVICTED, whereas exceeding this
+        # just triggers a prune. The durable cache is in the registry, so
+        # pruning here costs a re-pull, not a rebuild.
+        #
+        # These are the current field names. keepBytes/gckeepstorage are
+        # deprecated in favour of reservedSpace, and all of them parse through
+        # DiskSpace.UnmarshalText — so the values must be STRINGS. A bare
+        # integer does not decode into the struct and buildkitd fails to start.
+        gc = true
+        reservedSpace = "8GB"
+        maxUsedSpace = "24GB"
+        minFreeSpace = "4GB"
+
+      [worker.containerd]
+        enabled = false

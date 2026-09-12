@@ -1,0 +1,30 @@
+# Namespace for the in-cluster image builder.
+#
+# enforce: privileged is REQUIRED and is not a shortcut. Rootless BuildKit runs
+# as UID 1000 with no privileged flag and no host mounts — it is the *more*
+# secure of the two upstream variants — but it still has to create nested user
+# and mount namespaces, so the chart sets:
+#   securityContext.seccompProfile.type:   Unconfined
+#   securityContext.appArmorProfile.type:  Unconfined
+# PodSecurity "baseline" (Talos's cluster-wide default, exempting only
+# kube-system) added Seccomp to its control set in v1.25 and permits only
+# RuntimeDefault, Localhost or unset — so Unconfined is rejected and the
+# ReplicaSet reports no pods at all, the same silent DESIRED=n CURRENT=0 shape
+# that bit node-exporter in ../monitoring-crds/namespace.yaml.
+#
+# The userns variant (hostUsers: false) was considered and rejected: it sets
+# privileged: true on the container, which baseline also forbids, so it needs
+# the same exemption while additionally depending on the UserNamespacesSupport
+# feature gate. No gain.
+#
+# audit and warn stay at baseline so anything ELSE that lands here and starts
+# demanding host access still surfaces, instead of the exemption quietly
+# covering the whole namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: buildkit
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

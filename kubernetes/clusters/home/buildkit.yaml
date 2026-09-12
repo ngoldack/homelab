@@ -1,0 +1,33 @@
+# The in-cluster image builder. Its own Kustomization so image-builds.yaml can
+# dependsOn it: a build Job that starts before buildkitd is Ready just fails
+# its connection and burns a backoffLimit retry.
+#
+# dependsOn cert-manager, not just infra-controllers: pki.yaml creates Issuer
+# and Certificate CRs, and a Kustomization that cannot apply also cannot prune,
+# so applying them before cert-manager's CRDs are Established would wedge this
+# whole path rather than failing in isolation.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: buildkit
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/buildkit
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+    - name: infra-controllers
+    - name: cert-manager
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

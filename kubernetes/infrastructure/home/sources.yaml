@@ -69,3 +69,15 @@ metadata:
 spec:
   interval: 2h
   url: https://defilantech.github.io/LLMKube
+---
+# Consumed by buildkit/, applied by its own Flux Kustomization so the build
+# Jobs in image-builds/ can depend on the builder being up. moby/buildkit
+# ships no chart of its own — only the Kubernetes examples this one wraps.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: andrcuns
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://andrcuns.github.io/charts

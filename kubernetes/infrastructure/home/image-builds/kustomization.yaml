@@ -1,0 +1,9 @@
+# One-shot image build Jobs, driven by the builder in ../buildkit/.
+#
+# Separate from ../buildkit/ so that re-pinning a build does not churn the
+# builder's own Kustomization, and so a failed Job cannot block the builder
+# from reconciling — a Flux Kustomization that cannot apply also cannot prune.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ik-llama.yaml

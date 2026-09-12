@@ -1,0 +1,127 @@
+# Build ik_llama.cpp's llama-server for the P100, natively.
+#
+# WHY THIS IMAGE EXISTS
+#
+# ik_llama.cpp publishes no container images — only Dockerfiles — so there is
+# nothing to pull. And the mainline llama.cpp image this cluster currently runs
+# (ghcr.io/ggml-org/llama.cpp:server-cuda12, see ../llmkube/helmrelease.yaml)
+# is built for these architectures:
+#     50-virtual 61-virtual 70-virtual 75-virtual 80-virtual 86-real
+# The P100 is compute 6.0. There is no 60 in that list, and 61 is a different
+# card (it has the __dp4a integer dot-product instruction; 6.0 does not), so
+# the P100 falls back to the compute_50 PTX and JIT-compiles it at load. It
+# runs — but from kernels written for a two-generation-older target, forfeiting
+# the FP16 throughput that is the P100's one real advantage.
+#
+# ik_llama's own ggml/src/CMakeLists.txt defaults to "60;61;70;75;80" when
+# GGML_CUDA_F16 is set, which is exactly the right list — but its Dockerfile
+# hardcodes CUDA_DOCKER_ARCH="86;90" (Ampere and Hopper), which contains
+# nothing a Pascal card can execute at all. So the image has to be built here
+# with CUDA_DOCKER_ARCH=60 regardless.
+#
+# HOW THE BUILD GETS ITS SOURCE — no checkout, no fork, no vendored Dockerfile
+#
+# BuildKit's Dockerfile frontend accepts a git URL as the build context
+# (frontend/dockerui/context.go: DetectGitContext runs on opts["context"]), and
+# gitutil.IsCommitSHA means the fragment may be a full commit SHA, not just a
+# branch — so the source is pinned exactly, fetched by the builder directly
+# from GitHub, and this repo carries no copy of it.
+#
+# WHAT IS NOT DONE HERE, and why
+#
+# GGML_CUDA_F16=ON is genuinely wanted on this card (sm_60 does FP16 at 2x
+# FP32) but is NOT set below: ik_llama's Dockerfile declares no ARG for it and
+# hardcodes its cmake line, so there is no build-arg to pass. Getting it needs
+# our own Dockerfile — which BuildKit does support alongside a remote context,
+# via `--opt dockerfilekey=dockerfile` plus `--local dockerfile=<dir>`
+# (context.go sets forceLocalDockerfile on that opt). That is a deliberate
+# follow-up, not part of this first build: CUDA_DOCKER_ARCH=60 alone is the
+# large, certain win (native sm_60 kernels instead of JIT'd compute_50 PTX),
+# and it is worth confirming that end to end before adding a Dockerfile of our
+# own to maintain.
+#
+# RE-BUILDING
+#
+# The Job name embeds the short commit SHA. To build a newer ik_llama, change
+# the SHA in BOTH the name and the context fragment and the tag: Flux then sees
+# a new Job (Jobs are immutable, so editing one in place would fail) and prunes
+# the old one. That is the whole workflow — one commit, no kubectl.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-ik-llama-3bb386e
+  namespace: buildkit
+spec:
+  # A CUDA build is long; do not let a transient registry error restart it
+  # more than twice.
+  backoffLimit: 2
+  # 3h. nvcc over ggml-cuda's ~100 .cu files is slow even for a single arch,
+  # and the first build has no registry cache to import.
+  activeDeadlineSeconds: 10800
+  template:
+    spec:
+      restartPolicy: Never
+      # buildctl is a thin gRPC client — it does no work itself and needs no
+      # privileges, no GPU and no particular node. All the heavy lifting
+      # happens in the buildkitd pod.
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: buildctl
+          # Same version as the daemon (chart 1.8.0 → appVersion v0.31.0).
+          # This non-rootless image is used only because it is where buildctl
+          # ships; nothing in this pod runs privileged.
+          image: moby/buildkit:v0.31.0
+          command:
+            - buildctl
+          args:
+            - --addr=tcp://buildkitd:1234
+            - --tlscacert=/certs/ca.crt
+            - --tlscert=/certs/tls.crt
+            - --tlskey=/certs/tls.key
+            - build
+            - --frontend=dockerfile.v0
+            # The remote context. Everything after # is the git ref; a full
+            # commit SHA pins the tree exactly.
+            - --opt=context=https://github.com/ikawrakow/ik_llama.cpp.git#3bb386eb68ffee0a5dc7db21da0735d594929eeb
+            # Path WITHIN that remote context.
+            - --opt=filename=.devops/llama-server-cuda.Dockerfile
+            # The point of the whole exercise. Overrides the Dockerfile's
+            # ARG CUDA_DOCKER_ARCH="86;90", which no Pascal card can run.
+            - --opt=build-arg:CUDA_DOCKER_ARCH=60
+            - --output=type=image,name=ghcr.io/ngoldack/ik-llama-server:sm60-3bb386e,push=true
+            # mode=max exports every intermediate layer, not just the final
+            # ones, so a rebuild after a source bump reuses the CUDA toolchain
+            # layers. This registry cache — not the pod's emptyDir — is what
+            # makes the builder disposable.
+            - --export-cache=type=registry,ref=ghcr.io/ngoldack/ik-llama-server:buildcache,mode=max
+            - --import-cache=type=registry,ref=ghcr.io/ngoldack/ik-llama-server:buildcache
+            # Readable in `kubectl logs`; the default tty renderer emits
+            # cursor-control escapes that make a log file unusable.
+            - --progress=plain
+          env:
+            # buildctl resolves registry credentials CLIENT-side and forwards
+            # them over the session, so the token lives here and never touches
+            # the shared builder.
+            - name: DOCKER_CONFIG
+              value: /docker
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: docker
+              mountPath: /docker
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: buildctl-client-tls
+        - name: docker
+          secret:
+            secretName: ghcr-credentials
+            # DOCKER_CONFIG points at a DIRECTORY and the file inside it must
+            # be named config.json, but a kubernetes.io/dockerconfigjson Secret
+            # stores it under the key .dockerconfigjson — hence the rename.
+            items:
+              - key: .dockerconfigjson
+                path: config.json

@@ -1,0 +1,109 @@
+# mTLS for buildkitd's TCP listener, issued by cert-manager.
+#
+# WHY this is not optional. buildkitd's gRPC endpoint is not an API that
+# authorizes anything: whoever can reach it can run arbitrary RUN steps as
+# root inside the builder, mount any secret the client forwards, and push to
+# any registry the client has credentials for. Upstream's own manifest says
+# "Setting up mTLS is highly recommended" and ships a create-certs.sh for
+# people who have no CA. This cluster already runs cert-manager, so the shell
+# script is unnecessary — a self-signed Issuer plus a CA Issuer does the same
+# job and renews on its own.
+#
+# The chart's tls.existingSecret expects the keys tls.crt / tls.key / ca.crt,
+# which is exactly the shape of a cert-manager Certificate Secret. That is why
+# these drop straight in with no copying or re-encoding.
+#
+# Scope note: these are Issuers, not ClusterIssuers, and the CA never leaves
+# this namespace. It signs nothing outside buildkit and is deliberately
+# unrelated to the Let's Encrypt ClusterIssuer in ../network/.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: buildkit-selfsigned
+  namespace: buildkit
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: buildkit-ca
+  namespace: buildkit
+spec:
+  isCA: true
+  commonName: buildkit-ca
+  secretName: buildkit-ca
+  # Ten years. This CA is trusted by exactly two parties, both in this
+  # namespace, both of which get their leaf certs re-issued from it
+  # automatically — so a short CA lifetime buys nothing and a mid-build
+  # rotation would only cause avoidable failures.
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: buildkit-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: buildkit-ca
+  namespace: buildkit
+spec:
+  ca:
+    secretName: buildkit-ca
+---
+# Server half. The SANs must match the Service name the client dials, which is
+# fixed to "buildkitd" by fullnameOverride in helmrelease.yaml — without that
+# override the chart would name it <release>-buildkit-service and these SANs
+# would be wrong.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: buildkitd-server
+  namespace: buildkit
+spec:
+  secretName: buildkitd-server-tls
+  commonName: buildkitd
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  dnsNames:
+    - buildkitd
+    - buildkitd.buildkit
+    - buildkitd.buildkit.svc
+    - buildkitd.buildkit.svc.cluster.local
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: buildkit-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+# Client half, mounted by every build Job in ../image-builds/. buildkitd
+# verifies it against the same CA, so a pod that cannot mount this Secret
+# cannot drive the builder even though the Service is cluster-reachable.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: buildctl-client
+  namespace: buildkit
+spec:
+  secretName: buildctl-client-tls
+  commonName: buildctl
+  usages:
+    - client auth
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: buildkit-ca
+    kind: Issuer
+    group: cert-manager.io

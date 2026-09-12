@@ -13,3 +13,4 @@ resources:
   - outpost-token.yaml
   - outpost.yaml
   - httproutes.yaml
+  - httproutes-edge.yaml

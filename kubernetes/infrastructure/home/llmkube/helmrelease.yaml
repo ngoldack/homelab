@@ -1,0 +1,88 @@
+# LLMKube — operator for serving GGUF models on Kubernetes. Provides the
+# Model / InferenceService / ModelPool CRDs used by ../llmkube-models/.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: llmkube
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: llmkube
+      version: "0.9.25"
+      sourceRef:
+        kind: HelmRepository
+        name: llmkube
+      interval: 1h
+  targetNamespace: llmkube-system
+  releaseName: llmkube
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # THE critical setting on this cluster. The chart's samples default to
+    # ghcr.io/ggml-org/llama.cpp:server-cuda13, which CANNOT run on the P100.
+    #
+    # llama.cpp's own CMakeLists is explicit about why. It builds CUDA
+    # architectures like this:
+    #   if (CUDAToolkit_VERSION VERSION_LESS "13")
+    #       list(APPEND CMAKE_CUDA_ARCHITECTURES 50-virtual 61-virtual 70-virtual)
+    #   endif ()
+    #   list(APPEND CMAKE_CUDA_ARCHITECTURES 75-virtual 80-virtual 86-real)
+    # For CUDA 13 that first line is skipped, so the image contains nothing
+    # below compute 7.5 and a Pascal card fails with "no kernel image is
+    # available for execution on the device". The cuda12 image keeps
+    # 50-virtual, which is PTX — a compute 6.0 card JIT-compiles it at first
+    # load and runs fine.
+    #
+    # Known cost, worth recording: the default list has 61 (Pascal with the
+    # __dp4a integer dot-product instruction) but NOT 60. The P100 is 6.0 and
+    # has no dp4a, so it falls back to the compute_50 PTX path and does not get
+    # the FP16 intrinsics that are its one real advantage over other Pascal
+    # cards. Recovering that needs an image built with
+    # CMAKE_CUDA_ARCHITECTURES=60 — an optimisation, not a blocker.
+    runtimeImages:
+      llamacpp: ghcr.io/ggml-org/llama.cpp:server-cuda12
+
+    modelCache:
+      enabled: true
+      mode: shared
+      # Qwen3.8-27B at UD-Q3_K_XL is ~13GB, plus its mmproj vision tower and
+      # room for a second model later.
+      size: 60Gi
+      storageClass: truenas-fast-nfs-llmkube-models
+      accessMode: ReadWriteOnce
+
+    # The operator itself is a controller — it does no inference and must stay
+    # off the Hetzner ingress node.
+    controllerManager:
+      nodeSelector:
+        topology.homelab/site: home
+
+    # The chart ships Grafana dashboards and labels them grafana_dashboard,
+    # which is exactly what the Grafana sidecar in ../monitoring/ watches — so
+    # enabling this makes them appear with no further wiring. operator.enabled
+    # stays false: that path emits GrafanaDashboard CRs for grafana-operator,
+    # which is not installed here.
+    grafana:
+      dashboards:
+        enabled: true
+        additionalLabels:
+          grafana_dashboard: "1"
+
+    # OFF: both emit prometheus-operator kinds (ServiceMonitor/PodMonitor) and
+    # those CRDs are not installed — the monitoring stack is VictoriaMetrics,
+    # whose operator uses VMServiceScrape. Turning these on would fail the Helm
+    # install outright, exactly as Immich's metrics flag did. Scraping LLMKube
+    # is a VMServiceScrape added later; vmagent runs selectAllByDefault.
+    prometheus:
+      serviceMonitor:
+        enabled: false
+      inferencePodMonitor:
+        enabled: false

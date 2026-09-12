@@ -170,3 +170,22 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# LLMKube's shared model cache. Big GGUF files, written once and then read
+# (mmap'd) on every inference-pod start, so it wants the fast pool.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-llmkube-models
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/llmkube/models"
+  compression: "LZ4"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

@@ -18,3 +18,6 @@ resources:
   # Immich and its database operator.
   - cnpg-operator.yaml
   - immich.yaml
+  # LLM inference on the P100. Split so the CRs wait for the operator's CRDs.
+  - llmkube.yaml
+  - llmkube-models.yaml

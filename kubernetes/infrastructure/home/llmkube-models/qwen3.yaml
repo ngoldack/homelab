@@ -1,0 +1,82 @@
+# Qwen3.8-27B on the Tesla P100.
+#
+# QUANT CHOICE. The card has 16GB, and the usual default does not fit:
+#   UD-Q4_K_M   16.46 GB  does not fit at all
+#   UD-Q4_K_S   15.36 GB  no room left for KV cache
+#   UD-IQ4_XS   14.25 GB  fits, but see below
+#   UD-Q3_K_XL  13.15 GB  chosen — ~2.8GB left for KV cache and CUDA context
+#
+# IQ4_XS is nominally higher quality at a similar size, but i-quants lean on
+# the __dp4a integer dot-product instruction, which requires compute 6.1. The
+# P100 is compute 6.0 and does not have it (a P40 or GTX 1080 would), so
+# i-quants fall back to a slow path on this specific card. The K-quant is the
+# better trade here even though the file is smaller.
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: qwen3-27b
+  namespace: llmkube-system
+spec:
+  source: https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/Qwen3.8-27B-UD-Q3_K_XL.gguf
+  format: gguf
+  quantization: Q3_K_XL
+  # Download once into the shared cache rather than per-serving-pod. Matters
+  # here: the NAS currently sustains single-digit MB/s, so a 13GB pull is slow
+  # and should happen exactly once.
+  prefetch: true
+  # The prefetch Job has to be able to land on the GPU node, which carries
+  # dedicated=ai:NoSchedule.
+  prefetchTolerations:
+    - key: dedicated
+      operator: Equal
+      value: ai
+      effect: NoSchedule
+  hardware:
+    accelerator: cuda
+    gpu:
+      enabled: true
+      count: 1
+      vendor: nvidia
+      memory: "16Gi"
+      # -1 = offload every layer. At 13.15GB of weights in 16GB this fits, but
+      # if llama.cpp reports OOM at load, pin a number here instead and leave
+      # the remainder on CPU.
+      layers: -1
+  resources:
+    cpu: "4"
+    memory: "8Gi"
+---
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: qwen3-27b
+  namespace: llmkube-system
+spec:
+  modelRef: qwen3-27b
+  replicas: 1
+  # Set explicitly rather than relying on the chart default, which is the
+  # cuda13 image that cannot run on a Pascal card at all. See the long note in
+  # ../llmkube/helmrelease.yaml.
+  image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+  # The P100 box is the only node with a GPU, and it is reserved for this:
+  # instance-type selects it, the toleration gets past dedicated=ai:NoSchedule,
+  # and without the toleration the pod would sit Pending forever with no error.
+  nodeSelector:
+    hardware/gpu.model: Tesla-P100
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: ai
+      effect: NoSchedule
+  # 8k to start. Context is the other consumer of VRAM besides weights, and
+  # with ~2.8GB spare the KV cache is what will run out first — raise this only
+  # after confirming actual VRAM use.
+  contextSize: 8192
+  endpoint:
+    port: 8080
+    type: ClusterIP
+  resources:
+    gpu: 1
+    gpuMemory: "16Gi"
+    cpu: "4"
+    memory: "8Gi"

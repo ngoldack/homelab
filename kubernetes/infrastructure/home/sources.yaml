@@ -58,3 +58,14 @@ metadata:
 spec:
   interval: 2h
   url: https://immich-app.github.io/immich-charts
+---
+# Consumed by llmkube/, applied by its own Flux Kustomization so the Model and
+# InferenceService CRs can depend on the operator's CRDs existing.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: llmkube
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://defilantech.github.io/LLMKube

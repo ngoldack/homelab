@@ -39,6 +39,8 @@ data:
         attrs:
           type: proxy
           managed: null
+          # serializer requires config; {} = OutpostConfig dataclass defaults.
+          config: {}
           providers:
             - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
       # ---------- grafana via OIDC (app federates, no outpost) ----------

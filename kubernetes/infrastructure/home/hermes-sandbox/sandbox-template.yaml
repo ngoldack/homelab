@@ -1,0 +1,88 @@
+# hermes-go — the ONLY SandboxTemplate sandboxes in hermes-sandbox may use.
+#
+# WHY: every sandbox must be a Kata-isolated, credential-less, non-root pod
+# pinned to the dedicated sandbox worker; the ValidatingAdmissionPolicy
+# (agent-sandbox/policies/secure-hermes-sandbox) enforces exactly this shape,
+# so the template defines the one shape that passes. Every field is grounded
+# in `kubectl explain sandboxtemplate.spec --recursive` of the installed
+# v1beta1 CRD.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: hermes-go
+  namespace: hermes-sandbox
+spec:
+  # Cilium owns every sandbox packet (cilium-policy.yaml); the controller
+  # must not overlay its own network-policy bookkeeping on top.
+  networkPolicyManagement: Unmanaged
+  # No environment injection: sandboxd only surfaces SANDBOX_*-prefixed vars
+  # over its metadata endpoint, so the template must not seed anything extra.
+  envVarsInjectionPolicy: Disallowed
+  # No volume claims: sandboxes get exactly the two emptyDirs below — nothing
+  # that could carry host or cluster state into a session.
+  volumeClaimTemplatesPolicy: Disallowed
+  podTemplate:
+    spec:
+      # Kata is the only runtime (RuntimeClass `kata`); a runc fallback would
+      # silently drop the isolation boundary, so the admission policy rejects
+      # any other runtimeClassName.
+      runtimeClassName: kata
+      # Sandboxes hold no cluster credentials — nothing to mount, ever.
+      automountServiceAccountToken: false
+      # Schedule only on the sandbox worker; its NoSchedule taint keeps every
+      # other workload off it in return.
+      nodeSelector:
+        workload.hermes.io/sandbox: "true"
+      tolerations:
+        - key: workload.hermes.io/sandbox
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      # Non-root 10001 end to end (image user, pod and container security
+      # contexts) so nothing in a session can escalate via a UID mismatch.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runtime
+          # Tag 1.0.2 is a placeholder: a digest pin replaces it once the
+          # image is built and pushed (image-builds/hermes-sandbox-runtime).
+          image: registry.ngoldack.de/hermes-sandbox-runtime:1.0.2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # sandboxd listeners: 8080 REST FilesystemService, 9090 gRPC
+          # ProcessService (TCP only).
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            - containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "5Gi"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      # The only writable paths (matching the image layout): task state in
+      # /workspace, scratch in /tmp — emptyDirs, gone with the pod.
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: "20Gi"
+        - name: tmp
+          emptyDir:
+            sizeLimit: "2Gi"

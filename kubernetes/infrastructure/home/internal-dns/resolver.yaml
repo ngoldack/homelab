@@ -80,7 +80,7 @@ spec:
         topology.homelab/site: home
       containers:
         - name: coredns
-          image: coredns/coredns:1.11.3
+          image: coredns/coredns:1.14.7
           args: ["-conf", "/etc/coredns/Corefile"]
           ports:
             - name: dns

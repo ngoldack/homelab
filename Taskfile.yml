@@ -51,6 +51,16 @@ tasks:
           | grep '^ *AUTHENTIK_ADMIN_PASSWORD' \
           | sed -E 's/^ *AUTHENTIK_ADMIN_PASSWORD: *//'
 
+  hindsight:cp:access-key:
+    desc: Print the Hindsight dashboard (control-plane) login access key from SOPS
+    env:
+      SOPS_AGE_KEY_FILE: '{{.AGE_KEY_FILE}}'
+    cmds:
+      - |
+        sops --decrypt kubernetes/infrastructure/home/hindsight/secret.sops.yaml \
+          | grep '^ *HINDSIGHT_CP_ACCESS_KEY' \
+          | sed -E 's/^ *HINDSIGHT_CP_ACCESS_KEY: *//'
+
   hindsight:api:key:
     desc: Print the Hindsight API tenant key (Bearer auth) from SOPS
     env:

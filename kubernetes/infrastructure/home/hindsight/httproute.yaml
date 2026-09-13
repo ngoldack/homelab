@@ -1,15 +1,14 @@
-# LAN-only exposure on the internal Gateway (10.30.0.200, publish=lan so the
-# LAN external-dns instance owns both records). Two hosts, not one path-split:
-# the Next.js control plane would need a base-path rewrite dance to share a
-# host with the API, and the API wants the clean root for its SDKs.
+# LAN-only exposure of the Hindsight API on the internal Gateway
+# (10.30.0.200); the LAN external-dns instance owns the record (publish=lan).
+# hindsight.ngoldack.de → API :8888.
 #
-# hindsight.ngoldack.de        → API :8888   (agents, CLI, SDK clients)
-# hindsight-ui.ngoldack.de     → control plane :3000 (browser dashboard;
-#                                proxies the API internally, no auth hop)
+# The control-plane UI does NOT expose a LAN route anymore: hindsight-ui lives
+# on the edge behind the authentik outpost (httproutes-edge.yaml) — one
+# identity-gated path everywhere, consistent with headlamp/grafana.
 #
-# Deliberately NOT on the edge Gateway: the self-hosted API has no auth layer
-# of its own (multi-tenant auth is a custom TenantExtension), so it stays on
-# the trusted network. Clients outside the LAN reach it through Teleport.
+# The API has no auth layer of its own (multi-tenant auth is a custom
+# TenantExtension), so it stays on the trusted network; agents reach it via
+# ClusterIP (Teleport routes 10.30.0.0/24), the LAN VIP is convenience only.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -28,22 +27,3 @@ spec:
     - backendRefs:
         - name: hindsight-api
           port: 8888
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: hindsight-ui
-  namespace: hindsight
-  labels:
-    dns.ngoldack.de/publish: lan
-spec:
-  parentRefs:
-    - name: public
-      namespace: network
-      sectionName: https-apex
-  hostnames:
-    - hindsight-ui.${CLUSTER_DOMAIN}
-  rules:
-    - backendRefs:
-        - name: hindsight-control-plane
-          port: 3000

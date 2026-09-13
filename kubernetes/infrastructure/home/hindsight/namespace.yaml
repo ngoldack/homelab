@@ -3,8 +3,13 @@ kind: Namespace
 metadata:
   name: hindsight
   labels:
-    # LAN-only surface: the API + UI are served by the internal Gateway
-    # (10.30.0.200) under publish=lan. No edge-ingress label on purpose —
-    # the self-hosted API has no auth layer of its own (tenant extensions
-    # are the multi-tenant story), so it stays on the trusted network.
+    # Split surface by design:
+    # - edge-ingress: the control-plane UI is served by the edge Gateway
+    #   behind the authentik outpost (hindsight-ui-edge.yaml) — identity-gated
+    #   everywhere, WAN hairpin included.
+    # - public-ingress (LAN .200): the API only, publish=lan. The API has no
+    #   auth layer of its own (multi-tenant auth is a custom TenantExtension),
+    #   so it stays on the trusted network; agents reach it via ClusterIP
+    #   (Teleport routes it) and the LAN VIP is for convenience.
     gateway.ngoldack.de/public-ingress: "true"
+    gateway.ngoldack.de/edge-ingress: "true"

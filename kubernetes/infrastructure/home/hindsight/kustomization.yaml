@@ -9,3 +9,4 @@ resources:
   - sources.yaml
   - helmrelease.yaml
   - httproute.yaml
+  - httproutes-edge.yaml

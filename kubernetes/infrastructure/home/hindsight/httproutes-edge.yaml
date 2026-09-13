@@ -4,7 +4,9 @@
 #
 # The control plane then proxies to the hindsight API internally, so the UI
 # never touches the API over the network. The cross-namespace reference to
-# authentik-proxy is pre-authorized by the ReferenceGrant in
+# authentik-proxy (namespace: authentik — the outpost lives there, and without
+# the explicit namespace the backend defaulted to hindsight and 500'd with
+# BackendNotFound) is pre-authorized by the ReferenceGrant in
 # ../authentik/httproutes-edge.yaml.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -21,4 +23,5 @@ spec:
   rules:
     - backendRefs:
         - name: authentik-proxy
+          namespace: authentik
           port: 9000

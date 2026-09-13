@@ -55,7 +55,7 @@ spec:
       containers:
         - name: nginx
           image: docker.io/library/nginx:1.29-alpine
-          args: ["-c", "/etc/nginx/nginx.conf", "-fg"]
+          args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-fg"]
           volumeMounts:
             - name: conf
               mountPath: /etc/nginx/nginx.conf
@@ -112,7 +112,7 @@ spec:
       containers:
         - name: nginx
           image: docker.io/library/nginx:1.29-alpine
-          args: ["-c", "/etc/nginx/nginx.conf", "-fg"]
+          args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-fg"]
           volumeMounts:
             - name: conf
               mountPath: /etc/nginx/nginx.conf

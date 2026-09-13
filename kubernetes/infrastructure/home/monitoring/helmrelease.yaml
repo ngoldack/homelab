@@ -72,6 +72,11 @@ spec:
         # can both grow once real cardinality is known. VictoriaMetrics'
         # own guidance is to size from a live burn-in rather than a formula.
         retentionPeriod: "3"
+        # Graphite plaintext listener for the TrueNAS Metrics/Graphite reporter
+        # (homelab-infra-metrics/INFRA.md). Prom remote_write + InfluxDB line
+        # protocol (PVE/PBS) already answer on the :8428 Service without this.
+        extraArgs:
+          graphiteListenAddr: ":2003"
         # Pinned to the home site, and this is load-bearing rather than
         # tidiness. All TrueNAS StorageClasses reach the NAS at 10.20.10.10,
         # which is not routable from the Hetzner ingress node across KubeSpan —

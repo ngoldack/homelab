@@ -1,0 +1,32 @@
+# Forwarding non-Kubernetes homelab metrics (Proxmox VE, PBS, TrueNAS, UDM
+# Pro) into the in-cluster VictoriaMetrics: the push-endpoint LoadBalancer
+# Service and the unpoller exporter. Two dependsOn edges:
+#   - monitoring, so the vmsingle pods this Service selects already exist
+#     (a Service selecting nothing would briefly sit at zero endpoints).
+#   - monitoring-crds, because vm-scrapes.yaml needs the VMServiceScrape CRD.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: homelab-infra-metrics
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/homelab-infra-metrics
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: monitoring
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

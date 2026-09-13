@@ -1,0 +1,11 @@
+# Source for the unpoller Helm chart (helmrelease.yaml). Kept in this dir,
+# not the shared sources.yaml, because that file is owned by the
+# infra-controllers lane and this Kustomization is self-contained.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: unpoller
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://unpoller.github.io/helm-chart

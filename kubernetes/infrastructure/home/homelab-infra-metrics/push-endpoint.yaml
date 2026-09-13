@@ -1,0 +1,46 @@
+# The single LAN entry point through which non-Kubernetes homelab infra pushes
+# metrics into the in-cluster VictoriaMetrics (vmsingle).
+#
+# Type LoadBalancer so Cilium's L2 announcement + IPAM hand it a real LAN VIP
+# (10.30.0.202, see annotations). That address is reachable directly from
+# Proxmox, PBS, TrueNAS and the UDM without any Hetzner hop or VPN client —
+# the same reason the LB IPAM pool exists (../network/lb-ipam.yaml).
+#
+# 8428 is VictoriaMetrics' single-node API port: the influx line-protocol
+# endpoint (/influx/write, what Proxmox + PBS speak natively), the graphite
+# HTTP endpoint (/graphite/metrics), and the Prometheus remote_write endpoint
+# all live on it. 2003 is the graphite PLAINTEXT (carbon) listener that
+# TrueNAS' built-in "Reporting -> Graphite" export speaks; see INFRA.md for
+# the vmsingle extraArg that must be added before that port answers.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmsingle-push
+  namespace: monitoring
+  labels:
+    # Selects this Service into the Cilium L2 announcement policy (../network/
+    # l2-announcement.yaml), which ARP-answers the VIP below on ens18.
+    dns.ngoldack.de/scope: internal
+  annotations:
+    # .202 is the first address past the public gateway (.200) still inside
+    # the lan IPAM pool (10.30.0.200-250).
+    io.cilium/lb-ipam-ips: "10.30.0.202"
+spec:
+  type: LoadBalancer
+  # Match the vmsingle pods exactly as the operator's own vmsingle Service
+  # does — the labels are derived by vm-operator from the VMSingle CR, not set
+  # in monitoring/helmrelease.yaml, so they are pinned here against drift.
+  selector:
+    app.kubernetes.io/name: vmsingle
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/instance: monitoring-victoria-metrics-k8s-stack
+    managed-by: vm-operator
+  ports:
+    - name: http
+      port: 8428
+      targetPort: 8428
+      protocol: TCP
+    - name: graphite
+      port: 2003
+      targetPort: 2003
+      protocol: TCP

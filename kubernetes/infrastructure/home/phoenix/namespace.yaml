@@ -1,0 +1,10 @@
+# Phoenix: LLM observability (OTLP traces/spans, evals, prompt analytics).
+# LAN-only surface — the UI/API sit behind the internal Gateway (publish=lan);
+# the integration owner wires authentik SSO later. No edge-ingress label:
+# Phoenix is deliberately absent from the public WAN path until it is gated.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: phoenix
+  labels:
+    gateway.ngoldack.de/public-ingress: "true"

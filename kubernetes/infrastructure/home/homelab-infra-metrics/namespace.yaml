@@ -1,0 +1,8 @@
+# unpoller runs here. Deliberately its own namespace rather than piggybacking
+# on 'monitoring': it is a forwarder pulling from the UDM Pro, not part of the
+# monitoring stack, and keeping it isolated means the monitoring HelmRelease
+# (owned by a different lane) never has to know about it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: unpoller

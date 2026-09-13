@@ -1,0 +1,47 @@
+# Phoenix's Postgres on CloudNativePG, the same operator every relational
+# store here uses (immich/hindsight/authentik). Traces, projects, datasets,
+# prompts and evals all live here; the pod's /data mount is an emptyDir, so
+# this cluster is the only durable state.
+#
+# The app role/database are named phoenix (not the CNPG default "app") and the
+# password comes from OUR secret (postgres-credentials.sops.yaml) via
+# bootstrap.initdb.secret — that same literal is what the Phoenix HelmRelease
+# injects as PHOENIX_POSTGRES_PASSWORD (auth.secret[].valueFrom), so nothing
+# is auto-generated and a drift between the two fails loudly at connect time.
+# Same reasoning as hindsight/authentik.
+#
+# pgvector + pg_trgm ship inside 18-standard-trixie (verified live against
+# immich-database-1: pg_available_extensions lists 'vector'); the CREATE
+# EXTENSION itself is reconciled by the Database CR (database.yaml).
+#
+# Its own per-app StorageClass (truenas-fast-nfs-phoenix-database) so the
+# dataset lands at fast/k8s/nfs/phoenix/database with the same 6h/14d
+# snapshot schedule as the other databases and rootSquash off (initdb needs
+# it). Same NFS-for-PG caveat as the immich/hindsight databases (move to
+# block storage once NVMe-oF works).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: phoenix-database
+  namespace: phoenix
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  bootstrap:
+    initdb:
+      database: phoenix
+      owner: phoenix
+      secret:
+        name: phoenix-database-credentials
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nfs-phoenix-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

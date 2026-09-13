@@ -1,0 +1,16 @@
+# VMServiceScrape so vmagent (selectAllByDefault) collects Phoenix's
+# Prometheus /metrics on 9090, gated on PHOENIX_ENABLE_PROMETHEUS=true in the
+# HelmRelease. Phoenix exposes process/application metrics there; the UI/OTLP
+# (6006) and gRPC (4317) ports carry none. The endpoint targets the service's
+# named metrics port, avoiding the per-cluster-shape port-number guessing.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: phoenix
+  namespace: phoenix
+spec:
+  endpoints:
+    - port: phoenix-metrics
+  selector:
+    matchLabels:
+      app: phoenix

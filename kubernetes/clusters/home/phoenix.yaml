@@ -1,0 +1,32 @@
+# Arize Phoenix: LLM observability (OTLP traces/spans, prompt analytics),
+# self-hosted on the CNPG operator + the upstream Helm chart, LAN-only.
+# Depends on cnpg-operator for the Cluster/Database CRDs, on network for the
+# Gateway its HTTPRoute attaches to, and on monitoring-crds for the
+# VMServiceScrape CRD it defines (vm-scrapes.yaml).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: phoenix
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/phoenix
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+    - name: network
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

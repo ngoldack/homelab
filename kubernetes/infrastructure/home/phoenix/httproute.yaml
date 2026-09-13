@@ -1,0 +1,29 @@
+# LAN-only exposure of the Phoenix UI + HTTP API on the internal Gateway
+# (10.30.0.200); the LAN external-dns instance owns the record (publish=lan).
+# -> phoenix.ngoldack.de to the phoenix-svc on :6006.
+#
+# One route carries both the UI and the OTLP/HTTP collector: Phoenix accepts
+# spans on the app port 6006 under /v1/traces, so HTTPS-ing the app also
+# carries OTLP/HTTP on the trusted LAN. OTLP/gRPC (4317) stays ClusterIP-only
+# — that is how in-cluster homelab agents reach it.
+#
+# No authentik SSO here: the integration owner wires that (the route would
+# then backend the outpost instead of phoenix-svc, edge-gating the UI).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: phoenix
+  namespace: phoenix
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - phoenix.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: phoenix-svc
+          port: 6006

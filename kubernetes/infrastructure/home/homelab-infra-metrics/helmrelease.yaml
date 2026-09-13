@@ -1,0 +1,61 @@
+# unpoller (UniFi Poller) — pulls device/client/site metrics from the UDM Pro
+# controller API and re-exposes them as Prometheus metrics on :9130, which the
+# in-cluster vmagent (selectAllByDefault) then scrapes via vm-scrapes.yaml.
+#
+# Chart is pinned to 2.4.0 deliberately: it is the newest release in the
+# unpoller helm repo that still carries the toggles this cluster needs —
+# `podMonitor.enabled` (off, no prometheus-operator CRDs) and
+# `upConfigExistingSecret` (so the UniFi credentials live in a SOPS secret,
+# not inline here). The image tag is advanced separately to a current unpoller
+# release; the up.conf INI format is unchanged across those versions.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: unpoller
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: unpoller
+      version: "2.4.0"
+      sourceRef:
+        kind: HelmRepository
+        name: unpoller
+      interval: 1h
+  releaseName: unpoller
+  targetNamespace: unpoller
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    image:
+      # Pin past the chart's own appVersion (v3.5.0) to a current unpoller.
+      tag: v5.2.5
+    service:
+      # Expose :9130 as a ClusterIP Service so vm-scrapes.yaml can select it.
+      # ClusterIP, not LoadBalancer: unpoller is scraped in-cluster by vmagent,
+      # it is never reached off-cluster.
+      enabled: true
+      type: ClusterIP
+      port: 9130
+    # The chart ships a prometheus-operator PodMonitor and grafana-operator
+    # Grafana/GrafanaDashboard CRs, but this cluster has neither operator
+    # (VictoriaMetrics + vendored Grafana ConfigMaps). Leaving either enabled
+    # would fail the release on the missing CRDs.
+    podMonitor:
+      enabled: false
+    dashboards:
+      create: false
+      grafana:
+        create: false
+    # up.conf (the whole unpoller config, credentials included) comes from the
+    # SOPS-encrypted Secret in unifi.sops.yaml, so nothing here holds secrets.
+    upConfigExistingSecret:
+      name: unpoller-unifi
+      key: up.conf

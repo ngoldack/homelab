@@ -35,3 +35,7 @@ resources:
   - authentik.yaml
   # Hindsight agent memory: local LLM + CNPG/pgvector, LAN-only surface.
   - hindsight.yaml
+  # LLM/OTLP observability (Arize Phoenix, deep trace + prompt analytics).
+  - phoenix.yaml
+  # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
+  - homelab-infra-metrics.yaml

@@ -1,0 +1,19 @@
+# Scrapes unpoller's :9130 /metrics. vmagent runs selectAllByDefault: true
+# (monitoring/helmrelease.yaml), so this object is picked up with no label
+# wiring — the only thing that matters is that it exists in some namespace.
+#
+# The selector matches the Service labels the chart renders (releaseName is
+# forced to 'unpoller' in helmrelease.yaml, so app.kubernetes.io/instance is
+# stable); the endpoint port 'tcp' is the Service port name.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: unpoller
+  namespace: unpoller
+spec:
+  endpoints:
+    - port: tcp
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: unpoller
+      app.kubernetes.io/instance: unpoller

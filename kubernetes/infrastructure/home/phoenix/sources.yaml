@@ -1,0 +1,13 @@
+# Phoenix's chart is published as an OCI artifact on Docker Hub, tagged by
+# chart version (12.0.11 -> app 20.10.0 at time of writing). The chart name
+# inside the artifact is phoenix-helm (its Chart.yaml name), which the
+# HelmRelease below pulls.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: phoenix
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://registry-1.docker.io/arizephoenix/phoenix-helm

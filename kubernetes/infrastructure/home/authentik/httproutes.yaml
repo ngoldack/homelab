@@ -23,8 +23,8 @@ spec:
     - authentik.ngoldack.de
   rules:
     - backendRefs:
-        - name: authentik-server
-          port: 80
+        - name: portal-bridge-home
+          port: 9100
 ---
 # The edge headlamp route (../headlamp/httproute-edge.yaml) references
 # authentik-proxy across the namespace boundary. A grant with no route using

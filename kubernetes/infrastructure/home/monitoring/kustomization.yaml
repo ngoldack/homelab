@@ -6,11 +6,23 @@ resources:
   # grafana is edge-only now, SSO via authentik everywhere.
   - httproute-edge.yaml
   - grafana-authentik.sops.yaml
+  # Every VMServiceScrape/VMPodScrape in one place. Applies under this
+  # Kustomization, which dependsOn monitoring-crds (see
+  # kubernetes/clusters/home/monitoring.yaml), so the VM operator CRDs are
+  # installed before these CRs are reconciled.
+  - scrapes.yaml
 
 # One ConfigMap per vendored dashboard. The Grafana sidecar (enabled in
 # helmrelease.yaml) watches every namespace for ConfigMaps carrying
 # grafana_dashboard: "1" and drops their contents into Grafana's provisioning
 # directory — so this is the whole wiring; no operator, no CRDs.
+#
+# Every dashboard entry carries the same two options:
+#   - grafana_dashboard: "1" — the label the sidecar keys off.
+#   - kustomize.toolkit.fluxcd.io/substitute: disabled — Grafana dashboards
+#     are full of ${...} placeholders; Flux's postBuild.substituteFrom
+#     (strict envsubst) fails the whole Kustomization on any ${...} it cannot
+#     resolve, so each dashboard ConfigMap must opt out.
 #
 # disableNameSuffixHash is on because the sidecar keys off the label, not the
 # name, and a hash-suffixed name churns on every content change for no benefit.
@@ -22,15 +34,6 @@ configMapGenerator:
       labels:
         grafana_dashboard: "1"
       annotations:
-        # Grafana dashboards are full of ${datasource}, ${__interval} and
-        # friends. Flux's postBuild.substituteFrom runs envsubst over every
-        # manifest in this Kustomization and, in strict mode, fails on any
-        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
-        # monitoring reconcile with:
-        #   envsubst error: variable not set (strict mode): "datasource"
-        # This annotation is Flux's supported opt-out per resource. It must be
-        # on every dashboard ConfigMap, not just the one that happened to fail
-        # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-victoriametrics
     namespace: monitoring
@@ -39,15 +42,6 @@ configMapGenerator:
       labels:
         grafana_dashboard: "1"
       annotations:
-        # Grafana dashboards are full of ${datasource}, ${__interval} and
-        # friends. Flux's postBuild.substituteFrom runs envsubst over every
-        # manifest in this Kustomization and, in strict mode, fails on any
-        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
-        # monitoring reconcile with:
-        #   envsubst error: variable not set (strict mode): "datasource"
-        # This annotation is Flux's supported opt-out per resource. It must be
-        # on every dashboard ConfigMap, not just the one that happened to fail
-        # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmagent
     namespace: monitoring
@@ -56,15 +50,6 @@ configMapGenerator:
       labels:
         grafana_dashboard: "1"
       annotations:
-        # Grafana dashboards are full of ${datasource}, ${__interval} and
-        # friends. Flux's postBuild.substituteFrom runs envsubst over every
-        # manifest in this Kustomization and, in strict mode, fails on any
-        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
-        # monitoring reconcile with:
-        #   envsubst error: variable not set (strict mode): "datasource"
-        # This annotation is Flux's supported opt-out per resource. It must be
-        # on every dashboard ConfigMap, not just the one that happened to fail
-        # first.
         kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-vmalert
     namespace: monitoring
@@ -73,15 +58,94 @@ configMapGenerator:
       labels:
         grafana_dashboard: "1"
       annotations:
-        # Grafana dashboards are full of ${datasource}, ${__interval} and
-        # friends. Flux's postBuild.substituteFrom runs envsubst over every
-        # manifest in this Kustomization and, in strict mode, fails on any
-        # ${...} it cannot resolve — so vendoring a dashboard broke the whole
-        # monitoring reconcile with:
-        #   envsubst error: variable not set (strict mode): "datasource"
-        # This annotation is Flux's supported opt-out per resource. It must be
-        # on every dashboard ConfigMap, not just the one that happened to fail
-        # first.
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-immich
+    namespace: monitoring
+    files: [dashboards/immich.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-zot
+    namespace: monitoring
+    files: [dashboards/zot.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-cnpg
+    namespace: monitoring
+    files: [dashboards/cnpg.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-external-dns
+    namespace: monitoring
+    files: [dashboards/external-dns.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-cert-manager
+    namespace: monitoring
+    files: [dashboards/cert-manager.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-flux
+    namespace: monitoring
+    files: [dashboards/flux.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-authentik
+    namespace: monitoring
+    files: [dashboards/authentik.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-llamacpp
+    namespace: monitoring
+    files: [dashboards/llamacpp.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-cilium-agent
+    namespace: monitoring
+    files: [dashboards/cilium-agent.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-cilium-operator
+    namespace: monitoring
+    files: [dashboards/cilium-operator.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-valkey
+    namespace: monitoring
+    files: [dashboards/valkey.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
 
 generatorOptions:

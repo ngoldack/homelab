@@ -1,7 +1,9 @@
-# Phoenix's chart is published as an OCI artifact on Docker Hub, tagged by
-# chart version (12.0.11 -> app 20.10.0 at time of writing). The chart name
-# inside the artifact is phoenix-helm (its Chart.yaml name), which the
-# HelmRelease below pulls.
+# Phoenix's chart is published as an OCI artifact on Docker Hub as
+# arizephoenix/phoenix-helm, tagged by chart version (12.0.11 -> app 20.10.0).
+# The repo URL is the ORG path arizephoenix; the HelmRelease chart name is
+# phoenix-helm, so Flux resolves oci://registry-1.docker.io/arizephoenix/
+# phoenix-helm:12.0.11. (Including /phoenix-helm in the URL doubled the leaf
+# and pulled .../phoenix-helm/phoenix-helm -> 401 at first reconcile.)
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
@@ -10,4 +12,4 @@ metadata:
 spec:
   type: oci
   interval: 1h
-  url: oci://registry-1.docker.io/arizephoenix/phoenix-helm
+  url: oci://registry-1.docker.io/arizephoenix

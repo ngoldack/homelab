@@ -1,0 +1,222 @@
+# One scrape object per metrics-emitting workload, all in this single file so
+# the monitoring Kustomization (which already dependsOn monitoring-crds) ships
+# the CRs after the VM operator CRDs exist. vmagent runs selectAllByDefault
+# (see helmrelease.yaml), so a scrape object in any namespace is adopted with
+# no label wiring; each object below pins namespaceSelector.matchNames to the
+# workload's own namespace to be unambiguous about discovery.
+
+# ---- immich: server exposes OpenTelemetry PrometheusExporter endpoints on
+# 8081 (api) and 8082 (microservices) once IMMICH_TELEMETRY_INCLUDE is set on
+# the server container (../immich/helmrelease.yaml). Pod-level scrape, since
+# the Service only carries :2283.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  namespaceSelector:
+    matchNames: [immich]
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: immich
+      app.kubernetes.io/name: server
+  podMetricsEndpoints:
+    - port: "8081"
+    - port: "8082"
+---
+# ---- zot registry: metrics on the HTTP port once
+# extensions.metrics.enable is set (../registry/helmrelease.yaml).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: zot
+  namespace: registry
+spec:
+  namespaceSelector:
+    matchNames: [registry]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  endpoints:
+    - port: "5000"
+---
+# ---- CloudNativePG. Each instance pod ALWAYS serves Prometheus metrics on
+# :9187 (container port name "metrics"); the operator's deprecated
+# monitoring.enablePodMonitor would only emit a prometheus-operator PodMonitor
+# whose CRD is not installed here, so we scrape the pods directly and leave
+# the Cluster CRs untouched.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: authentik-database
+  namespace: authentik
+spec:
+  namespaceSelector:
+    matchNames: [authentik]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: authentik-database
+  podMetricsEndpoints:
+    - port: "9187"
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: immich-database
+  namespace: immich
+spec:
+  namespaceSelector:
+    matchNames: [immich]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: immich-database
+  podMetricsEndpoints:
+    - port: "9187"
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: hindsight-database
+  namespace: hindsight
+spec:
+  namespaceSelector:
+    matchNames: [hindsight]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: hindsight-database
+  podMetricsEndpoints:
+    - port: "9187"
+---
+# ---- external-dns (both the LAN and edge instances share the
+# app.kubernetes.io/name=external-dns service label, so one scrape covers
+# both) on the metrics port 7979.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: external-dns
+  namespace: network
+spec:
+  namespaceSelector:
+    matchNames: [network]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+  endpoints:
+    - port: "7979"
+---
+# ---- cert-manager controller only (the task scopes to the controller; the
+# cainjector/webhook emit on 9402/10250 but their Services are not prometheus
+# ports we rely on).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  namespaceSelector:
+    matchNames: [cert-manager]
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+  endpoints:
+    - port: "9402"
+---
+# ---- Flux controllers: source/kustomize/helm/notification controllers all
+# label their pods app.kubernetes.io/part-of=flux and serve :8080 (container
+# port name http-prom). There is no Service, so this is a pod scrape.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: flux-controllers
+  namespace: flux-system
+spec:
+  namespaceSelector:
+    matchNames: [flux-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: flux
+  podMetricsEndpoints:
+    - port: "8080"
+---
+# ---- authentik server pods serve django-prometheus metrics on :9300 (the
+# container port "metrics"); the chart does not create a metrics Service, so
+# this is a pod scrape.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: authentik-server
+  namespace: authentik
+spec:
+  namespaceSelector:
+    matchNames: [authentik]
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: authentik
+      app.kubernetes.io/component: server
+  podMetricsEndpoints:
+    - port: "9300"
+---
+# ---- llmkube llama.cpp qwen3-27b: the llama-server runs with --metrics on
+# :8080 (the InferenceService Service of the same name exposes it).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: qwen3-27b
+  namespace: llmkube-system
+spec:
+  namespaceSelector:
+    matchNames: [llmkube-system]
+  selector:
+    matchLabels:
+      app: qwen3-27b
+  endpoints:
+    - port: "8080"
+---
+# ---- cilium agent (9962, default prometheus-serve-addr) and operator
+# (9963, container port name "prometheus"). Both live in kube-system and have
+# no scrapeable Service of their own, so these are pod scrapes.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cilium-agent
+  namespace: kube-system
+spec:
+  namespaceSelector:
+    matchNames: [kube-system]
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  podMetricsEndpoints:
+    - port: "9962"
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cilium-operator
+  namespace: kube-system
+spec:
+  namespaceSelector:
+    matchNames: [kube-system]
+  selector:
+    matchLabels:
+      io.cilium/app: operator
+  podMetricsEndpoints:
+    - port: "9963"
+---
+# ---- valkey (authentik's cache/broker): the valkey-operator runs an
+# oliver006/redis_exporter sidecar on :9121 whenever ValkeyCluster
+# spec.exporter.enabled is true (it is — ../authentik/valkey.yaml).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: valkey
+  namespace: authentik
+spec:
+  namespaceSelector:
+    matchNames: [authentik]
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: valkey-node
+  podMetricsEndpoints:
+    - port: "9121"

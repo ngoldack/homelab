@@ -52,10 +52,11 @@ spec:
         #
         # The VM operator can convert ServiceMonitors, but only if the
         # prometheus-operator CRDs are installed alongside it, which is a whole
-        # second CRD set to own for one chart's benefit. Scraping Immich is
-        # instead a VMServiceScrape added here later — vmagent runs with
-        # selectAllByDefault, so such an object is picked up with no further
-        # wiring.
+        # second CRD set to own for one chart's benefit. Immich is instead
+        # scraped by the VMPodScrape in ../monitoring/scrapes.yaml (server
+        # pods, :8081/:8082), enabled via IMMICH_TELEMETRY_INCLUDE below —
+        # vmagent runs with selectAllByDefault, so that object is picked up
+        # with no further wiring.
         enabled: false
 
     # Valkey (Redis) is DISABLED by default in this chart, and Immich does not
@@ -173,6 +174,16 @@ spec:
                       name: immich-database-app
                       key: dbname
                 REDIS_HOSTNAME: immich-valkey
+                # Prometheus metrics. Not the chart's metrics.enabled flag —
+                # that renders a prometheus-operator ServiceMonitor whose CRD
+                # is not installed (see the immich.metrics comment above).
+                # Immich v3 serves OpenTelemetry metrics via a
+                # PrometheusExporter on the IMMICH_API_METRICS_PORT (8081)
+                # and IMMICH_MICROSERVICES_METRICS_PORT (8082) defaults; this
+                # variable is what actually turns the custom metric groups on
+                # (otel instruments stay silent without it). Scraped by the
+                # VMPodScrape ../monitoring/scrapes.yaml, not via any Service.
+                IMMICH_TELEMETRY_INCLUDE: all
       # Keep the server on the LAN: it mounts the library from the NAS, which
       # the Hetzner ingress node cannot reach.
       defaultPodOptions:

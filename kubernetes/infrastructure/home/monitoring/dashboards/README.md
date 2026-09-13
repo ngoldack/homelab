@@ -17,6 +17,22 @@ Sources, all pinned:
   vmagent.json          same tag
   vmalert.json          same tag
   node-exporter-full    grafana.com dashboard 1860, revision 37
+  cnpg.json             grafana.com dashboard 20417 (CloudNativePG), revision 4
+  external-dns.json     grafana.com dashboard 15038 (External DNS), revision 3
+  cert-manager.json     grafana.com dashboard 11001 (cert-manager), revision 1
+  cilium-agent.json     grafana.com dashboard 15513 (Cilium Agent Metrics), rev 1
+  cilium-operator.json  grafana.com dashboard 15514 (Cilium Operator), rev 1
+  valkey.json           grafana.com dashboard 763 (Redis Exporter 1.x), rev 6
+  flux.json             fluxcd/flux2-monitoring-example control-plane.json
+                        (official Flux Control Plane dashboard, pinned at its
+                        main-branch state when vendored)
+  immich.json           hand-authored (no official dashboard) — OTel HTTP
+                        server metrics from IMMICH_TELEMETRY_INCLUDE
+  zot.json              hand-authored (no official dashboard) — zot_* metrics
+  llamacpp.json         hand-authored (no official dashboard) — llamacpp:*
+                        metrics from llama.cpp server --metrics
+  authentik.json        hand-authored (no official dashboard) — django-
+                        prometheus process metrics on the :9300 metrics server
 
 Processing applied when vendoring, which must be repeated if these are
 refreshed:

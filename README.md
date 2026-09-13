@@ -628,17 +628,20 @@ paths exist, and an app takes exactly one:
 ```mermaid
 sequenceDiagram
   participant B as Browser / SDK
-  participant E as Edge Gateway (Cilum envoy, cloud)
+  participant E as Edge Gateway (Cilium envoy, cloud)
   participant A as Authentik
   participant O as Proxy outpost (cloud)
   participant P as App pod (home)
-  B->>A: 1. request app.ngoldack.de
-  B->>E: TLS at edge listener
+  B->>E: request https://app.ngoldack.de (TLS at edge listener)
   E->>O: HTTPRoute -> outpost (proxy provider vhost)
-  O-->>A: no session? -> login flow (RD2)
-  A-->>B: login screen (identify + password + TOTOD/MFA)
-  B-->>A: credentials
-  A-->>O: session cookie issued
+  alt no session
+    O-->>B: 302 -> https://authentik.ngoldack.de login
+    B->>A: GET /application/o/authorize?client_id=...
+    A-->>B: login screen (identify + password + TOTP/MFA)
+    B->>A: credentials
+    A-->>B: session cookie + 302 back to the app origin
+  end
+  B->>O: request with session cookie
   O->>P: proxies request (upstream = app Service)
   P-->>B: response
 ```

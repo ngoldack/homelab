@@ -29,7 +29,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -73,7 +73,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "count(up{job=~\".*node.*\"})",
           "legendFormat": "{{__name__}}",
@@ -89,7 +89,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -133,10 +133,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[2m]))*100*0+avg by (instance)(sum(rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) and avg by (instance)(node_cpu_seconds_total))*0+100 - avg(sum(rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) / sum(count(node_cpu_seconds_total) by (instance)) * 100)",
-          "legendFormat": "{{__name__}}",
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "cpu",
           "refId": "A"
         }
       ],
@@ -149,7 +149,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -193,7 +193,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)/(1024^3)",
           "legendFormat": "{{__name__}}",
@@ -209,7 +209,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -253,7 +253,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "count(kube_pod_info)",
           "legendFormat": "{{__name__}}",
@@ -269,7 +269,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -313,7 +313,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "count(gotk_reconcile_condition{kind=\"HelmRelease\",status=\"True\"})",
           "legendFormat": "{{__name__}}",
@@ -329,7 +329,7 @@
       "url": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 5,
@@ -373,7 +373,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "sum(rate(vmagent_remotewrite_sent_bytes_total[1m]))*8/1024",
           "legendFormat": "{{__name__}}",
@@ -388,7 +388,7 @@
       "title": "CPU by node",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 8,
@@ -421,10 +421,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
-          "expr": "100 - (sum by (instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) / on (instance) group_left sum by (instance)(count(node_cpu_seconds_total) ) * 100)",
-          "legendFormat": "{{instance}}",
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "cpu",
           "refId": "A"
         }
       ]
@@ -435,7 +435,7 @@
       "title": "Memory by node",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 8,
@@ -468,7 +468,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)/(1024^3)",
           "legendFormat": "{{instance}}",
@@ -482,7 +482,7 @@
       "title": "Disk usage % per node",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 8,
@@ -515,7 +515,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "(1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})) * 100",
           "legendFormat": "{{instance}}",
@@ -529,7 +529,7 @@
       "title": "Network TX/RX (bytes/s)",
       "datasource": {
         "type": "prometheus",
-        "uid": "000000001"
+        "uid": "VictoriaMetrics"
       },
       "gridPos": {
         "h": 8,
@@ -562,7 +562,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "000000001"
+            "uid": "VictoriaMetrics"
           },
           "expr": "rate(node_network_receive_bytes_total[2m])",
           "legendFormat": "rx {{instance}}",

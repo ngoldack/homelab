@@ -27,6 +27,7 @@ data:
           name: headlamp
           meta_name: Headlamp (edge)
           meta_launch_url: https://headlamp.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:

@@ -56,6 +56,10 @@ metadata:
   namespace: authentik
 spec:
   schedule: "*/15 * * * *"
+  # keep exactly one job's pods of history; the token only changes on
+  # rotation, every run after the first is a no-op rewrite
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:

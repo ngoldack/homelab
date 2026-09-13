@@ -69,7 +69,7 @@ spec:
       env: &llm-env
         HINDSIGHT_API_LLM_PROVIDER: openai
         HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: deepseek/deepseek-v4-flash
+        HINDSIGHT_API_LLM_MODEL: openai/gpt-5-nano
         HINDSIGHT_API_LLM_1_PROVIDER: openai
         HINDSIGHT_API_LLM_1_BASE_URL: https://openrouter.ai/api/v1
         HINDSIGHT_API_LLM_1_MODEL: z-ai/glm-5.3-flash
@@ -78,11 +78,14 @@ spec:
         HINDSIGHT_API_LLM_2_MODEL: qwen3-27b
         HINDSIGHT_API_LLM_2_API_KEY: not-needed
         HINDSIGHT_API_LLM_STRATEGY: '{"mode": "failover"}'
-        # NO HINDSIGHT_API_LLM_REASONING_EFFORT here — verified live 2026-09-13:
-        # both OpenRouter members (gpt-5-nano, glm-5.3-flash) 400 "Reasoning is
-        # mandatory for this endpoint" when sent reasoning_effort: none, so it
-        # is left unset and each model runs at its own default effort. The
-        # local llama.cpp failover strips thinking via ggpre (not effort).
+        # REASONING_EFFORT intentionally UNSET (verified live 2026-09-13):
+        # sending reasoning_effort: none to the OpenRouter members 400s
+        # ("Reasoning is mandatory for this endpoint"), so each model runs at
+        # its own default effort. The local llama.cpp failover strips thinking
+        # via ggpre (not effort).
+        # Primary model reverted to gpt-5-nano 2026-09-13: the deepseek-v4-flash
+        # slug was retired upstream, and hindsight-api's slow multi-leg startup
+        # verification (3 connections) crossed the chart's 30s liveness budget.
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; upstream first-token
         # latency plus 4k max_tokens generation busts the chart-default ~60s

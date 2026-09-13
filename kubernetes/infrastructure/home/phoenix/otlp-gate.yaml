@@ -70,7 +70,17 @@ spec:
         app.kubernetes.io/name: otlp-gate
     spec:
       nodeSelector:
-        topology.homelab/site: home
+        # The edge Gateway (otlp.ngoldack.de) is served by the cilium-envoy
+        # on the CLOUD node (fsn1, site: cloud) with externalTrafficPolicy
+        # Local, so the edge can only reach node-local backends. The gate MUST
+        # follow the outpost's pin (site: cloud) or the edge times out on the
+        # cross-node hop — same doctrine as authentic outpost.yaml:38. It
+        # proxies to phoenix-svc (home) over the mesh, like the outpost does.
+        topology.homelab/site: cloud
+      tolerations:
+        - key: dedicated
+          value: ingress
+          effect: NoSchedule
       initContainers:
         - name: render-conf
           image: docker.io/library/alpine:3.20

@@ -194,3 +194,151 @@ data:
           meta_name: Grafana
           meta_launch_url: https://grafana.ngoldack.de/
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, grafana-oidc]]
+      # ---------- MFA (admin-gated) ----------
+      # Phase 1 (non-breaking): creates the MFA authentication flow, the
+      # enrollment chain, and the akadmin/users groups. NOTHING is re-pointed
+      # at the MFA flow yet (default-authentication-flow stays authoritative),
+      # so there is zero lockout risk. Follows the official blueprint pattern
+      # (docs: customize/blueprints/v1/example.md) — !KeyOf for in-file refs,
+      # attrs omitted when the default is fine.
+      #
+      # ORDER MATTERS: !KeyOf/!Find resolve only against entries processed
+      # EARLIER in the document, so the enrollment flow + its stages are
+      # declared before the MFA flow that configures them.
+      # ---- enrollment flow (webauthn -> totp -> recovery) ----
+      - id: enroll-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: default-authenticator-enrollment
+        attrs:
+          name: default-authenticator-enrollment
+          title: Enroll MFA
+          designation: stage_configuration
+      - id: webauthn-enroll
+        model: authentik_stages_authenticator_webauthn.authenticatorwebauthnstage
+        state: present
+        identifiers:
+          name: webauthn-enroll
+        attrs:
+          friendly_name: Security key / passkey
+      - id: totp-enroll
+        model: authentik_stages_authenticator_totp.authenticatortotpstage
+        state: present
+        identifiers:
+          name: totp-enroll
+        attrs:
+          friendly_name: Authenticator app
+          digits: 6
+      - id: recovery-enroll
+        model: authentik_stages_authenticator_static.authenticatorstaticstage
+        state: present
+        identifiers:
+          name: recovery-enroll
+        attrs:
+          friendly_name: Recovery codes
+      - id: enroll-user-write
+        model: authentik_stages_user_write.userwritestage
+        state: present
+        identifiers:
+          name: enroll-user-write
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 10
+          stage: !KeyOf webauthn-enroll
+          target: !KeyOf enroll-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 20
+          stage: !KeyOf totp-enroll
+          target: !KeyOf enroll-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 30
+          stage: !KeyOf recovery-enroll
+          target: !KeyOf enroll-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 40
+          stage: !KeyOf enroll-user-write
+          target: !KeyOf enroll-flow
+      # ---- MFA authentication flow (own stages, stacked) ----
+      - id: mfa-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: default-authentication-flow-mfa
+        attrs:
+          name: default-authentication-flow-mfa
+          title: MFA authentication
+          designation: authentication
+      - id: mfa-password
+        model: authentik_stages_password.passwordstage
+        state: present
+        identifiers:
+          name: mfa-password
+        attrs:
+          backends:
+            - authentik.core.auth.InbuiltBackend
+      - id: mfa-validate
+        model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+        state: present
+        identifiers:
+          name: mfa-validate
+        attrs:
+          device_classes: [webauthn, totp, static]
+          # skip during phase 1 (no lockout); flipped to configure in phase 3
+          not_configured_action: skip
+          configure_flow: !KeyOf enroll-flow
+      - id: mfa-identification
+        model: authentik_stages_identification.identificationstage
+        state: present
+        identifiers:
+          name: mfa-identification
+        attrs:
+          user_fields: [email, username]
+      - id: mfa-login
+        model: authentik_stages_user_login.userloginstage
+        state: present
+        identifiers:
+          name: mfa-login
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 10
+          stage: !KeyOf mfa-identification
+          target: !KeyOf mfa-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 20
+          stage: !KeyOf mfa-password
+          target: !KeyOf mfa-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 30
+          stage: !KeyOf mfa-validate
+          target: !KeyOf mfa-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 100
+          stage: !KeyOf mfa-login
+          target: !KeyOf mfa-flow
+      # ---- groups: akadmin (privileged) + users (zero default access) ----
+      - id: akadmin-group
+        model: authentik_core.group
+        state: present
+        identifiers:
+          name: akadmin
+        attrs:
+          is_superuser: true
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: users

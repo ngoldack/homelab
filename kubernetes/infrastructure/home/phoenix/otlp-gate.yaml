@@ -74,6 +74,8 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              # envsubst ships in the gettext package, not base Alpine
+              apk add --no-cache gettext >/dev/null 2>&1
               envsubst '${OTLP_TOKEN}' < /tpl/nginx.conf > /out/nginx.conf
           env:
             - name: OTLP_TOKEN

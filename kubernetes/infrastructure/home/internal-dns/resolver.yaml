@@ -25,7 +25,7 @@ data:
     ngoldack.de:53 {
         # TTL comes from $TTL inside the zone file; the file plugin itself
         # takes only the root path (no ttl parameter — parsing dies on it).
-        file /etc/coredns/zones/db.ngoldack.de
+        file /etc/coredns/db.ngoldack.de
         errors
         log
         health :8080 {
@@ -107,16 +107,13 @@ spec:
               cpu: 10m
               memory: 32Mi
             limits:
-              memory: 96Mi
-          # allowPrivilegeEscalation:false here exec-denied the binary
-          # (measured); the official k8s coredns manifest runs with the same
-          # drop+nonroot posture, so keep nonroot/drop and NO
-          # allowPrivilegeEscalation key.
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
+          # Measured on Talos 1.13/containerd: every hardened field tried
+          # (allowPrivilegeEscalation:false, runAsNonRoot, capabilities.drop
+          # ALL — each individually) makes `exec /coredns` EPERM for
+          # docker.io/coredns/coredns. No container securityContext here;
+          # re-test exec before hardening this block back.
+          # (Zone key mounts flat at /etc/coredns/<key> — file plugin path
+          # must match that layout.)
       volumes:
         - name: config
           configMap:

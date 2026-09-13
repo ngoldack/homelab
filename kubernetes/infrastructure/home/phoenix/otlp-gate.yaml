@@ -30,7 +30,7 @@ data:
     http {
       map $http_authorization $allowed {
         default 0;
-        ~^Bearer ${OTLP_TOKEN}$ 1;
+        "~^Bearer ${OTLP_TOKEN}$" 1;
       }
       server {
         listen 8081;

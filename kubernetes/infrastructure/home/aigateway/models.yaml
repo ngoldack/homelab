@@ -16,9 +16,10 @@
 # Auth: the BackendSecurityPolicy reads the OpenRouter key from the
 # openrouter-key Secret (key "apiKey", the only key the BackendSecurityPolicy
 # CRD accepts). That Secret is decrypted from openrouter-key.sops.yaml in this
-# same aigateway/ tree — it carries the same OpenRouter key the hindsight
-# deployment uses (HINDSIGHT_API_LLM_API_KEY), re-wrapped under the apiKey key
-# EAG demands, so no new credential is minted.
+# same aigateway/ tree. Since 2026-09-13 it carries a DEDICATED OpenRouter key
+# (isolated from the hindsight deployment's HINDSIGHT_API_LLM_API_KEY — the
+# earlier shared-key design was retired so the two integrations cannot share a
+# single compromised credential), re-wrapped under the apiKey key EAG demands.
 #
 # TLS: the OpenRouter backend is external, so each EG Backend is paired with a
 # BackendTLSPolicy against the system CA (wellKnownCACertificates: System),

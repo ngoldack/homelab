@@ -8,14 +8,11 @@
 #   - The ai-gateway CRDs (ai-gateway-crds-helm v1.1.0) and the Gateway API
 #     CRDs must exist before the Gateway / AIGatewayRoute / models CRs in this
 #     tree reconcile. The Gateway API CRDs are already owned repo-wide
-#     (tofu/home/gateway-api-crds.tf). The ai-gateway CRDs are a one-time helm
-#     apply the operator runs on first deploy:
-#       helm upgrade -i aieg-crd oci://docker.io/envoyproxy/ai-gateway-crds-helm \
-#         --version v1.1.0 --namespace aigateway --create-namespace
-#     (This is deliberately NOT a Flux HelmRelease: it is a cluster-scoped,
-#     CRD-only chart applied once, matching how tofu owns the Gateway API
-#     CRDs. Subsequent Flux reconciles of this Kustomization only touch the
-#     CRs below.)
+#     (tofu/home/gateway-api-crds.tf). The ai-gateway CRDs (aigateway.envoyproxy.io
+#     group) are a Flux-managed, CRD-only HelmRelease in the separate
+#     aigateway-crds lane (dependsOn below) — cluster-scoped and applied once,
+#     matching how tofu owns the Gateway API CRDs. This Kustomization only
+#     touches the CRs below.
 #   - envoy-gateway (data plane) is reconciled by its OWN Flux Kustomization
 #     (aigateway-envoy-gateway) so the gateway.envoyproxy.io CRDs (Kind:
 #     Backend) are Established before the Backend CRs below dry-run. That

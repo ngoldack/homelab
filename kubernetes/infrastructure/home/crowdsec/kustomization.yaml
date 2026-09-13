@@ -6,7 +6,14 @@ resources:
   - helmrelease.yaml
   - bouncer.yaml
   - bouncer-key.sops.yaml
-  - bouncer-register.yaml
-  # ext-auth.yaml is PARKED (cilium 1.20.1 lacks Gateway ext_authz CRD) —
-  # do not apply until cilium supports it.
+  # NO bouncer-register Job (removed 2026-09-13): `cscli bouncers add` writes
+  # DIRECTLY to the LAPI's sqlite DB (not the LAPI API), so a one-shot Job with
+  # only the config PVC touched an ephemeral copy and never registered the
+  # bouncer (bouncer looped "access forbidden"). The registration is done ONCE
+  # inside the LAPI pod — `cscli bouncers add envoy-bouncer --key <KEY>` —
+  # and persists in the LAPI data PVC, surviving restarts.
+  # ext-auth.yaml PARKED (kept as reference to the cilium EnvoyExtensionPolicy
+  # approach; the LIVE mechanism is the Gateway API ExternalAuth filter wired
+  # in authentik/httproutes-edge.yaml + the ReferenceGrant below).
+  - allowed-httproutes.yaml
   - vm-scrapes.yaml

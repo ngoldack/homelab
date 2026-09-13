@@ -53,6 +53,10 @@ spec:
         - type: ExternalAuth
           externalAuth:
             protocol: GRPC
+            # Gateway API v1.6 validates `protocol == 'GRPC' ? has(grpc)` — the
+            # grpc key must be present (all its fields optional); without it the
+            # route is rejected and the filter silently never applies.
+            grpc: {}
             backendRef:
               name: crowdsec-bouncer
               namespace: crowdsec

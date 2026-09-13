@@ -14,6 +14,9 @@ ignore: |
   **/gotk-components.yaml
   # Vendored upstream Gateway API CRD manifest (chart template content, not ours).
   tofu/**/charts/**
+  # Vendored Envoy Gateway CRDs, rendered from gateway-crds-helm (chart template
+  # content, not ours — same machine-generated rationale as the tofu gateway-api CRDs).
+  kubernetes/**/aigateway-envoy-gateway/envoy-crds.yaml
 
 rules:
   line-length:

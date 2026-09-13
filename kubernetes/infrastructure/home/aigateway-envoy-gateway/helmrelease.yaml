@@ -34,10 +34,11 @@ spec:
   releaseName: envoy-gateway
   install:
     createNamespace: true
-    # The standard + Envoy CRDs come from the separate gateway-crds-helm
-    # release (crds-helmrelease.yaml in this lane) plus tofu's gateway-api-crds.
-    # This chart's bundled crds/ (gateway-api bundle v1.5.1) would otherwise
-    # collide with tofu's v1.6.1 copies (tcproutes storedVersions rejection).
+    # The standard + Envoy CRDs come from the vendored envoy-crds.yaml (envoy-only
+    # group, rendered from gateway-crds-helm with crds.gatewayAPI.enabled=false)
+    # plus tofu's gateway-api-crds. This chart's bundled crds/ (gateway-api
+    # bundle v1.5.1) would otherwise collide with tofu's v1.6.1 copies
+    # (tcproutes storedVersions rejection), so the chart installs with no CRDs.
     crds: Skip
     remediation:
       retries: 3

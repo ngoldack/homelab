@@ -43,16 +43,9 @@ data:
       # ---------- hindsight control-plane UI behind the edge outpost ----------
       # The owning application is what gives the outpost its vhost (learned
       # the hard way with grafana-proxy: without it the outpost silently
-      # falls back to the default provider for every Host).
-      - model: authentik_core.application
-        state: present
-        identifiers:
-          slug: hindsight-ui
-        attrs:
-          name: hindsight-ui
-          meta_name: Hindsight (memory UI)
-          meta_launch_url: https://hindsight-ui.ngoldack.de/
-          provider: !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
+      # falls back to the default provider for every Host). The provider MUST
+      # be defined before the app that !Finds it — earlier in this file broke
+      # the whole blueprint (same ordering rule as the outpost entries).
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:
@@ -65,6 +58,15 @@ data:
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: hindsight-ui
+        attrs:
+          name: hindsight-ui
+          meta_name: Hindsight (memory UI)
+          meta_launch_url: https://hindsight-ui.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:

@@ -130,17 +130,20 @@ data:
           client_id: grafana
           client_type: confidential
           client_secret: !File /secrets/client_secret
-          # grant_types/response_types/issuer_mode MUST be pinned: the blueprint
-          # importer resets undeclared fields to their model defaults on every
-          # import, so a provider left unstated here loses its grants and every
-          # OIDC login fails with "Invalid grant_type for provider" (oauthlib's
-          # "otherwise malformed"). Declared = survives re-import.
+          # grant_types MUST be pinned. OAuth2Provider.grant_types is a PG
+          # ArrayField defaulting to [] — when it is empty every OIDC login is
+          # denied: authorize.py check_grant logs "Invalid grant_type for
+          # provider" and errors.py maps it to oauthlib's "The request is
+          # otherwise malformed". The importer's partial update does NOT reset
+          # undeclared fields on an existing entry, so this guards re-creation
+          # (fresh provider -> model default []), which is how grants vanish.
+          # Do NOT add response_types: it is not in the serializer's fields, so
+          # the importer silently ignores it — response types derive from the
+          # grants above.
           issuer_mode: per_provider
           grant_types:
             - authorization_code
             - refresh_token
-          response_types:
-            - code
           redirect_uris:
             - matching_mode: strict
               url: https://grafana.ngoldack.de/login/generic_oauth

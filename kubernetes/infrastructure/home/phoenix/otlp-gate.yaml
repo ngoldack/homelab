@@ -111,3 +111,18 @@ spec:
             name: otlp-gate-template
         - name: out
           emptyDir: {}
+---
+# The HTTPRoute 'phoenix-otlp' backends to 'otlp-gate:8081'; without this
+# Service the route has nothing to route to and the public endpoint 404s.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otlp-gate
+  namespace: phoenix
+spec:
+  selector:
+    app.kubernetes.io/name: otlp-gate
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081

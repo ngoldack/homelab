@@ -157,7 +157,70 @@ spec:
         nodeSelector:
           topology.homelab/site: home
 
-    # OFF for the same reason as defaultDashboards below, which is worth being
+    # VictoriaLogs: the log half of the stack, declared through the same
+    # operator that runs vmsingle (VLSingle/VLAgent CRDs ship in
+    # ../monitoring-crds/). No custom log shipper is needed: the chart's
+    # VLAgent supports an operator-managed k8s collector DaemonSet reading
+    # /var/log/pods, and the chart auto-wires its remoteWrite to vlsingle's
+    # /insert/native (verified by helm template). This replaces the upstream
+    # defaultRules/defaultDashboards network-fetch trade-off too — nothing here
+    # pulls from the internet at sync time, though Grafana fetches the logs
+    # datasource plugin at pod start (see the grafana.plugins note below).
+    vlsingle:
+      enabled: true
+      spec:
+        # DAYS, explicit. The chart default "1" carries no unit suffix, which
+        # means MONTHS — the same unsigned-integer gotcha as vmsingle's
+        # retentionPeriod, pointed the other way. 14 days is a generous
+        # debugging window for a homelab and keeps the NFS volume small;
+        # bump as real usage shows.
+        retentionPeriod: "14d"
+        # Same substrate as vmsingle: the monitoring-dedicated TrueNAS NFS
+        # class (allowVolumeExpansion=true, so this can grow). The nvmeof
+        # migration caveat in vmsingle's storage comment applies to this PVC
+        # equally.
+        nodeSelector:
+          topology.homelab/site: home
+        storage:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: truenas-fast-nfs-monitoring-vmsingle
+          resources:
+            requests:
+              storage: 20Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+
+    vlagent:
+      enabled: true
+      spec:
+        k8sCollector:
+          enabled: true
+          # Also stream pod labels through as kubernetes.pod_labels.* — cheap
+          # enrichment that lets dashboards filter by app=... instead of only
+          # namespace/pod/container.
+          includePodLabels: true
+        # Deliberately no nodeSelector, and tolerate ALL NoSchedule taints
+        # (operator: Exists) — for the same reason prometheus-node-exporter
+        # below must not be pinned: pod logs exist on every node, including
+        # the arm64 Hetzner ingress node (dedicated=ingress), the nvidia node
+        # and the control-plane node. The vlagent image is multi-arch (amd64
+        # + arm64 verified against the registry) and the collector streams to
+        # vlsingle over the in-cluster Service, so it can run on nodes that
+        # cannot reach the NAS.
+
+        # Resources are left at the operator's VLAgent defaults (requests
+        # 64Mi/250m, limits 128Mi/500m per VM_VLAGENTDEFAULT_* — documented in
+        # docs.victoriametrics.com/operator/resources/vlagent/), which are
+        # deliberately modest for a log collector on every node.
+        tolerations:
+          - operator: Exists
+
+    # OFF for the same reason as defaultDashboards below, ...
     # explicit about because "no alerting rules" looks like an oversight.
     #
     # defaultRules does not embed rules in the chart. It renders a sync-job
@@ -243,6 +306,18 @@ spec:
           searchNamespace: ALL
         datasources:
           enabled: true
+      # The VictoriaLogs datasource is the victoriametrics-logs-datasource
+      # plugin, which is NOT bundled in the stock grafana image. Declaring it
+      # in `plugins:` makes the community subchart preinstall it at container
+      # start (GF_PLUGINS_PREINSTALL_SYNC in the rendered grafana Deployment —
+      # verified by helm template); no custom image is required. It is exactly
+      # the same mechanism the upstream chart's defaultDatasources uses, and
+      # the datasource entry for it is emitted automatically by the chart when
+      # vlsingle is enabled (uid "VictoriaLogs", URL pointing at the vlsingle
+      # Service). Grafana needs egress to registry.grafana.com or the plugin
+      # feed once at pod start to fetch it.
+      plugins:
+        - victoriametrics-logs-datasource
       # No Ingress/HTTPRoute. Reaching this is an unresolved decision — the
       # standing policy is Tailscale-only for internal services and never
       # exposing home addresses, and attaching it to the public Cilium Gateway

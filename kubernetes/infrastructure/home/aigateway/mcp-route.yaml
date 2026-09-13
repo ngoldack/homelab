@@ -1,0 +1,41 @@
+# MCP gateway: EAG exposes each MCPRoute as a unified MCP endpoint on the
+# data-plane Gateway and traces tool calls through the same OpenTelemetry
+# exporter as the LLM routes (mcp.* spans -> Phoenix via otel-pipeline.yaml).
+#
+# There is currently no in-cluster MCP server to proxy, so no MCPRoute is
+# applied. The controller's MCP capability is ready (seed set in
+# helmrelease.yaml); when a target MCP server exists, uncomment and adjust.
+#
+# Example (from the v1.1.0 MCP docs, site/docs/capabilities/mcp/index.md):
+#   apiVersion: aigateway.envoyproxy.io/v1beta1
+#   kind: MCPRoute
+#   metadata:
+#     name: mcp-example
+#     namespace: aigateway
+#   spec:
+#     parentRefs:
+#       - name: aigateway
+#         kind: Gateway
+#         group: gateway.networking.k8s.io
+#     path: "/mcp"
+#     backendRefs:
+#       - name: <mcp-backend>
+#         kind: Backend
+#         group: gateway.envoyproxy.io
+#         path: "/mcp"
+#         securityPolicy:
+#           apiKey:
+#             secretRef:
+#               name: <mcp-key>
+#               namespace: aigateway
+#   ---
+#   apiVersion: gateway.envoyproxy.io/v1alpha1
+#   kind: Backend
+#   metadata:
+#     name: <mcp-backend>
+#     namespace: aigateway
+#   spec:
+#     endpoints:
+#       - fqdn:
+#           hostname: <mcp-server-host>
+#           port: 443

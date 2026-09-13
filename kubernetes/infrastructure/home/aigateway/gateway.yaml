@@ -1,0 +1,27 @@
+# The AI Gateway's Gateway. The ai-gateway-controller programs every Gateway
+# under this class; AIGatewayRoute / MCPRoute resources attach here via
+# parentRefs.
+#
+# The Gateway annotation aigateway.envoyproxy.io/gateway-config points the
+# external processor of THIS gateway at the OTel config in otel-pipeline.yaml
+# so spans land in Phoenix.
+#
+# Listener on :80. Envoy Gateway's generated Envoy Service is a LoadBalancer
+# whose ip we reserve on the LAN pool (see envoyproxy.yaml), so clients reach
+# this at the same port they would use in-cluster.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: aigateway
+  namespace: aigateway
+  annotations:
+    aigateway.envoyproxy.io/gateway-config: otel-phoenix
+spec:
+  gatewayClassName: aigateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+  # The generated Envoy data-plane Service inherits nothing here; the LB
+  # address + LAN labels live on the EnvoyProxy CR's envoyService, which
+  # Envoy Gateway merges into the generated Service.

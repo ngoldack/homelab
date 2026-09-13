@@ -1,0 +1,49 @@
+# EnvoyProxy CR — customizes the Envoy data plane that Envoy Gateway provisions
+# for the `aigateway` Gateway (this is how the generated Envoy Service gets a
+# reachable LAN address instead of a dead ClusterIP, and how the Envoy pods
+# are pinned to home).
+#
+# LAN exposure: the generated Envoy Service is a LoadBalancer. EnvoyGateway
+# merges `envoyService` settings onto it:
+#   - loadBalancerIP 10.30.0.201 — a free address in the lan LB-IPAM pool
+#     (10.30.0.200-250, kubernetes/infrastructure/home/network/lb-ipam.yaml).
+#   - labels dns.ngoldack.de/scope: internal — the selector the
+#     CiliumL2AnnouncementPolicy (network/l2-announcement.yaml) uses, so Cilium
+#     answers ARP for that VIP on the LAN and clients reach it directly.
+# This is the same mechanism the network/public Gateway uses for its .200 VIP.
+# LAN-only: no public-ingress / edge-ingress labels, no external-dns records.
+#
+# The ClientTrafficPolicy below raises Envoy's request buffer from the 32KiB
+# default to 50Mi, which is required for multi-token AI responses.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: aigateway
+  namespace: aigateway
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        pod:
+          nodeSelector:
+            topology.homelab/site: home
+      # The generated Envoy Service inherits these:
+      envoyService:
+        labels:
+          dns.ngoldack.de/scope: internal
+        loadBalancerIP: 10.30.0.201
+        type: LoadBalancer
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: aigateway-buffer
+  namespace: aigateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: aigateway
+  connection:
+    bufferLimit: 50Mi

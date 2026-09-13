@@ -1,0 +1,53 @@
+# Envoy AI Gateway (aigateway.envoyproxy.io / "formerly Envoy AI Gateway",
+# now theagentrouter.ai): LAN AI gateway. Control plane ai-gateway-helm
+# v1.1.0 + Envoy Gateway data plane gateway-helm v1.8.1, two DeepSeek routes
+# via OpenRouter (deepseek/deepseek-v4-flash-latest, deepseek/deepseek-v4-pro),
+# OpenInference/OTel traces exported directly to Arize Phoenix.
+#
+# Dependencies:
+#   - The ai-gateway CRDs (ai-gateway-crds-helm v1.1.0) and the Gateway API
+#     CRDs must exist before the Gateway / AIGatewayRoute / models CRs in this
+#     tree reconcile. The Gateway API CRDs are already owned repo-wide
+#     (tofu/home/gateway-api-crds.tf). The ai-gateway CRDs are a one-time helm
+#     apply the operator runs on first deploy:
+#       helm upgrade -i aieg-crd oci://docker.io/envoyproxy/ai-gateway-crds-helm \
+#         --version v1.1.0 --namespace aigateway --create-namespace
+#     (This is deliberately NOT a Flux HelmRelease: it is a cluster-scoped,
+#     CRD-only chart applied once, matching how tofu owns the Gateway API
+#     CRDs. Subsequent Flux reconciles of this Kustomization only touch the
+#     CRs below.)
+#   - envoy-gateway (data plane) is reconciled by the helmrelease-envoy-gateway
+#     HelmRelease in this same tree; its membership here is what makes the
+#     Gateway/EnvoyProxy CRs land after it in the same Flux generation.
+#   - LAN-only surface: the EnvoyProxy LB Service is handed 10.30.0.201 from
+#     the lan LB-IPAM pool and ARP-announced on the LAN by the network
+#     l2-announcement policy (dns.ngoldack.de/scope=internal label). No public
+#     edge / external-dns records.
+#   - No Postgres: the v1.1.0 ai-gateway chart is controller + external
+#     processor only (no bundled DB), so cnpg-operator is not a prerequisite.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: aigateway
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/aigateway
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  # The VMServiceScrape (vm-scrapes.yaml) needs the VictoriaMetrics CRDs.
+  dependsOn:
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

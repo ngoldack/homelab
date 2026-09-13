@@ -1,0 +1,12 @@
+# Envoy AI Gateway (theagentrouter.ai, "formerly Envoy AI Gateway") control
+# plane: the ai-gateway-controller Deployment, its CRDs, and the model-route
+# CRs that describe the two DeepSeek routes via OpenRouter.
+#
+# LAN-only by design: nothing here attaches to the network/ public Gateway
+# (no public-ingress/edge-ingress labels). The data plane's LB Service is
+# labelled dns.ngoldack.de/scope=internal so Cilium L2-announcements hand it
+# a reachable LAN VIP (see envoyproxy.yaml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aigateway

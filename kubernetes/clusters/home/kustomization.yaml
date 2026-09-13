@@ -35,6 +35,8 @@ resources:
   - authentik.yaml
   # Hindsight agent memory: local LLM + CNPG/pgvector, LAN-only surface.
   - hindsight.yaml
+  # Envoy AI Gateway (Agent Router lineage) -> Phoenix via OpenInference/OTel.
+  - aigateway.yaml
   # CrowdSec: edge intrusion detection (authentik logs) + LAPI + bouncer.
   - crowdsec.yaml
   # LLM/OTLP observability (Arize Phoenix, deep trace + prompt analytics).

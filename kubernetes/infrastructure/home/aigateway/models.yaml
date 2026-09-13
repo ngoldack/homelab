@@ -1,0 +1,146 @@
+# Model routing for the AI Gateway — two DeepSeek routes via OpenRouter.
+#
+# OpenRouter (https://openrouter.ai) is OpenAI-compatible at
+# https://openrouter.ai/api/v1. Per the v1.1.0 supported-providers table,
+# an OpenAI-compatible provider with a custom path is expressed as
+#   AIServiceBackend.spec.schema = {name: OpenAI, prefix: /api/v1}
+# (see the DeepSeek row: schema {"name":"OpenAI","prefix":"/v1"} for the
+# native api-docs.deepseek.com; here OpenRouter's path is /api/v1).
+#
+# Each downstream model name (the tokens clients send in the "model" field
+# of a chat/completions request, matched by the x-ai-eg-model header) maps to
+# one AIServiceBackend backed by the OpenRouter upstream:
+#   - deepseek/deepseek-v4-flash-latest
+#   - deepseek/deepseek-v4-pro
+#
+# Auth: the BackendSecurityPolicy reads the OpenRouter key from the
+# openrouter-key Secret (key "apiKey", the only key the BackendSecurityPolicy
+# CRD accepts). That Secret is decrypted from openrouter-key.sops.yaml in this
+# same aigateway/ tree — it carries the same OpenRouter key the hindsight
+# deployment uses (HINDSIGHT_API_LLM_API_KEY), re-wrapped under the apiKey key
+# EAG demands, so no new credential is minted.
+#
+# TLS: the OpenRouter backend is external, so each EG Backend is paired with a
+# BackendTLSPolicy against the system CA (wellKnownCACertificates: System),
+# matching the basic/openai.yaml example.
+
+# ---- OpenRouter upstream backends (Envoy Gateway) ----
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openrouter-flash
+  namespace: aigateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: openrouter.ai
+        port: 443
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openrouter-pro
+  namespace: aigateway
+spec:
+  endpoints:
+    - fqdn:
+        hostname: openrouter.ai
+        port: 443
+---
+# TLS for both upstreams against the system trust store.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: openrouter-tls
+  namespace: aigateway
+spec:
+  targetRefs:
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: openrouter-flash
+    - group: gateway.envoyproxy.io
+      kind: Backend
+      name: openrouter-pro
+  validation:
+    wellKnownCACertificates: System
+    hostname: openrouter.ai
+
+# ---- AI service backends (EAG) ----
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: openrouter-flash
+  namespace: aigateway
+spec:
+  schema:
+    name: OpenAI
+    prefix: /api/v1
+  backendRef:
+    name: openrouter-flash
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: openrouter-pro
+  namespace: aigateway
+spec:
+  schema:
+    name: OpenAI
+    prefix: /api/v1
+  backendRef:
+    name: openrouter-pro
+    kind: Backend
+    group: gateway.envoyproxy.io
+
+# ---- Auth: shared OpenRouter key ----
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: BackendSecurityPolicy
+metadata:
+  name: openrouter-key
+  namespace: aigateway
+spec:
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: openrouter-flash
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: openrouter-pro
+  type: APIKey
+  apiKey:
+    secretRef:
+      name: openrouter-key
+      namespace: aigateway
+
+# ---- Routes: map the two downstream model names ----
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: deepseek
+  namespace: aigateway
+spec:
+  parentRefs:
+    - name: aigateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: deepseek/deepseek-v4-flash-latest
+      backendRefs:
+        - name: openrouter-flash
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: deepseek/deepseek-v4-pro
+      backendRefs:
+        - name: openrouter-pro

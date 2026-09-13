@@ -1,0 +1,62 @@
+# Envoy AI Gateway control plane — the ai-gateway-controller Deployment that
+# turns AIGatewayRoute / AIServiceBackend / BackendSecurityPolicy CRs into xDS
+# for the Envoy Gateway data plane (the envoy-gateway HelmRelease in this same
+# kustomization). Chart ai-gateway-helm v1.1.0; its CRDs come from the
+# ai-gateway-crds-helm v1.1.0 chart, applied by the cluster entry as a
+# one-shot bootstrap step (see kubernetes/clusters/home/aigateway.yaml).
+#
+# v1.1.0 deploys controller + external processor only; there is NO bundled
+# Postgres. The data plane is Envoy Gateway v1.8.1, installed separately.
+#
+# The external processor's OpenTelemetry exporter is configured per-Gateway
+# via the GatewayConfig in otel-pipeline.yaml (the documented way to point
+# the extProc env at Phoenix) — it is annotated onto the Gateway in
+# gateway.yaml, so no controller-scoped extraEnvVars are needed here.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ai-gateway
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: ai-gateway-helm
+      version: "v1.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: ai-gateway
+        namespace: flux-system
+      interval: 1h
+  targetNamespace: aigateway
+  releaseName: ai-gateway
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    controller:
+      replicaCount: 1
+      image:
+        repository: docker.io/envoyproxy/ai-gateway-controller
+      service:
+        type: ClusterIP
+      nodeSelector:
+        topology.homelab/site: home
+      # MCP gateway: the controller's MCP capability is built-in (no enable
+      # flag); MCP tool-call spans reuse the OpenTelemetry exporter from
+      # otel-pipeline.yaml so they land in Phoenix as mcp.* spans once an
+      # MCPRoute + backend exists. This secures the MCP session-encryption key.
+      mcp:
+        sessionEncryption:
+          # Generated 2026-09-13 (python secrets.token_hex(32)).
+          seed: "e810662024098e91997c8a67eb1f7ffb39b8caa54d8476b88b0cf15e4bf0b0c5"
+    # The namespace where Envoy Gateway's control plane (envoy-gateway
+    # Deploy from the gateway-helm chart) runs; the controller's extension
+    # manager hooks dial it there.
+    envoyGateway:
+      namespace: envoy-gateway-system

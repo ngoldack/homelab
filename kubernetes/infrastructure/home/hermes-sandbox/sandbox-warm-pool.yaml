@@ -1,0 +1,23 @@
+# hermes-go — warm pool keeping one pre-provisioned sandbox ready.
+#
+# WHY: task latency is dominated by image pull + Kata guest boot; a warm pod
+# makes the first command start in seconds. Exactly ONE warm sandbox: the
+# worker has 12 GiB RAM and each sandbox can draw up to its 5 GiB limit, so
+# one warm + one active is the ceiling that fits.
+#
+# Fields grounded in `kubectl explain sandboxwarmpool.spec --recursive` of
+# the installed v1beta1 CRD.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: hermes-go
+  namespace: hermes-sandbox
+spec:
+  replicas: 1
+  sandboxTemplateRef:
+    name: hermes-go
+  # Recreate, not OnReplenish: replenishment must destroy-then-create, never
+  # briefly run two sandbox pods side by side — OnReplenish could exceed the
+  # node's RAM once an active task shares it with the replacement.
+  updateStrategy:
+    type: Recreate

@@ -1,0 +1,120 @@
+# hermes-sandbox Cilium policies — default-deny baseline plus the two keeps.
+#
+# Cilium default-deny semantics (same pattern as agent-sandbox/cilium-*.yaml):
+# every endpoint starts OPEN; the FIRST policy rule that selects an endpoint
+# (its endpointSelector matches) and carries an ingress and/or egress section
+# flips that endpoint to default-deny for the matching direction. The
+# default-deny doc therefore carries one empty rule per direction, and the
+# two allow docs below carve out exactly the traffic sandboxes emit and
+# accept. Every field is grounded in `kubectl explain
+# ciliumnetworkpolicy.spec --recursive` of the installed cilium.io/v2 CRD.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-default-deny
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    Deny-all traffic baseline for every pod in hermes-sandbox. The egress
+    and ingress-router allow docs are the only exceptions; the egressDeny
+    rules below additionally keep management-plane ranges dropped with a
+    labeled verdict even if a future allow rule ever mentions them.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+  egressDeny:
+    # RFC1918 + link-local are the networks this cluster's management planes
+    # (Talos, Proxmox, Kubernetes API, host metadata services) live on.
+    # Explicit deny beats allow: these ranges stay dropped and the verdict
+    # stays labeled (Hubble-observable) no matter what any allow rule says.
+    # 172.20.0.0/16 + 172.21.0.0/16 (node + k8s service subnets) are
+    # excepted because legitimately allowed flows live there: cluster DNS,
+    # kube-apiserver egress and Router-to-sandbox traffic.
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.169.254/32
+        - cidr: 172.16.0.0/12
+          except:
+            - 172.20.0.0/16
+            - 172.21.0.0/16
+    # openrouter.ai / api.openrouter.ai MUST stay unreachable. The installed
+    # cilium.io/v2 CRD has no toFQDNs under egressDeny (verified `kubectl
+    # explain ciliumnetworkpolicy.spec.egressDeny`), so a named FQDN deny
+    # cannot be expressed; they are instead STRICTLY absent from the egress
+    # allowlist, which lands every attempt on default-deny. Allowing these
+    # FQDNs therefore requires a deliberate, reviewable edit.
+---
+# hermes-sandbox egress allowlist — the only network a sandbox may emit.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-egress-allowlist
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    The ONLY egress sandboxes get: cluster DNS, plus exactly three approved
+    Go/Git endpoints on 443/TCP. This doc selects every pod in
+    hermes-sandbox (empty matchLabels {} is a wildcard): the namespace has no
+    other allow CNP to subdivide the endpoints with.
+  endpointSelector:
+    matchLabels: {}
+  egress:
+    # Cluster DNS first: every other rule (including FQDN resolution) depends
+    # on it. Keyed on the k8s-app label Cilium recognizes for kube-dns.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Deliberately EXACT three FQDNs on 443/TCP — NOT *.github.com: git
+    # archive/object subdomains (codeload, objects) stay denied until an
+    # internal mirror replaces this list, at which point this rule shrinks
+    # to the mirror.
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: proxy.golang.org
+        - matchName: sum.golang.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# hermes-sandbox ingress allowlist — the only caller of sandbox APIs.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-ingress-router
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    The only ingress a sandbox accepts: the sandbox-router reaching the
+    runtime API ports. Cilium v2 has no namespaceSelector — cross-namespace
+    matching uses the k8s:io.kubernetes.pod.namespace virtual label (repo
+    pattern from agent-sandbox/cilium-router.yaml).
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    # Any pod in agent-sandbox-system is the Router by construction: that
+    # namespace's PSA-restricted admission admits only the vendored
+    # controller and Router identities, so no third party exists that could
+    # spoof the namespace label.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "8888"
+              protocol: TCP
+            - port: "9090"
+              protocol: TCP

@@ -1,0 +1,12 @@
+# hermes-sandbox — the ONLY namespace sandbox Pods may exist in. PSA
+# restricted is the floor for everything the extension controller creates
+# here; the ValidatingAdmissionPolicy in agent-sandbox/policies additionally
+# rejects anything that is not a Kata pod.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-sandbox
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

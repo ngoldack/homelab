@@ -42,14 +42,14 @@ tasks:
         age-keygen -y home-flux.age.key
 
   authentik:admin:password:
-    desc: Print the initial authentik admin password (akadmin) from SOPS
+    desc: Print the authentik console login (URL + akadmin password) from SOPS
     env:
       SOPS_AGE_KEY_FILE: '{{.AGE_KEY_FILE}}'
     cmds:
       - |
         sops --decrypt kubernetes/infrastructure/home/authentik/secret.sops.yaml \
-          | grep '^ *AUTHENTIK_INITIAL_ADMIN_PASSWORD' \
-          | sed -E 's/^ *AUTHENTIK_INITIAL_ADMIN_PASSWORD: *//'
+          | grep '^ *AUTHENTIK_ADMIN_PASSWORD' \
+          | sed -E 's/^ *AUTHENTIK_ADMIN_PASSWORD: *//'
 
   sops:edit:
     desc: Edit a SOPS-encrypted file

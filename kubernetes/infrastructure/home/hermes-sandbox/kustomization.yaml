@@ -6,6 +6,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
+  - runtimeclass-kata.yaml
   # Template before warm pool: the pool's sandboxTemplateRef must resolve.
   - sandbox-template.yaml
   - sandbox-warm-pool.yaml

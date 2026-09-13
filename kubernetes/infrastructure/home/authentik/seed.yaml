@@ -40,22 +40,6 @@ data:
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      - model: authentik_outposts.outpost
-        state: present
-        identifiers:
-          name: edge-outpost
-        attrs:
-          type: proxy
-          managed: null
-          # serializer requires config; {} = OutpostConfig dataclass defaults.
-          config: {}
-          providers:
-            - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
-            - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
-      # grafana behind the SAME edge outpost (proxy provider; the edge envoy
-      # cannot dial grafana's home pod directly — pod->pod only, measured
-      # 20/20). Distinct from the OIDC federation below, which serves the
-      # LAN-direct path; grafana's own login page simply shows authentik.
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:
@@ -72,6 +56,22 @@ data:
       # authentik ships NO groups scope mapping (verified live: the default
       # set is openid/profile/email/proxy-outpost/entitlements/...); define
       # one so Grafana's role_attribute_path sees membership.
+      - model: authentik_outposts.outpost
+        state: present
+        identifiers:
+          name: edge-outpost
+        attrs:
+          type: proxy
+          managed: null
+          # serializer requires config; {} = OutpostConfig dataclass defaults.
+          config: {}
+          providers:
+            - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
+      # grafana behind the SAME edge outpost (proxy provider; the edge envoy
+      # cannot dial grafana's home pod directly — pod->pod only, measured
+      # 20/20). Distinct from the OIDC federation below, which serves the
+      # LAN-direct path; grafana's own login page simply shows authentik.
       - model: authentik_providers_oauth2.scopemapping
         state: present
         identifiers:

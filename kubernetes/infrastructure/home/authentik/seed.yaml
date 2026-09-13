@@ -130,6 +130,17 @@ data:
           client_id: grafana
           client_type: confidential
           client_secret: !File /secrets/client_secret
+          # grant_types/response_types/issuer_mode MUST be pinned: the blueprint
+          # importer resets undeclared fields to their model defaults on every
+          # import, so a provider left unstated here loses its grants and every
+          # OIDC login fails with "Invalid grant_type for provider" (oauthlib's
+          # "otherwise malformed"). Declared = survives re-import.
+          issuer_mode: per_provider
+          grant_types:
+            - authorization_code
+            - refresh_token
+          response_types:
+            - code
           redirect_uris:
             - matching_mode: strict
               url: https://grafana.ngoldack.de/login/generic_oauth

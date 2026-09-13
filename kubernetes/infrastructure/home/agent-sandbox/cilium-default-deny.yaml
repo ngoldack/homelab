@@ -1,0 +1,31 @@
+# agent-sandbox-system default-deny — baseline zero-trust posture.
+#
+# Cilium CiliumNetworkPolicy default-deny semantics: every endpoint in the
+# policy's namespace starts fully open; the first policy rule that SELECTS an
+# endpoint (its endpointSelector matches) and carries an ingress and/or egress
+# section flips that endpoint into default-deny for the matching direction.
+# An empty ingress list with no allow-rules therefore locks the endpoint down:
+# from then on ONLY traffic explicitly allowed by OTHER allow rules is
+# permitted; everything else is dropped (and is Hubble-observable).
+#
+# This rule selects EVERY pod in agent-sandbox-system (empty matchLabels {}
+# matches all) and enables default-deny for ingress and egress with no
+# allow-rules, so the controller and Router start shut. The two
+# cilium-*.yaml allowlists below carve out exactly the traffic this controller
+# and Router actually need.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-sandbox-system-default-deny
+  namespace: agent-sandbox-system
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in agent-sandbox-system;
+    the per-entity allowlists in cilium-router.yaml and cilium-controller.yaml
+    are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

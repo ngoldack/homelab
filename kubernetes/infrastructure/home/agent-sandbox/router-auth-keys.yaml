@@ -1,0 +1,14 @@
+# sandbox-router-auth-keys — PUBLIC Ed25519 verification key set consumed by
+# the Router's --authz-scoped-token-verification-keys-file (mounted read-only
+# by router-patch.yaml at /etc/sandbox-router-auth). Only the public key ever
+# lives in the repo; the matching PRIVATE key is kept in the hermes Secret
+# (AGENT_SANDBOX_ROUTER_TOKEN_FILE). Rotation: regenerate the keypair,
+# replace the publicKey here and the private key in the hermes Secret, then
+# roll the scoped token.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-router-auth-keys
+  namespace: agent-sandbox-system
+data:
+  keys.json: '{"keys":[{"kid":"hermes-1","publicKey":"CDK3kvm_qpEDTd41aSXpAXr1ZHl3ZdXnQCwFj1uuplc"}]}'

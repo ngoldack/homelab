@@ -1,0 +1,12 @@
+# Same OCI repo as the main aigateway lane, but this entry is a SEPARATE
+# Kustomization (CRD-before-CR split) so it must carry its own source —
+# without it the HelmRelease fails with 'HelmRepository "ai-gateway" not found'.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: ai-gateway
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://docker.io/envoyproxy

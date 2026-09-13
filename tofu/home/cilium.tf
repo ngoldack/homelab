@@ -58,6 +58,16 @@ resource "helm_release" "cilium" {
       acceleration = "best-effort"
     }
     routingMode    = "tunnel"
+    # No FQDN NetworkPolicies exist, so the DNS proxy is pure liability here:
+    # with transparent mode on it redirects EVERY node-local :53 socket query
+    # (pods and host netns alike) to the node's upstream resolver - including
+    # queries aimed at the internal-dns LB (10.30.0.201), which made the
+    # split-horizon resolver untestable and answered router forwards with the
+    # public zone. Disabling leaves the proxy engaged only if a policy ever
+    # declares dns.fqdns rules.
+    dnsProxy = {
+      enableTransparentMode = false
+    }
     tunnelProtocol = "vxlan"
     securityContext = {
       capabilities = {

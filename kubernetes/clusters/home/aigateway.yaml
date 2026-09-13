@@ -16,9 +16,10 @@
 #     CRD-only chart applied once, matching how tofu owns the Gateway API
 #     CRDs. Subsequent Flux reconciles of this Kustomization only touch the
 #     CRs below.)
-#   - envoy-gateway (data plane) is reconciled by the helmrelease-envoy-gateway
-#     HelmRelease in this same tree; its membership here is what makes the
-#     Gateway/EnvoyProxy CRs land after it in the same Flux generation.
+#   - envoy-gateway (data plane) is reconciled by its OWN Flux Kustomization
+#     (aigateway-envoy-gateway) so the gateway.envoyproxy.io CRDs (Kind:
+#     Backend) are Established before the Backend CRs below dry-run. That
+#     lane is a hard dependsOn of this one.
 #   - LAN-only surface: the EnvoyProxy LB Service is handed 10.30.0.201 from
 #     the lan LB-IPAM pool and ARP-announced on the LAN by the network
 #     l2-announcement policy (dns.ngoldack.de/scope=internal label). No public
@@ -39,6 +40,7 @@ spec:
   retryInterval: 2m
   # The VMServiceScrape (vm-scrapes.yaml) needs the VictoriaMetrics CRDs.
   dependsOn:
+    - name: aigateway-envoy-gateway
     - name: aigateway-crds
     - name: monitoring-crds
   sourceRef:

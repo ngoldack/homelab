@@ -80,6 +80,11 @@ spec:
     # https-wildcard which serves *.svc.${CLUSTER_DOMAIN}.
     httproute:
       enabled: true
+      # consumed by the LAN-scoped external-dns instance (--label-filter
+      # dns.ngoldack.de/publish=lan); registry stays a LAN-only name
+      # (anonymous-pull registry — not edge material).
+      labels:
+        dns.ngoldack.de/publish: lan
       parentRefs:
         - name: public
           namespace: network

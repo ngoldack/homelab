@@ -1,0 +1,84 @@
+# The EDGE half of public-zone DNS: publishes exactly the edge Gateway's
+# route hostnames (headlamp, authentik, grafana) at the Hetzner address via
+# edge.yaml's external-dns.kubernetes.io/target annotation.
+#
+# Same Hetzner webhook provider as the LAN instance but a SEPARATE ownership
+# domain: distinct txtOwnerId (home-edge) and txtPrefix (rege-) so the two
+# instances can never fight over a record. Together with the LAN instance's
+# --label-filter=dns.ngoldack.de/publish=lan exclusion, every name in the
+# public zone has exactly one writer.
+#
+# Bootstrap note: headlamp/authentik records currently exist under the LAN
+# instance's OLD ownership (owner home, prefix reg-). The LAN instance
+# excludes them the moment the route labels land, so its sync DELETES those
+# two names once and this instance recreates them at the new target — a
+# self-migrating flip, a sub-minute gap for internet clients only (LAN
+# clients never see it: their answer comes from the internal-dns resolver).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns-edge
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.22.0"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+      interval: 1h
+  targetNamespace: network
+  releaseName: external-dns-edge
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    provider:
+      name: webhook
+      webhook:
+        image:
+          repository: ghcr.io/mconfalonieri/external-dns-hetzner-webhook
+          tag: v1.0.2
+        env:
+          - name: HETZNER_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: hetzner-dns-token
+                key: api-token
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-webhook
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http-webhook
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+    sources:
+      - gateway-httproute
+    domainFilters:
+      - ${CLUSTER_DOMAIN}
+    registry: txt
+    txtOwnerId: ${CLUSTER_NAME}-edge
+    txtPrefix: "rege-%{record_type}."
+    policy: sync
+    interval: 1m
+    extraArgs:
+      - --gateway-name=edge
+    nodeSelector:
+      topology.homelab/site: home
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

@@ -21,6 +21,9 @@ metadata:
     # "public-ingress" because that is the Gateway's own gate; Grafana is
     # reachable only on the LAN, via local DNS.
     gateway.ngoldack.de/public-ingress: "true"
+    # grafana is edge-SERVED (route to the outpost); its public DNS entry is
+    # the Hetzner address — see network/edge.yaml + external-dns-edge.
+    gateway.ngoldack.de/edge-ingress: "true"
     pod-security.kubernetes.io/enforce: privileged
     # enforce is relaxed, but audit and warn are deliberately left at baseline
     # so anything ELSE in this namespace that starts demanding host access

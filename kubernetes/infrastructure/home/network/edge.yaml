@@ -41,6 +41,11 @@ metadata:
   namespace: network
   labels:
     dns.ngoldack.de/scope: public
+  annotations:
+    # Authoritative target for the edge-scoped external-dns instance
+    # (external-dns/helmrelease-edge.yaml): the Hetzner primary. This
+    # annotation is how the public zone answers for edge-served names.
+    external-dns.kubernetes.io/target: "2.28.31.116"
 spec:
   gatewayClassName: cilium
   infrastructure:

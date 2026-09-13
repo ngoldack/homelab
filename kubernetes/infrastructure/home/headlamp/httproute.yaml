@@ -16,6 +16,8 @@ kind: HTTPRoute
 metadata:
   name: headlamp
   namespace: headlamp
+  labels:
+    dns.ngoldack.de/publish: twin
 spec:
   parentRefs:
     - name: public

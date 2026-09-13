@@ -122,6 +122,11 @@ spec:
     # extraArgs.
     extraArgs:
       - --gateway-name=public
+      # Exclude the internal twins of edge-served names (headlamp,
+      # authentik): those flip to the Hetzner address via the edge
+      # instance; LAN clients keep the VIP answer through the
+      # internal-dns resolver instead. The label lives on the routes.
+      - --label-filter=dns.ngoldack.de/publish=lan
     # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from
     # the retired cloud-ingress design; services now live directly under the
     # apex (immich.${CLUSTER_DOMAIN}, registry.${CLUSTER_DOMAIN}). This still

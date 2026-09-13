@@ -1,0 +1,45 @@
+# agent-sandbox-controller allowlist — minimal control-plane egress. The
+# vendored Deployment's pod template carries only app: agent-sandbox-controller
+# (verified against upstream/sandbox-with-extensions.yaml), NOT the
+# app.kubernetes.io/* labels; keep endpointSelector matching the labels the
+# Deployment actually sets. Monitoring scrapes 8080/TCP; the controller talks
+# cluster DNS and the kube-apiserver on 443/6443 and nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-sandbox-controller-allowlist
+  namespace: agent-sandbox-system
+spec:
+  description: >-
+    Controller ingress from monitoring on 8080/TCP; egress only to cluster DNS
+    (53/UDP+TCP) and kube-apiserver (443+6443/TCP).
+  endpointSelector:
+    matchLabels:
+      app: agent-sandbox-controller
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

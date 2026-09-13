@@ -41,5 +41,10 @@ resources:
   - aigateway.yaml
   # LLM/OTLP observability (Arize Phoenix, deep trace + prompt analytics).
   - phoenix.yaml
+  # Agent Sandbox (controller + authenticated Router, self-contained CRDs) is
+  # the base; hermes-sandbox (Kata RuntimeClass + template/warm pool) depends
+  # on it; hermes (the gateway StatefulSet) depends on both.
+  - agent-sandbox.yaml
+  - hermes-sandbox.yaml
   # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
   - homelab-infra-metrics.yaml

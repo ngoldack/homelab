@@ -1,0 +1,82 @@
+# sandbox-router allowlist — the only network this component needs.
+#
+# Cilium v2 has no namespaceSelector; cross-namespace matching is expressed
+# with the k8s:io.kubernetes.pod.namespace virtual label (the documented CNP
+# equivalent of NetworkPolicy's namespaceSelector), combined here with the
+# pod labels the vendored Deployment actually carries
+# (app.kubernetes.io/name + app.kubernetes.io/component) for exactness.
+# Named-pod selectors are implicitly restricted to the policy's own namespace,
+# so the hermes / monitoring / hermes-sandbox matches below rely on the
+# explicit namespace label.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-sandbox-router-allowlist
+  namespace: agent-sandbox-system
+spec:
+  description: >-
+    Router ingress only from hermes (8080/TCP proxy) and monitoring
+    (9090/TCP metrics, 8081/TCP healthz); cluster DNS egress; kube-apiserver
+    egress on 443+6443 (with a 172.21.0.0/16:6443 CIDR fallback covering the
+    k8s service CIDR for the apiserver svc); sandbox runtime API egress to
+    hermes-sandbox on 8888/8080/9090/TCP.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-router
+      app.kubernetes.io/component: sandbox-router
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # The kube-apiserver entity resolves the cluster's k8s Service; on Talos
+    # the apiserver is served over the k8s service CIDR, so also allow that
+    # subnet explicitly as a safety net when the entity cannot be resolved.
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+            - port: "9090"
+              protocol: TCP

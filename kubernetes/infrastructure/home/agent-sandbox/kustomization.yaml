@@ -1,0 +1,81 @@
+# Agent Sandbox controller + Router overlay set. Resource order matters:
+#  1. the vendored all-in-one (CRDs + controller + namespace) — it ships
+#     `Namespace agent-sandbox-system` as doc 1, and kustomize forbids
+#     registering the same GVK twice, so there is intentionally NO local
+#     namespace.yaml resource here. The mandated PSA labels are applied to
+#     that vendored Namespace via `patches` below (kustomize applies patches
+#     after resource registration — the only legal way to touch the vendored
+#     Namespace without editing upstream/).
+#  2. the vendored Router deployment pieces — deliberately WITHOUT
+#     networkpolicy.yaml (the Cilium policies below are the single source of
+#     truth; the vendored k8s NetworkPolicy would hole-poke them) and WITHOU
+#     rbac-tokenreview.yaml (the Router runs scoped-token v2; tokenreview
+#     authz mode is unused).
+#  3. router-auth-keys.yaml — the Router's scoped-token verification key set.
+#  4. Cilium default-deny + the two per-entity allowlists.
+#  5. policies/validating-admission-policy.yaml last (regulates pods that only
+#     exist once the controller + Router are live).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - upstream/sandbox-with-extensions.yaml
+  - upstream/sandbox-router/serviceaccount.yaml
+  - upstream/sandbox-router/rbac.yaml
+  - upstream/sandbox-router/service.yaml
+  - upstream/sandbox-router/pdb.yaml
+  - upstream/sandbox-router/deployment.yaml
+  - router-auth-keys.yaml
+  - cilium-default-deny.yaml
+  - cilium-router.yaml
+  - cilium-controller.yaml
+  - policies/validating-admission-policy.yaml
+# Strategic-merge overlays, each target scoped by kind+name (several vendored
+# resources share the name `sandbox-router` — a name-only target would merge
+# the Deployment patch into the ServiceAccount/ClusterRoles/PDB: that is
+# exactly what broke the first live apply).
+patches:
+  - target:
+      kind: Namespace
+      name: agent-sandbox-system
+    patch: |
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: agent-sandbox-system
+        labels:
+          pod-security.kubernetes.io/enforce: baseline
+          pod-security.kubernetes.io/audit: restricted
+          pod-security.kubernetes.io/warn: restricted
+  - target:
+      kind: Deployment
+      name: sandbox-router
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sandbox-router
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: sandbox-router
+                image: registry.k8s.io/agent-sandbox/sandbox-router-go:v1.0.2
+                args:
+                  - --http-bind-address=:8080
+                  - --metrics-bind-address=:9090
+                  - --health-probe-bind-address=:8081
+                  - --cluster-domain=cluster.local
+                  - --proxy-timeout=180s
+                  - --upstream-max-retries=3
+                  - --cache-enabled=true
+                  - --authz-mode=scoped-token
+                  - --authz-scoped-token-verification-keys-file=/etc/sandbox-router-auth/keys.json
+                volumeMounts:
+                  - name: router-auth-keys
+                    mountPath: /etc/sandbox-router-auth
+                    readOnly: true
+            volumes:
+              - name: router-auth-keys
+                configMap:
+                  name: sandbox-router-auth-keys

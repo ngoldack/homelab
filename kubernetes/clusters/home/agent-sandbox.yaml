@@ -1,0 +1,32 @@
+# Agent Sandbox controller + Router + admission policy. wait:true: Flux applies
+# this directory only after its resources are Ready, and the hermes-sandbox /
+# hermes Kustomizations dependOn this one — the controller and Router must be
+# Ready (and hermes-sandbox's runtimeclass + templates present) before Hermes
+# resources that depend on them are reconciled. dependsOn network because the
+# Cilium CNPs here attach to the edge Gateway setup the network Kustomization
+# provides.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: agent-sandbox
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/agent-sandbox
+  prune: true
+  wait: true
+  timeout: 20m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

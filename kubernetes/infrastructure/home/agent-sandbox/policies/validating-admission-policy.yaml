@@ -1,0 +1,123 @@
+# secure-hermes-sandbox — admission gate for sandbox Pods.
+#
+# Binds to (and only to) the hermes-sandbox namespace and blocks any Pod that
+# violates the sandbox isolation contract: Kata-only runtime, no ServiceAccount
+# token, no privileged container, no hostNetwork/hostPID/hostIPC, no
+# hostPath/secret/SA-token-projected volumes, no privilege escalation, no added
+# capabilities, no root runAsUser/runAsGroup, mandatory cpu+memory resource
+# limits, a nodeSelector pinning the sandbox node, and runAsNonRoot: true.
+#
+# Expressions are written against core PodSchema (k8s v1.36) and guarded with
+# has() so an absent field is treated as a violation rather than a runtime
+# error. All validation reasons are MUST_FAIL because this policy exists to
+# DENY; the Binding enforces it with validationActions: [Deny].
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: secure-hermes-sandbox
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    # Every container the Pod runs — init (kata) plus regular containers.
+    - name: allContainers
+      expression: >-
+        object.spec.containers +
+        (has(object.spec.initContainers) ? object.spec.initContainers : [])
+  validations:
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'kata'"
+      message: "hermes-sandbox requires runtimeClassName 'kata'"
+      reason: Invalid
+    - expression: "has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false"
+      message: "hermes-sandbox requires automountServiceAccountToken explicitly false"
+      reason: Invalid
+    - expression: >-
+        !has(object.spec.securityContext) ||
+        !has(object.spec.securityContext.privileged) ||
+        object.spec.securityContext.privileged == false
+      message: "hermes-sandbox requires no privileged securityContext"
+      reason: Invalid
+    - expression: "!has(object.spec.hostNetwork) || object.spec.hostNetwork == false"
+      message: "hermes-sandbox requires hostNetwork false"
+      reason: Invalid
+    - expression: "!has(object.spec.hostPID) || object.spec.hostPID == false"
+      message: "hermes-sandbox requires hostPID false"
+      reason: Invalid
+    - expression: "!has(object.spec.hostIPC) || object.spec.hostIPC == false"
+      message: "hermes-sandbox requires hostIPC false"
+      reason: Invalid
+    - expression: "!has(object.spec.volumes) || !object.spec.volumes.exists(v, has(v.hostPath))"
+      message: "hermes-sandbox requires no hostPath volumes"
+      reason: Invalid
+    - expression: >-
+        !has(object.spec.volumes) ||
+        !object.spec.volumes.exists(v,
+          has(v.secret) ||
+          (has(v.projected) && has(v.projected.source) && v.projected.source == 'ServiceAccountToken'))
+      message: "hermes-sandbox requires no secret or serviceAccountToken-projected volumes"
+      reason: Invalid
+    - expression: >-
+        variables.allContainers.all(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == false)
+      message: "hermes-sandbox requires allowPrivilegeEscalation false on every container"
+      reason: Invalid
+    - expression: >-
+        variables.allContainers.all(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.capabilities) ||
+          !has(c.securityContext.capabilities.add) ||
+          size(c.securityContext.capabilities.add) == 0)
+      message: "hermes-sandbox requires empty capabilities.add on every container"
+      reason: Invalid
+    - expression: >-
+        (!has(object.spec.securityContext) ||
+         !has(object.spec.securityContext.runAsNonRoot) ||
+         object.spec.securityContext.runAsNonRoot == true) &&
+        variables.allContainers.all(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.runAsNonRoot) ||
+          c.securityContext.runAsNonRoot == true)
+      message: "hermes-sandbox requires runAsNonRoot true at pod or container level"
+      reason: Invalid
+    - expression: >-
+        variables.allContainers.all(c,
+          has(c.resources) &&
+          has(c.resources.limits) &&
+          has(c.resources.limits.cpu) &&
+          has(c.resources.limits.memory))
+      message: "hermes-sandbox requires cpu and memory limits on every container"
+      reason: Invalid
+    - expression: >-
+        has(object.spec.nodeSelector) &&
+        'workload.hermes.io/sandbox' in object.spec.nodeSelector &&
+        object.spec.nodeSelector['workload.hermes.io/sandbox'] == 'true'
+      message: "hermes-sandbox requires nodeSelector workload.hermes.io/sandbox == 'true'"
+      reason: Invalid
+    - expression: >-
+        (!has(object.spec.runAsUser) || object.spec.runAsUser != 0) &&
+        (!has(object.spec.runAsGroup) || object.spec.runAsGroup != 0) &&
+        variables.allContainers.all(c,
+          (!has(c.runAsUser) || c.runAsUser != 0) &&
+          (!has(c.runAsGroup) || c.runAsGroup != 0))
+      message: "hermes-sandbox requires no container runAsUser/runAsGroup of 0"
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: secure-hermes-sandbox
+spec:
+  policyName: secure-hermes-sandbox
+  validationActions:
+    - Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: hermes-sandbox

@@ -229,6 +229,12 @@ parameters:
   snapshot.retention: "14"
   snapshot.retentionUnit: "DAY"
   snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  # rootSquash off: without it the kubelet's fsGroup chown on first mount is
+  # mapped to nobody, and initdb dies with "data directory has wrong
+  # ownership" — the exact failure this class shipped with at first apply.
+  nfs.rootSquash: "false"
+  forceDelete: "false"
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate

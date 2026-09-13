@@ -70,9 +70,30 @@ spec:
           mountPath: /secrets
           readOnly: true
     server:
-      replicas: 1
-      nodeSelector:
-        topology.homelab/site: home
+      # 2 replicas, NOT site-pinned, tolerating the ingress taint: the edge
+      # Gateway's envoy is the host-netns cilium-envoy DaemonSet, and
+      # host-origin traffic from the Hetzner node cannot reach LAN pod IPs
+      # (the edge portal 503, while the outpost→server path in a pod netns
+      # worked). With one replica landing on the ingress node, the edge
+      # listener's upstream is LOCAL and the cross-site hop moves into pod
+      # networking where KubeSpan serves it fine. The scheduler cannot put
+      # them both on one home node without more capacity pressure than exists
+      # (two untainted home nodes vs cp taint + gpu taint), and
+      # topologySpread below makes home/home illegal anyway.
+      replicas: 2
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: authentik
+              app.kubernetes.io/component: server
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: ingress
+          effect: NoSchedule
       resources:
         requests:
           cpu: 200m

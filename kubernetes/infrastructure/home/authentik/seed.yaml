@@ -164,31 +164,3 @@ data:
           meta_name: Grafana
           meta_launch_url: https://grafana.ngoldack.de/
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, grafana-oidc]]
-      # ---------- built-in brute-force defense (primary) ----------
-      # authentik's ReputationPolicy is the PRIMARY login-brute-force layer
-      # (IP + username reputation score; denies once the score drops below
-      # threshold). CrowdSec edge enforcement was removed 2026-09-13 (its
-      # GEP-1494 ExternalAuth filter is fail-closed — an availability risk
-      # next to this zero-cost built-in); this policy restores the protection
-      # with no sidecar dependency.
-      - model: authentik_policies_reputation.reputationpolicy
-        state: present
-        identifiers:
-          name: homelab-login-bruteforce
-        attrs:
-          check_ip: true
-          check_username: true
-          threshold: -5
-      # PolicyBinding has no natural key: its identity is the composite
-      # (target, policy, order, negate, group, user) — those go in IDENTIFIERS
-      # (an empty {} fails with 'No or invalid identifiers').
-      - model: authentik_policies.policybinding
-        state: present
-        identifiers:
-          target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          policy: !Find [authentik_policies_reputation.reputationpolicy, [name, homelab-login-bruteforce]]
-          order: 0
-          negate: false
-          group: null
-          user: null
-        attrs: {}

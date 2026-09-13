@@ -81,11 +81,16 @@ spec:
       # (two untainted home nodes vs cp taint + gpu taint), and
       # topologySpread below makes home/home illegal anyway.
       replicas: 2
-      # RollingUpdate deadlocks against the hard anti-affinity (surge pod has
-      # no third schedulable node — cp and gpu workers are tainted out);
-      # Recreate serializes the swap with a brief portal blip.
+      # maxSurge=0 serializes the swap against the hard anti-affinity (a
+      # surge pod has no third schedulable node — cp and gpu workers are
+      # tainted out). type:Recrete is NOT usable: the chart's strategy
+      # template emits rollingUpdate defaults regardless, which
+      # server-side-apply then rejects as invalid (observed).
       deploymentStrategy:
-        type: Recreate
+        type: RollingUpdate
+        rollingUpdate:
+          maxSurge: 0
+          maxUnavailable: 1
       # HARD anti-affinity by hostname: exactly one server per node, so the
       # pair straddles home+Hetzner instead of both landing on the ingress
       # node (ScheduleAnyway spread let that happen, which then 503'd the

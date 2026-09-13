@@ -52,7 +52,7 @@ data:
           name: hindsight-ui-proxy
         attrs:
           mode: proxy
-          internal_host: http://hindsight-control-plane.hindsight.svc.cluster.local/
+          internal_host: http://hindsight-control-plane.hindsight.svc.cluster.local:3000/
           external_host: https://hindsight-ui.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]

@@ -81,14 +81,19 @@ spec:
       # (two untainted home nodes vs cp taint + gpu taint), and
       # topologySpread below makes home/home illegal anyway.
       replicas: 2
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: authentik
-              app.kubernetes.io/component: server
+      # HARD anti-affinity by hostname: exactly one server per node, so the
+      # pair straddles home+Hetzner instead of both landing on the ingress
+      # node (ScheduleAnyway spread let that happen, which then 503'd the
+      # INTERNAL portal — the failure is directional-symmetric: host-netns
+      # envoy only ever reaches LOCAL pods).
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: authentik
+                  app.kubernetes.io/component: server
+              topologyKey: kubernetes.io/hostname
       tolerations:
         - key: dedicated
           operator: Equal

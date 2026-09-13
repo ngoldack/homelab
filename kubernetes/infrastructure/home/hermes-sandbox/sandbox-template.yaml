@@ -49,9 +49,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: runtime
-          # Tag 1.0.2 is a placeholder: a digest pin replaces it once the
-          # image is built and pushed (image-builds/hermes-sandbox-runtime).
-          image: registry.ngoldack.de/hermes-sandbox-runtime:1.0.2
+          # Digest-pinned zot ref — manifest digest of the image pushed by
+          # build-hermes-sandbox-runtime-c1376ef; re-pin by bumping that Job.
+          image: registry.ngoldack.de/hermes-sandbox-runtime@sha256:38e4c80931b88dadb46d455330e273391076db46790d3d59121bcda9a0cfb163
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

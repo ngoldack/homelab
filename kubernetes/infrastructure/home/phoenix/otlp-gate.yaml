@@ -18,6 +18,12 @@ kind: ConfigMap
 metadata:
   name: otlp-gate-template
   namespace: phoenix
+  annotations:
+    # This ConfigMap intentionally contains ${OTLP_TOKEN}, substituted at
+    # container start by the initContainer's envsubst. Flux's postBuild
+    # envsubst (strict) would fail the whole Kustomization on it, so opt out —
+    # the same annotation the Grafana dashboards carry.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   nginx.conf: |
     events {}

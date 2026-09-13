@@ -3,6 +3,9 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - sources.yaml
+  # ai-gateway-crds FIRST (CRD-before-CR): installs aigateway.envoyproxy.io/v1beta1
+  # CRDs; without it the AIServiceBackend/AIGatewayRoute CRs dry-run fails.
+  - helmrelease-crds.yaml
   - helmrelease-envoy-gateway.yaml
   - helmrelease.yaml
   - gatewayclass.yaml

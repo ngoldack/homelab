@@ -2,8 +2,8 @@
 # turns AIGatewayRoute / AIServiceBackend / BackendSecurityPolicy CRs into xDS
 # for the Envoy Gateway data plane (the envoy-gateway HelmRelease in this same
 # kustomization). Chart ai-gateway-helm v1.1.0; its CRDs come from the
-# ai-gateway-crds-helm v1.1.0 chart, applied by the cluster entry as a
-# one-shot bootstrap step (see kubernetes/clusters/home/aigateway.yaml).
+# ai-gateway-crds-helm v1.1.0 HelmRelease (helmrelease-crds.yaml), registered
+# first in this kustomization so the CRs have their schema at apply time.
 #
 # v1.1.0 deploys controller + external processor only; there is NO bundled
 # Postgres. The data plane is Envoy Gateway v1.8.1, installed separately.

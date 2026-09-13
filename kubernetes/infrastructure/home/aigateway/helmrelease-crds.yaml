@@ -1,0 +1,31 @@
+# The AIServiceBackend / AIGatewayRoute / BackendSecurityPolicy CRDs
+# (aigateway.envoyproxy.io/v1beta1) come from ai-gateway-crds-helm v1.1.0.
+# Registered FIRST in kustomization.yaml so the CRDs exist before the CRs
+# (models.yaml / mcp-route.yaml) dry-run — without this, Flux fails every
+# CR with `no matches for kind "AIServiceBackend"`.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ai-gateway-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: ai-gateway-crds-helm
+      version: "v1.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: ai-gateway
+        namespace: flux-system
+      interval: 1h
+  targetNamespace: aigateway
+  releaseName: ai-gateway-crds
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3

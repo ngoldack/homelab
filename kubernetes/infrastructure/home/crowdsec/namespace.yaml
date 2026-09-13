@@ -1,0 +1,10 @@
+# CrowdSec. Deliberately carries NO Gateway ingress labels (neither
+# public-ingress nor edge-ingress): nothing here is served over HTTP. The only
+# thing the edge ever dials is the bouncer's gRPC ext_authz backend, and that
+# happens node-locally from the cilium-envoy DaemonSet on the ingress node, not
+# through an HTTPRoute. Labelling the namespace would advertise an ingress
+# surface that does not exist.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crowdsec

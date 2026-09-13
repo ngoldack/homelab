@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - sources.yaml
+  - helmrelease.yaml
+  - bouncer.yaml
+  - bouncer-key.sops.yaml
+  - bouncer-register.yaml
+  # ext-auth.yaml is PARKED (cilium 1.20.1 lacks Gateway ext_authz CRD) —
+  # do not apply until cilium supports it.
+  - vm-scrapes.yaml

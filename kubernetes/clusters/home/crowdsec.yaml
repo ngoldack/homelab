@@ -1,0 +1,35 @@
+# CrowdSec protecting the authentik edge surface. dependsOn network (the edge
+# Gateway its ext_auth policy attaches to) and monitoring-crds (the
+# VMServiceScrape CRDs vm-scrapes.yaml emits). Both it and the bouncer bring
+# their own HelmRepositories in-crate (sources.yaml), so unlike authentic it
+# has no dependency on infra-controllers' shared sources file.
+#
+# wait: false deliberately — the one-shot bouncer-register Job only succeeds
+# after the LAPI's first boot, which can lag a crowded first reconcile; with
+# wait: true a healthy-but-slow rollout would be reported failed and retried.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: crowdsec
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/crowdsec
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

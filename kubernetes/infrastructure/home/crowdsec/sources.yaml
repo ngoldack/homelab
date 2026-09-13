@@ -1,0 +1,23 @@
+# The official CrowdSec Helm repo, consumed by helmrelease.yaml (LAPI + agent).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: crowdsecurity
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://crowdsecurity.github.io/helm-charts
+---
+# kdwils' envoy-proxy-crowdsec-bouncer chart, consumed by bouncer.yaml. This
+# is the gRPC ext_authz server the edge envoy dials: the bouncer checks each
+# request against the LAPI's decisions database. Published as an OCI artifact
+# next to its image, like hindsight/phoenix.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: envoy-proxy-bouncer
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/kdwils/charts

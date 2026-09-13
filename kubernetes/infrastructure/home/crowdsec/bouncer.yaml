@@ -1,0 +1,73 @@
+# The Envoy proxy bouncer: the gRPC ext_authz server the edge envoy dials
+# (ext-auth.yaml wires that connection). It keeps a local copy of the decisions
+# stream from CrowdSec and answers each request with allow/deny, optionally
+# serving a CAPTCHA. fail-open lives on the envoy side (failureModeAllow), so
+# this single replica is enough — a missing bouncer is not an outage.
+#
+# fullnameOverride pins every object (Service, Deployment, ConfigMap,
+# ServiceAccount) to crowdsec-bouncer, which is the exact Service name
+# ext-auth.yaml and vm-scrapes.yaml reference.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: crowdsec-bouncer
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: envoy-proxy-bouncer
+      version: "0.8.1"
+      sourceRef:
+        kind: HelmRepository
+        name: envoy-proxy-bouncer
+      interval: 1h
+  targetNamespace: crowdsec
+  releaseName: crowdsec-bouncer
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: crowdsec-bouncer
+    # The edge envoy is the host-netns cilium-envoy DaemonSet; it only ever
+    # reaches LOCAL pods (see authentic/helmrelease.yaml server.tolerations for
+    # the same constraint). pin the bouncer to the Hetzner ingress node — the
+    # one that serves the public edge Gateway — so the ext_authz dial from the
+    # host-netns envoy stays node-local and never crosses the WAN leg.
+    nodeSelector:
+      topology.homelab/site: cloud
+    tolerations:
+      - key: dedicated
+        operator: Equal
+        value: ingress
+        effect: NoSchedule
+    config:
+      bouncer:
+        # Fully-qualified to sidestep any cross-namespace DNS surprise; the
+        # LAPI Service is crowdsec-service because the crowdsec HelmRelease
+        # pins releaseName: crowdsec.
+        lapiURL: http://crowdsec-service.crowdsec.svc.cluster.local:8080
+        # The key the register Job (bouncer-register.yaml) added to the LAPI
+        # with cscli. Injected from sops so the secret value never appears in
+        # git plaintext.
+        apiKeySecretRef:
+          name: crowdsec-bouncer-key
+          key: API_KEY
+      # Prometheus metrics on :9090 (name "metrics" on the Service), scraped by
+      # vm-scrapes.yaml. The chart's ServiceMonitor stays off for the same
+      # reason every other app here disables it: prometheus-operator CRDs do
+      # not exist, VictoriaMetrics is the stack.
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: false
+    # Grafana picks the dashboard ConfigMap up via the sidecar's
+    # grafana_dashboard label (searchNamespace: ALL in monitoring), no wiring.
+    grafana:
+      dashboard:
+        enabled: true

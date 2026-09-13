@@ -1,0 +1,57 @@
+# PARKED (NOT applied — do not register in kustomization.yaml until cilium
+# has Gateway ext_authz): the enforcement half of CrowdSec.
+#
+# Target design: every request to the public edge listener is checked by the
+# crowdsec bouncer's gRPC ext_authz before reaching any backend, so a banned
+# IP is blocked at the edge (fail-open so a bouncer/LAPI outage never takes
+# the edge down).
+#
+# Blocked on cilium 1.20.1, which has NO ext_authz CRD for its Gateway data
+# plane: EnvoyExtensionPolicy (cilium.io/v2) and CiliumGatewayClassConfig
+# securityPolicy/extAuth BOTH do not exist in this version (verified live
+# 2026-09-13). Adoption requires bumping cilium (tofu/home/cilium.tf) past
+# the version that ships EnvoyExtensionPolicy for Gateway API, or wiring the
+# bouncer as an ext_authz filter on the edge envoy via CiliumEnvoyConfig
+# (fragile against the ingress Gateway listener). Until then the detection
+# stack (LAPI + agent + authentik acquisition + bouncer + dashboards) is
+# live and its decisions are recorded, but NOT enforced at the edge.
+#
+# Manifest for the target state (uncomment + register once cilium supports it):
+apiVersion: cilium.io/v2
+kind: EnvoyExtensionPolicy
+metadata:
+  name: crowdsec-edge-ext-auth
+  namespace: network
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: edge
+    namespace: network
+  extAuth:
+    - grpc:
+        service:
+          name: crowdsec-bouncer
+          namespace: crowdsec
+          port: 8080
+      failureModeAllow: true
+---
+# Lets the EnvoyExtensionPolicy above (which lives in namespace network)
+# reference the crowdsec-bouncer Service across the namespace boundary, the
+# same pattern the edge HTTPRoutes use to reach authentik (see
+# ../authentik/httproutes-edge.yaml). The grant lives in the namespace of the
+# referenced resource (crowdsec), not the referencing one (network).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-edge-ext-auth-to-crowdsec-bouncer
+  namespace: crowdsec
+spec:
+  from:
+    - group: cilium.io
+      kind: EnvoyExtensionPolicy
+      namespace: network
+  to:
+    - group: ""
+      kind: Service
+      name: crowdsec-bouncer

@@ -1,19 +1,11 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: three-member failover chain (Hindsight-native {"mode":"failover"}).
-# Primary openai/gpt-5-nano: $0.05/$0.40 per M, 400k ctx, flat price, and the
-# most reliable strict-JSON writer at its cost tier — memory extraction is an
-# input-heavy workload, so input price decides the bill. Secondary
-# z-ai/glm-5.3-flash: $0.15/$0.50 flat, 1.3M ctx, Artificial Analysis 57 —
-# the quality hop when nano is down or rate-limited. Last member is the
-# cluster's own qwen3-27b llama.cpp server: free, offline-capable, 8k ctx —
-# slow but the lights never go out when credits do. (deepseek-v4-flash was
-# the pick until DeepSeek retired it 2026-09-10; its OpenRouter listing now
-# routes to V4.1 with weekday-Beijing peak double pricing — the flat two
-# above are the better homelab economics.)
-# REASONING_EFFORT=none stops thinking blocks; STRICT_SCHEMA grammar-
-# enforces structured output for the cheap members.
+# LLM: a SINGLE OpenRouter model (openai/gpt-5-nano, $0.05/$0.40 per M,
+# 400k ctx, flat price, reliable strict-JSON writer). The prior 3-member
+# failover chain (incl. the local qwen3-27b leg) made startup verification
+# cross the chart's 30s liveness budget, crash-looping the API pod mid-boot —
+# removed 2026-09-13. One working model keeps startup fast and singular.
 #
 # Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
 # ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and
@@ -70,22 +62,14 @@ spec:
         HINDSIGHT_API_LLM_PROVIDER: openai
         HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
         HINDSIGHT_API_LLM_MODEL: openai/gpt-5-nano
-        HINDSIGHT_API_LLM_1_PROVIDER: openai
-        HINDSIGHT_API_LLM_1_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_1_MODEL: z-ai/glm-5.3-flash
-        HINDSIGHT_API_LLM_2_PROVIDER: openai
-        HINDSIGHT_API_LLM_2_BASE_URL: http://qwen3-27b.llmkube-system.svc.cluster.local:8080/v1
-        HINDSIGHT_API_LLM_2_MODEL: qwen3-27b
-        HINDSIGHT_API_LLM_2_API_KEY: not-needed
-        HINDSIGHT_API_LLM_STRATEGY: '{"mode": "failover"}'
+        # Single OpenRouter model only — no local qwen3-27b failover leg
+        # (2026-09-13): the local leg made startup verification cross the
+        # chart's 30s liveness budget, crash-looping the pod mid-boot. One
+        # reliable OpenRouter model keeps startup fast and singular.
         # REASONING_EFFORT intentionally UNSET (verified live 2026-09-13):
         # sending reasoning_effort: none to the OpenRouter members 400s
         # ("Reasoning is mandatory for this endpoint"), so each model runs at
-        # its own default effort. The local llama.cpp failover strips thinking
-        # via ggpre (not effort).
-        # Primary model reverted to gpt-5-nano 2026-09-13: the deepseek-v4-flash
-        # slug was retired upstream, and hindsight-api's slow multi-leg startup
-        # verification (3 connections) crossed the chart's 30s liveness budget.
+        # its own default effort.
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; upstream first-token
         # latency plus 4k max_tokens generation busts the chart-default ~60s

@@ -57,7 +57,7 @@ resource "helm_release" "cilium" {
     loadBalancer = {
       acceleration = "best-effort"
     }
-    routingMode    = "tunnel"
+    routingMode = "tunnel"
     # No FQDN NetworkPolicies exist, so the DNS proxy is pure liability here:
     # with transparent mode on it redirects EVERY node-local :53 socket query
     # (pods and host netns alike) to the node's upstream resolver - including

@@ -20,5 +20,6 @@ resources:
   # failure. (It did not include it until the DNS rework; this comment
   # described an intent, not the state.)
   - headlamp
-  # LAN split-horizon resolver (CoreDNS static VIP zone + LB 10.30.0.201)
-  - internal-dns
+  # internal-dns (LAN split-horizon resolver) retired 2026-09-13: the public
+  # Hetzner zone is the single source of truth for every client, so no
+  # router-side config and no LAN resolver exist. See README "Ingress".

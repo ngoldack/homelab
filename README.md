@@ -33,7 +33,7 @@ its former ingress role is now the LAN VIP described above.
 │       └── home/              # cert-manager, network (two Gateways: `public`
 │                              # on the LAN VIP, `edge` on the Hetzner IP;
 │                              # LB-IPAM, L2 announcements), external-dns (two
-│                              # scoped instances) + internal-dns (resolver)),
+│                              # scoped instances),
 │                              # nvidia, truenas-csi, registry (Zot), buildkit,
 │                              # image-builds, immich, cnpg-operator,
 │                              # valkey-operator, authentik (+ edge outpost),
@@ -587,27 +587,32 @@ If you need to add a workload later, add it in a single, purpose-built layer rat
 
 ## Ingress
 
-Public names, split-horizon answers: LAN clients get `10.30.0.200` — a
-LoadBalancer VIP on the cluster VLAN, announced with ARP by Cilium — either
-from the router's zone-forward to the in-cluster resolver (every name) or
-from the public zone itself (the LAN-only names). Internet clients get
-`2.28.31.116` (the Hetzner edge worker) for the names that have an edge
-route — headlamp, authentik, grafana — and those pass authentik before
-touching the cluster. The remaining names (immich, registry/zot) still
-publish the RFC1918 VIP from the public zone: unreachable from the internet,
-and what public DNS buys is resolver independence (DoH clients, UniFi
-Teleport and plain LAN clients all get the same answer; this is what killed
-the old "turn Encrypted DNS off on the UDM" workaround). The stated cost is
-unchanged: service hostnames and the internal VIP are publicly enumerable;
-the wildcard certificate keeps individual names out of CT logs.
+Public names, one answer everywhere: the public Hetzner zone is the single
+source of truth. `headlamp`, `authentik`, `grafana` resolve to
+`2.28.31.116` (the Hetzner edge worker) for every client — LAN included —
+and pass authentik at the edge outpost before touching the cluster.
+`immich` and `registry` resolve to `10.30.0.200` — a LoadBalancer VIP on
+the cluster VLAN, announced with ARP by Cilium — reachable only on the LAN;
+from the internet they are black holes by design, and what public DNS buys
+is resolver independence (DoH clients, UniFi Teleport, IPv6 clients on the
+ISP's resolver, and plain LAN clients all get the same answer; this is what
+killed the old "turn Encrypted DNS off on the UDM" workaround). The stated
+cost is unchanged: service hostnames and the internal VIP are publicly
+enumerable; the wildcard certificate keeps individual names out of CT logs.
+
+No router-side DNS configuration exists or is required — the earlier
+split-horizon resolver (`internal-dns/`, CoreDNS at `.201`) and the UDM
+conditional forward were retired 2026-09-13 so that LAN clients need zero
+per-name or per-zone maintenance on the router.
 
 Traffic path:
 
 ```text
-LAN:      client → router zone-forward → 10.30.0.201 (CoreDNS) → 10.30.0.200
-             → Cilium Gateway (`public`) :443 → HTTPRoute → pod
-Internet: client → Hetzner DNS → 2.28.31.116 → Cilium Gateway (`edge`) :443
-             → authentik edge outpost (session check) → home pod via KubeSpan
+LAN / Internet: client → Hetzner DNS → 2.28.31.116 → Cilium Gateway (`edge`)
+             :443 → authentik edge outpost (session check) → home pod via
+             KubeSpan
+LAN only:     client → Hetzner DNS → 10.30.0.200 → Cilium Gateway (`public`)
+             :443 → HTTPRoute → pod   (immich, registry — no auth hop)
 ```
 
 - Envoy is an ordinary **pod**, not a host-network bind:
@@ -690,56 +695,43 @@ Bump one without the other and the operator crash returns; the chart's
 swap lands before the bundle's new `safe-upgrades` admission policy exists to
 object.
 
-### Edge ingress: split-horizon with authentik
+### Edge ingress: one authenticated path with authentik
 
-Same hostnames, two paths — the answer a client gets decides which:
+Every client, LAN included, reaches `headlamp`, `authentik`, `grafana`
+through the same door:
 
 | Client | Resolves to | Path |
 | ------ | ----------- | ---- |
-| LAN / UniFi Teleport | `10.30.0.200` (LAN VIP) | internal Gateway (`public`) → app pod. No auth hop, no WAN. |
-| Internet | `2.28.31.116` (Hetzner primary IP) | edge Gateway → cilium-envoy on the ingress node → authentik edge outpost (session check; login redirects to the portal) → home pod over KubeSpan. |
+| All (LAN, VPN, internet) | `2.28.31.116` (Hetzner primary IP) | edge Gateway → cilium-envoy on the ingress node → authentik edge outpost (session check; login redirects to the portal) → home pod over KubeSpan. |
+| LAN only | `10.30.0.200` (LAN VIP) | internal Gateway (`public`) → app pod, no auth hop — only for the LAN-only names (immich, registry). |
 
-Pieces: `network/edge.yaml` (cloud LB-IPAM pool + second Gateway — the
-datapath already exists, only the VIP registration is new), the
+Pieces: `network/edge.yaml` (cloud LB-IPAM pool + second Gateway), the
 `authentik/` stack (server+worker on CNPG+valkey-operator at home, Rust
 proxy outpost pinned to the Hetzner node via `nodeSelector`/toleration),
 per-Gateway namespace labels (`public-ingress` vs `edge-ingress`), and
 external-dns instance scoping via `--gateway-name` (one instance per Gateway —
 `--gateway-label-filter` proved unusable, see
 `kubernetes/infrastructure/home/external-dns/helmrelease.yaml`) so an edge
-route can never overwrite an internal record. Edge exposure per app = its own
+route can never overwrite a LAN record. Edge exposure per app = its own
 edge HTTPRoute (see `headlamp/httproute-edge.yaml`); authentik resources are
 seeded declaratively from `/blueprints` (`authentik/seed.yaml`).
 
-The DNS split is live and enforced by three writers that can never collide on
-a record:
+Two external-dns instances write the public zone and can never collide on a
+record:
 
-- **Public zone, edge instance** (`external-dns/helmrelease-edge.yaml`,
+- **Edge instance** (`external-dns/helmrelease-edge.yaml`,
   `--gateway-name=edge`): publishes the edge routes' hostnames — headlamp,
   authentik, grafana — to the Hetzner IP.
-- **Public zone, LAN instance** (`external-dns/helmrelease.yaml`,
-  `--gateway-name=public` + `--label-filter=dns.ngoldack.de/publish=lan`):
-  publishes only the LAN-only names (immich, registry/zot), still at `.200`,
-  so router-DNS clients keep working unchanged.
-- **In-cluster CoreDNS resolver** (`internal-dns/`): authoritative for
-  `ngoldack.de` from a git-managed zone file — the reviewable ledger of LAN
-  names, every answer `.200` — and forwards everything else. LoadBalancer at
-  `.201` (the `dns.ngoldack.de/scope=internal` label drives the L2
-  announcement). Routes labelled `publish=twin` (the internal copies of
-  headlamp/authentik/grafana) are deliberately absent from both external-dns
-  instances; their `.200` answer comes from the zone file.
+- **LAN instance** (`external-dns/helmrelease.yaml`, `--gateway-name=public`
+  + `--label-filter=dns.ngoldack.de/publish=lan`): publishes only the
+  LAN-only names (immich, registry) at `.200` — unreachable from the
+  internet by design.
 
-Remaining manual step: UniFi → DNS Policies → Forward zone `ngoldack.de` →
-`10.30.0.201`. Until then LAN clients use the public zone: edge-twin names
-hairpin via Hetzner + authentik (works, slower, auth required), the rest
-resolve to `.200` directly.
-
-Two measured gotchas, both commented in `internal-dns/resolver.yaml`: the
-`docker.io/coredns` image refuses `exec` under *any* hardened container
-securityContext on Talos, and cilium's transparent DNS proxy intercepts every
-`:53` egress from in-cluster pods — resolver tests run from a normal pod get
-fake answers. Test with `kubectl port-forward svc/internal-dns` plus
-`dig +tcp -p <local> @127.0.0.1`, or from a hostNetwork pod.
+The earlier split-horizon design (in-cluster CoreDNS resolver at `.201` +
+UDM conditional forward + `publish=twin` internal routes) was retired
+2026-09-13: it required router-side config to function, and IPv6 clients on
+the ISP's resolver bypassed it anyway. One public answer per name is now the
+invariant; the router needs zero DNS configuration.
 
 A proxy provider only gets an outpost vhost if an Application *owns* it —
 the seed binds `grafana-proxy` to its own `grafana-edge` app for exactly
@@ -839,9 +831,10 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   Ready.
 - Gateway: `kubectl get gateway -n network public` shows Programmed with
   `10.30.0.200`.
-- DNS: `kubectl logs -n network deploy/external-dns` and
-  `dig <app>.<domain>` → `10.30.0.200` (from any resolver, DoH included —
-  that's the point).
+- DNS: `dig <app>.<domain>` → `10.30.0.200` for the LAN-only names and
+  `2.28.31.116` for the edge names, from any resolver (DoH included —
+  that's the point); `kubectl logs -n network deploy/external-dns` and
+  `deploy/external-dns-edge` show the two scoped syncs.
 - TLS end-to-end: `curl -v https://<app>.<domain>` from the LAN presents the
   Let's Encrypt cert.
 
@@ -866,17 +859,16 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   Proxmox's own Console tab would otherwise freeze on the last framebuffer
   frame — pointing the console at the serial port keeps it live for every
   node, not just the one with PCIe passthrough.
-- **Headlamp**'s ServiceAccount is bound to `cluster-admin` and the app has no
-  native OIDC: the LAN path reaches it directly (no auth hop), so the edge
-  path is gated by the authentik outpost — `headlamp/httproute-edge.yaml`
-  (live) proxies to the home pod only after a valid session.
-- **LAN DNS enforcement is best-effort**: clients whose DoH or hard-coded
-  resolver bypasses the router's forward get the public answer even at home —
-  the edge path (WAN hairpin + authentik login) instead of the direct VIP.
-  Per-VLAN DoH blocks, or publishing self-hosted DoH + RFC 9463 DNR, would
-  close that; it is an optimization, not a correctness requirement. The edge
-  instance publishes A records only — IPv6-only mobile clients need the
-  Hetzner primary IPv6 + AAAA before they can reach edge names at all.
+- **Headlamp**'s ServiceAccount is bound to `cluster-admin` and the app has
+  no native OIDC: its only path is the edge route, so the authentik outpost
+  gates every access — `headlamp/httproute-edge.yaml` proxies to the home
+  pod only after a valid session.
+- **LAN clients of edge names hairpin**: `headlamp`/`authentik`/`grafana`
+  resolve to the Hetzner IP for everyone, so a LAN browser pays one in-country
+  WAN round trip plus the authentik session check. This is the accepted cost
+  of zero router-side DNS configuration. The edge instance publishes A
+  records only — IPv6-only mobile clients need the Hetzner primary IPv6 +
+  AAAA before they can reach edge names at all.
 - **Insecure TLS to the Proxmox API** (`insecure = true` by default) trusts
   Proxmox's typical self-signed certificate; if you've issued a real one,
   set `insecure = false` per host in `proxmox_nodes`.

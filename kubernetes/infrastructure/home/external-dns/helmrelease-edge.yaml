@@ -8,12 +8,9 @@
 # --label-filter=dns.ngoldack.de/publish=lan exclusion, every name in the
 # public zone has exactly one writer.
 #
-# Bootstrap note: headlamp/authentik records currently exist under the LAN
-# instance's OLD ownership (owner home, prefix reg-). The LAN instance
-# excludes them the moment the route labels land, so its sync DELETES those
-# two names once and this instance recreates them at the new target — a
-# self-migrating flip, a sub-minute gap for internet clients only (LAN
-# clients never see it: their answer comes from the internal-dns resolver).
+# This is now the ONLY answer for edge names, everywhere: the split-horizon
+# resolver (internal-dns) was retired 2026-09-13, so LAN clients reach these
+# names through the edge + authentik outpost like every other client.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:

@@ -104,28 +104,23 @@ spec:
       # act — create an HTTPRoute, and label its namespace for the Gateway.
       - gateway-httproute
 
-    # SCOPING for split-horizon: this instance publishes exactly what the
-    # INTERNAL Gateway (`public`, LAN VIP) serves and ignores the edge one.
-    # Edge hostnames deliberately duplicate internal ones (same apps, two
-    # VIPs); an unscoped gateway-httproute source merges both targets and
-    # flips records like headlamp.ngoldack.de to the Hetzner address the
-    # moment an edge route exists. Two filter attempts, both learned live:
-    # --gateway-label-filter rejects `!=` outright ("is not a valid label
-    # selector operator", container dies at startup; the chart happily
-    # renders it), and its positive form matched NOTHING even with the
-    # label on the Gateway objects — empty desired set, policy:sync deleted
-    # the zone's records. --gateway-name=public is the blunt instrument
-    # that works: one instance per Gateway. The future internal-DNS
-    # instance mirrors it against Unbound/UniFi; a public-edge instance
-    # would use --gateway-name=edge plus the GA target annotation on
-    # network/edge.yaml. Not a first-class chart value in 1.22.0 →
-    # extraArgs.
+    # SCOPING: this instance publishes exactly what the LAN Gateway
+    # (`public`, VIP 10.30.0.200) serves and ignores the edge one. Two
+    # filter attempts, both learned live: --gateway-label-filter rejects
+    # `!=` outright ("is not a valid label selector operator", container
+    # dies at startup; the chart happily renders it), and its positive form
+    # matched NOTHING even with the label on the Gateway objects — empty
+    # desired set, policy:sync deleted the zone's records. --gateway-name
+    # is the blunt instrument that works: one instance per Gateway. Not a
+    # first-class chart value in 1.22.0 → extraArgs.
+    #
+    # The label filter selects the LAN-only names (immich, registry):
+    # routes without dns.ngoldack.de/publish=lan are edge-served and
+    # belong to the edge instance. The split-horizon twins (headlamp,
+    # authentik, grafana internal routes) were retired with the resolver —
+    # every client now gets the edge answer for those names.
     extraArgs:
       - --gateway-name=public
-      # Exclude the internal twins of edge-served names (headlamp,
-      # authentik): those flip to the Hetzner address via the edge
-      # instance; LAN clients keep the VIP answer through the
-      # internal-dns resolver instead. The label lives on the routes.
       - --label-filter=dns.ngoldack.de/publish=lan
     # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from
     # the retired cloud-ingress design; services now live directly under the

@@ -1,12 +1,12 @@
-# Headlamp behind authentik on the EDGE path only — the internal path keeps
-# its direct, auth-free route (httproute.yaml), which the namespace's LAN DNS
-# answer selects. This is the file headlamp's own SECURITY NOTE anticipated:
-# cluster-admin-bound headlamp gets identity-gated before it gets a public
-# answer. Backend is the edge outpost, not headlamp itself: the outpost checks
-# the session, then proxies straight to headlamp's Service over the mesh.
+# Headlamp behind authentik — now the ONLY path: the LAN twin route
+# (httproute.yaml) was retired with the split-horizon design, so the
+# cluster-admin-bound UI is identity-gated everywhere, which is what its
+# old SECURITY NOTE anticipated. Backend is the edge outpost, not headlamp
+# itself: the outpost checks the session, then proxies straight to
+# headlamp's Service over the mesh.
 #
 # The cross-namespace reference is pre-authorized by the ReferenceGrant in
-# ../authentik/httproutes.yaml.
+# ../authentik/httproutes-edge.yaml.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

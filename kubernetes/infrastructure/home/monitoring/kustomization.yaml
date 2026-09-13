@@ -2,7 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - helmrelease.yaml
-  - httproute.yaml
+  # httproute.yaml (LAN twin) retired with the split-horizon design:
+  # grafana is edge-only now, SSO via authentik everywhere.
   - httproute-edge.yaml
   - grafana-authentik.sops.yaml
 

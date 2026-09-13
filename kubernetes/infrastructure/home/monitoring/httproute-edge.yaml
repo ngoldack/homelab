@@ -2,8 +2,9 @@
 # edge envoy (host-netns, Hetzner) cannot reach grafana's home pods, but the
 # outpost is a pod and pod->pod crosses sites fine (20/20 measured).
 # authentik session checked at the edge, then proxied to grafana internally.
-# Grafana's OWN OIDC config (LAN direct path) stays as is: two independent
-# authentication perimeters on purpose.
+# The LAN twin route (httproute.yaml) was retired with the split-horizon
+# design; grafana's own OIDC config remains configured but the outpost is
+# now the only way in.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

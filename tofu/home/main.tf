@@ -297,6 +297,16 @@ resource "proxmox_download_file" "talos_iso" {
   file_name = "talos-${var.talos_version}-${substr(talos_image_factory_schematic.this[each.value.ext_key].id, 0, 12)}-amd64.iso"
   url       = data.talos_image_factory_urls.this[each.value.ext_key].urls.iso
 
+  # Note: a brand-new schematic (like the kata one) triggers a one-off build +
+  # a 302-to-S3 redirect in the Talos Image Factory; the Proxmox download
+  # task at v1.13.4 took >10 min there and the bpg provider (v0.112.0, no
+  # per-resource download timeout attribute) interrupts it at a fixed window.
+  # Recovery recipe, proven live: curl -L the urls.iso to the datastore path
+  # <datastore_free_dir>/<file_name> directly on pmx-main (or elsewhere +
+  # scp), verify size 576008192, then
+  #   tofu import 'proxmox_download_file.talos_iso["<host>::<ext_key>"]' '<node>:iso/<file_name>'
+  # and apply (the resource then only manages the already-present file).
+
   # Download the replacement BEFORE removing the old one. The running VMs keep
   # the outgoing ISO mounted as their cdrom, and Proxmox will not delete a
   # volume that is still attached — destroy-then-create would try exactly that

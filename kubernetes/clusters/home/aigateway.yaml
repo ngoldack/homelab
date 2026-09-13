@@ -39,6 +39,7 @@ spec:
   retryInterval: 2m
   # The VMServiceScrape (vm-scrapes.yaml) needs the VictoriaMetrics CRDs.
   dependsOn:
+    - name: aigateway-crds
     - name: monitoring-crds
   sourceRef:
     kind: GitRepository

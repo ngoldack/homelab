@@ -8,3 +8,6 @@ metadata:
   name: phoenix
   labels:
     gateway.ngoldack.de/public-ingress: "true"
+    # edge-ingress so the token-gated OTLP route (otlp.ngoldack.de) can attach
+    # to the edge Gateway; the UI route stays LAN-only on `public`.
+    gateway.ngoldack.de/edge-ingress: "true"

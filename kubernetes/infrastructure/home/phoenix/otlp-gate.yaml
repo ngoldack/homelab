@@ -1,0 +1,99 @@
+# OTLP/HTTP ingest gate for Phoenix: a public, token-protected endpoint that
+# lets external producers (e.g. OpenRouter's OTLP broadcast) send spans to
+# Phoenix WITHOUT going through the session-gated UI path.
+#
+# WHY this exists: OpenRouter posts traces to phoenix.ngoldack.de and gets
+# 403 from the edge auth in front of the UI. authentik's proxy outpost only
+# does session-cookie auth — it cannot accept a header API key. So this gate
+# fronts Phoenix's OTLP listener (which itself accepts unauthenticated; its
+# auth is off) and enforces a shared bearer token at the edge. OpenRouter
+# sends `Authorization: Bearer <token>` (its OTLP broadcaster supports a
+# custom header); anything without the token is 401/403.
+#
+# The token is engineered OUT of git: it lives in a sops secret
+# (otlp-secret.sops.yaml, key OTLP_TOKEN) mounted as an env, and an
+# initContainer envsubst's it into the nginx config at container start.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otlp-gate-template
+  namespace: phoenix
+data:
+  nginx.conf: |
+    events {}
+    http {
+      map $http_authorization $allowed {
+        default 0;
+        ~^Bearer ${OTLP_TOKEN}$ 1;
+      }
+      server {
+        listen 8081;
+        if ($allowed != 1) { return 401; }
+        location /v1/traces {
+          proxy_pass http://phoenix-svc.phoenix.svc.cluster.local:6006/v1/traces;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+        location = /health { return 200 "ok\n"; }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otlp-gate
+  namespace: phoenix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otlp-gate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otlp-gate
+    spec:
+      nodeSelector:
+        topology.homelab/site: home
+      initContainers:
+        - name: render-conf
+          image: docker.io/library/alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              envsubst '${OTLP_TOKEN}' < /tpl/nginx.conf > /out/nginx.conf
+          env:
+            - name: OTLP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: otlp-token
+                  key: OTLP_TOKEN
+          volumeMounts:
+            - name: tpl
+              mountPath: /tpl/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: out
+              mountPath: /out
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.29-alpine
+          args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
+          volumeMounts:
+            - name: out
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: tpl
+          configMap:
+            name: otlp-gate-template
+        - name: out
+          emptyDir: {}

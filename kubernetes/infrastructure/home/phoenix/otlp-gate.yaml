@@ -50,6 +50,12 @@ kind: Deployment
 metadata:
   name: otlp-gate
   namespace: phoenix
+  annotations:
+    # No ${} lives in this Deployment, but Flux's strict envsubst runs over it
+    # anyway and the OTLP_TOKEN envsubst workflow lives in the sibling
+    # ConfigMap. Opt out here too so the two stay consistent and the
+    # Kustomization build never trips on substitution.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:
   replicas: 1
   selector:

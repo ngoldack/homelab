@@ -5,21 +5,14 @@
 # (site/docs/compatibility.md): AI Gateway 1.1.x + CRDs requires
 # Envoy Gateway v1.8.1+ / Envoy Proxy v1.38.x, Kubernetes >= 1.32.
 #   - ai-gateway-helm / ai-gateway-crds-helm : v1.1.0
-#   - gateway-helm (control plane of Envoy Gateway) : v1.8.1
+#   - gateway-helm (control plane of Envoy Gateway) : v1.8.1 — the envoy-gateway
+#     HelmRepository for that chart now lives in the aigateway-envoy-gateway
+#     lane, so that lane owns it exclusively (two Flux Kustomizations must not
+#     claim the same flux-system resource).
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: ai-gateway
-  namespace: flux-system
-spec:
-  type: oci
-  interval: 1h
-  url: oci://docker.io/envoyproxy
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: envoy-gateway
   namespace: flux-system
 spec:
   type: oci

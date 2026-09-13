@@ -341,7 +341,7 @@ data:
           # Membership is REQUIRED: when Phase-3 PolicyBindings gate providers
           # to this group, an empty group would deny every user (incl.
           # akadmin) from every app — the lockout this rollout must avoid.
-          users: [akadmin]
+          users: [!Find [authentik_core.user, [username, akadmin]]]
       - model: authentik_core.group
         state: present
         identifiers:

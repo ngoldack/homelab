@@ -146,6 +146,17 @@ Design of the consolidation:
 * VGA-arbitration hazard is handled by the vga rule in `main.tf`: any node
   with hostpci gets `serial0` (no emulated display) — the iGPU-passthrough
   guest once hung at boot with `std` + passed VGA decode concurrently.
+* **Every request path stays site-local.** Cross-site pod reachability over
+  KubeSpan+VXLAN proved unreliable here (host-netns→remote-pod: dead both
+  directions; pod→remote-pod: ~50%), and the gateway data plane is the
+  host-netns cilium-envoy DaemonSet. So: `authentik-server` runs 2 replicas
+  hard-split one-per-node (anti-affinity; `deploymentStrategy` uses
+  maxSurge=0 because a surge pod has no third schedulable node), each site's
+  portal route terminates at a same-node `portal-bridge` nginx, and that
+  bridge dials `authentik-server-local` (`internalTrafficPolicy: Local`).
+  The edge outpost reaches authentik through the same -local Service.
+  Anything NEW that must speak cross-site from a gateway path follows this
+  bridge pattern until mesh routing is properly fixed.
 
 Host prerequisites applied OUTSIDE this repo (recorded here so a rebuilt
 AR900i does not relearn them the hard way): `/etc/systemd/system.conf`

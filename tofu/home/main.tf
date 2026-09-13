@@ -405,6 +405,12 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # build matching this node's own resolved extension set (see
   # local.iso_downloads), not just any ISO on the node's host.
   cdrom {
+    # The ISO is only the live install carrier; the node's OWN schematic is
+    # delivered by machine.install.image (talos.tf). Factory ISOs are NOT
+    # safe to fetch with parallel range downloads — a --ranged assembly
+    # silently dropped the EFI partition of the kata ISO (booted nowhere,
+    # hash self-consistent); single-stream downloads only (see the
+    # hand-download recipe above).
     file_id = proxmox_download_file.talos_iso["${each.value.host}::${each.value.ext_key}"].id
   }
 

@@ -104,27 +104,22 @@ spec:
       # act — create an HTTPRoute, and label its namespace for the Gateway.
       - gateway-httproute
 
-    # SCOPING for split-horizon: this instance must IGNORE the edge Gateway.
-    # Edge hostnames deliberately duplicate internal ones (same app names on
-    # two VIPs); without scoping, the gateway-httproute source would merge
-    # endpoints from both Gateways and flip records like
-    # headlamp.ngoldack.de to the Hetzner address the moment any edge route
-    # exists. The filter is POSITIVE (scope=internal) because external-dns
-    # v0.22.0's --gateway-label-filter parser rejects `!=` outright — the
-    # container dies at startup with: `"!=" is not a valid label selector
-    # operator` (learned live; the chart happily renders it). Consequence:
-    # any FUTURE internal Gateway must carry dns.ngoldack.de/scope=internal
-    # or its records silently stop being published. The internal instance
-    # (Unbound/UniFi webhook, next step) carries the same internal filter
-    # against its own provider; a future public-edge instance uses
-    # scope=public plus the external-dns.kubernetes.io/target annotation on
-    # edge.yaml. Not a first-class chart value in 1.22.0 → extraArgs.
-    # --gateway-label-filter is documented as gateway-scoped and the Gateway
-    # objects DO carry dns.ngoldack.de/scope, yet the binary emitted an empty
-    # desired set through the label path (observed live). --gateway-name is
-    # the blunt, unambiguous equivalent for a single-gateway instance:
-    # publish what `public` serves, nothing else. The future public/edge
-    # instance runs --gateway-name=edge against its own provider.
+    # SCOPING for split-horizon: this instance publishes exactly what the
+    # INTERNAL Gateway (`public`, LAN VIP) serves and ignores the edge one.
+    # Edge hostnames deliberately duplicate internal ones (same apps, two
+    # VIPs); an unscoped gateway-httproute source merges both targets and
+    # flips records like headlamp.ngoldack.de to the Hetzner address the
+    # moment an edge route exists. Two filter attempts, both learned live:
+    # --gateway-label-filter rejects `!=` outright ("is not a valid label
+    # selector operator", container dies at startup; the chart happily
+    # renders it), and its positive form matched NOTHING even with the
+    # label on the Gateway objects — empty desired set, policy:sync deleted
+    # the zone's records. --gateway-name=public is the blunt instrument
+    # that works: one instance per Gateway. The future internal-DNS
+    # instance mirrors it against Unbound/UniFi; a public-edge instance
+    # would use --gateway-name=edge plus the GA target annotation on
+    # network/edge.yaml. Not a first-class chart value in 1.22.0 →
+    # extraArgs.
     extraArgs:
       - --gateway-name=public
     # The apex, not svc.${CLUSTER_DOMAIN}. The subdomain scoping dates from

@@ -688,8 +688,10 @@ datapath already exists, only the VIP registration is new), the
 `authentik/` stack (server+worker on CNPG+valkey-operator at home, Rust
 proxy outpost pinned to the Hetzner node via `nodeSelector`/toleration),
 per-Gateway namespace labels (`public-ingress` vs `edge-ingress`), and
-external-dns instance scoping via `--gateway-label-filter` so an edge route
-can never overwrite an internal record. Edge exposure per app = its own
+external-dns instance scoping via `--gateway-name` (one instance per Gateway —
+`--gateway-label-filter` proved unusable, see
+`kubernetes/infrastructure/home/external-dns/helmrelease.yaml`) so an edge
+route can never overwrite an internal record. Edge exposure per app = its own
 edge HTTPRoute (see `headlamp/httproute-edge.yaml`); authentik resources are
 seeded declaratively from `/blueprints` (`authentik/seed.yaml`).
 

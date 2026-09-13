@@ -34,8 +34,11 @@ data:
       }
       server {
         listen 8081;
-        if ($allowed != 1) { return 401; }
         location /v1/traces {
+          # Auth scoped to the ingest path only, so /health answers 200 even
+          # for probes that carry no token. (A server-scope if would 401 the
+          # health check before location matching runs.)
+          if ($allowed != 1) { return 401; }
           proxy_pass http://phoenix-svc.phoenix.svc.cluster.local:6006/v1/traces;
           proxy_http_version 1.1;
           proxy_set_header Host $host;

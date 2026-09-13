@@ -10,7 +10,7 @@ metadata:
   name: grafana
   namespace: monitoring
   labels:
-    dns.ngoldack.de/publish: lan
+    dns.ngoldack.de/publish: twin
 spec:
   parentRefs:
     - name: public

@@ -39,7 +39,25 @@ spec:
   hostnames:
     - authentik.ngoldack.de
   rules:
-    - backendRefs:
+    - filters:
+        # CrowdSec enforcement at the edge (GEP-1494 ExternalAuth filter,
+        # native Gateway API — no Cilium ext-auth CRD needed). Every request
+        # to the portal is checked against the kdwils ext_authz bouncer
+        # (gRPC, Envoy ext_authz v3); the bouncer streams LAPI decisions and
+        # returns DENIED for a banned IP, ALLOW otherwise. Fail-closed per
+        # spec: if the bouncer is unreachable the portal refuses, which is the
+        # right posture for a login endpoint. The bouncer is pinned to the
+        # Hetzner node (same cloud node as the edge envoy) to keep the dial
+        # node-local. ReferenceGrant for the cross-namespace Service ref lives
+        # in ../crowdsec/ (allow-edge-ext-auth-to-crowdsec-bouncer).
+        - type: ExternalAuth
+          externalAuth:
+            protocol: GRPC
+            backendRef:
+              name: crowdsec-bouncer
+              namespace: crowdsec
+              port: 8080
+      backendRefs:
         # portal-bridge, NOT authentik-server — edge envoy (host-netns) only
         # reaches node-local pods; see portal-bridge.yaml.
         - name: portal-bridge-cloud

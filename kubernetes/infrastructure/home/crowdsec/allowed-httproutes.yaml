@@ -1,0 +1,26 @@
+# ReferenceGrant so the EDGE HTTPRoutes in the app namespaces can reference
+# the crowdsec-bouncer Service across the namespace boundary for their
+# ExternalAuth filter (GEP-1494). Without it the filter's backendRef is refused.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-edge-routes-to-crowdsec-bouncer
+  namespace: crowdsec
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: authentik
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: headlamp
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: hindsight
+  to:
+    - group: ""
+      kind: Service
+      name: crowdsec-bouncer

@@ -78,7 +78,7 @@ spec:
                 echo "envoy-bouncer already registered; nothing to do"
                 exit 0
               fi
-              cscli -c /etc/crowdsec/config.yaml bouncers add envoy-bouncer -k "$BOUNCER_API_KEY"
+              cscli -c /etc/crowdsec/config.yaml bouncers add envoy-bouncer --key "$BOUNCER_API_KEY"
               echo "envoy-bouncer registered"
           volumeMounts:
             - name: crowdsec-config

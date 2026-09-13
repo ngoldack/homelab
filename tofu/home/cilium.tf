@@ -44,6 +44,15 @@ resource "helm_release" "cilium" {
     k8sServicePort       = 7445
     bpf = {
       masquerade = true
+      # Host-netns → Pod traffic must use the kernel routing table (vxlan
+      # device) instead of per-node socket BPF. Without it, cilium-envoy —
+      # which is a hostNetwork DaemonSet — can serve home-cluster backends on
+      # its own node but cannot reach LAN pod IPs from the Hetzner worker:
+      # the edge Gateway's 503 for cross-site backends (authentik portal),
+      # while the outpost→server path worked because that starts in a pod
+      # netns. Pair of machine.sysctls kubespan entries; costs a small
+      # performance loss on host-origin traffic only.
+      hostLegacyRouting = true
     }
     loadBalancer = {
       acceleration = "best-effort"

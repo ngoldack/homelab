@@ -53,9 +53,9 @@ spec:
   upgrade:
     remediation:
       retries: 3
-  dependsOn:
-    - name: cnpg-operator
-      namespace: flux-system
+  # No dependsOn here: 'cnpg-operator' is a Flux Kustomization, not a
+  # HelmRelease — the entry Kustomization (clusters/home/hindsight.yaml)
+  # already waits on it for the CRDs.
   values:
     existingSecret: hindsight-env
     postgresql:

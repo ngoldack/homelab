@@ -1,0 +1,26 @@
+# VMServiceScrapes so vmagent (selectAllByDefault) collects the Hindsight
+# Prometheus metrics: /metrics on the api (8888) and the worker (8889);
+# the control plane (Next.js) exposes none.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: hindsight-api
+  namespace: hindsight
+spec:
+  endpoints:
+    - port: 8888
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: hindsight-worker
+  namespace: hindsight
+spec:
+  endpoints:
+    - port: 8889
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker

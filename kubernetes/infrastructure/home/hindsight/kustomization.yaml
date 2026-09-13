@@ -10,3 +10,4 @@ resources:
   - helmrelease.yaml
   - httproute.yaml
   - httproutes-edge.yaml
+  - vm-scrapes.yaml

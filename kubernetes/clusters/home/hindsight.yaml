@@ -16,6 +16,8 @@ spec:
   dependsOn:
     - name: cnpg-operator
     - name: network
+    # VMServiceScrape CRDs for the metrics scrape (hindsight/vm-scrapes.yaml)
+    - name: monitoring-crds
   sourceRef:
     kind: GitRepository
     name: flux-system

@@ -80,6 +80,12 @@ spec:
         HINDSIGHT_API_LLM_STRATEGY: '{"mode": "failover"}'
         HINDSIGHT_API_LLM_REASONING_EFFORT: none
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
+        # Extraction bundles a large system schema + chunk; upstream first-token
+        # latency plus 4k max_tokens generation busts the chart-default ~60s
+        # budget on a cold gpt-5-nano slot. Raise generously; connect is still
+        # capped so a dead route fails fast.
+        HINDSIGHT_API_LLM_TIMEOUT: "300"
+        HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation
       # LLM chains are long and must not starve recall latency on the API pod.

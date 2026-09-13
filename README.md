@@ -105,27 +105,30 @@ network:
     - 1.1.1.1
   node_ips:
     cp-main: 10.30.0.10
-    wk-main-efficiency: 10.30.0.21
+    wk-main-efficiency: 10.30.0.23
     wk-main-performance: 10.30.0.22
+    wk-main-sandbox: 10.30.0.24
 ```
 
 ### Home node roles and capacity
 
 `pmx-main` (i9-13900HX: 8 P-cores/16 threads = "performance", 16 E-cores =
 "efficiency", 96 GiB installed / 94 GiB usable) runs a **deliberately
-consolidated two-worker fleet**: every VM that is not the P100 box shares one
-general-purpose worker.
+consolidated LAN fleet**: every VM that is not the P100 box shares one
+general-purpose worker, plus a dedicated Kata sandbox worker.
 
 | node | class | threads | RAM | passthrough | taint |
 | --- | --- | --- | --- | --- | --- |
 | `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
 | `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | Intel UHD 770 iGPU | — (general node) |
-| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | Tesla P100 | `dedicated=nvidia` |
+| `wk-main-performance` | performance | 10 (0–9) | 36 GiB | Tesla P100 | `dedicated=nvidia` |
+| `wk-main-sandbox` | performance | 6 (10–15) | 12 GiB | nested KVM (Kata) | `workload.hermes.io/sandbox` |
 
 Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
 82 GiB committed, so the host really keeps ~12 with ARC capped at
-1 GiB). E-threads sum to exactly 14/14 — cp 4 + worker 10 — **adding another
-node means taking capacity from an existing one**.
+1 GiB). E-threads sum to exactly 14/14 — cp 4 + worker 10; P-threads sum to
+exactly 16/16 — perf 10 + sandbox 6 — **adding another node means taking
+capacity from an existing one**.
 
 Design of the consolidation:
 
@@ -137,10 +140,18 @@ Design of the consolidation:
   `workload/media` — e.g. Immich's machine-learning component.
 * The P100 worker keeps a hard `dedicated=nvidia:NoSchedule` (applied by the
   node-taints Flux Job, selected on `instance-type=gpu-worker`); only
-  inference and the builder tolerate it. It stays at 48 GiB because that is
-  the proven-bootable size (64 GiB starved the host — see the tfvars
-  comment), and llama.cpp offload fits; post-consolidation RAM demand grows
-  on the general node, not here.
+  inference and the builder tolerate it. Since the 2026-09-13 sandbox carve
+  it runs 36 GiB / 10 P-threads: llama.cpp offload still fits (27B-Q4
+  weights ~17 GiB + KV) with headroom, and inference is memory-bandwidth
+  bound — see the tfvars comment (the 48 GiB size was kept for proven boot
+  reliability; 64 GiB starved the host).
+* The sandbox worker exists for ONE workload family: Hermes/Agent Sandbox
+  code execution, every sandbox a Kata QEMU microVM with its own guest
+  kernel. It needs nested hardware virtualization on pmx-main
+  (`kvm_intel.nested=Y`, fleet CPU type is already `host`) — `task
+  sandbox:preflight` enforces that before apply. The
+  `workload.hermes.io/sandbox=true:NoSchedule` taint (same node-taints Job)
+  keeps every non-sandbox workload off it.
 * BuildKit is rootless, so the P100 node's machine config raises
   `user.max_user_namespaces` via `machine.sysctls` (Talos ships it at 0 as
   a hardening default; rootless buildkitd refuses to start otherwise).

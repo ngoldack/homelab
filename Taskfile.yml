@@ -195,6 +195,83 @@ tasks:
           TOFU_DIR: tofu/home
           TOFU_ARGS: validate
 
+  sandbox:preflight:
+    desc: Verify pmx-main nested virtualization before creating wk-main-sandbox
+    cmds:
+      - |
+        set -eu
+        # pmx-main is the only fleet hypervisor (94 GiB i9-13900HX), mgmt
+        # IP 10.20.10.21 = tofu/home/terraform.tfvars proxmox_nodes.endpoint
+        # (its bare hostname does not resolve from every LAN client). Kata
+        # sandboxes run real QEMU microVMs inside the Talos guest, so the
+        # host must expose VMX. kvm_intel is the right knob on this Intel
+        # host; on a future AMD host this task must check kvm_amd instead.
+        nested=$(ssh root@10.20.10.21 'cat /sys/module/kvm_intel/parameters/nested' 2>/dev/null || true)
+        if [ "$nested" = "Y" ] || [ "$nested" = "1" ]; then
+          echo "NESTED VIRT OK: kvm_intel.nested=${nested} on pmx-main"
+        else
+          echo "NESTED VIRT NOT ENABLED on pmx-main (10.20.10.21, kvm_intel.nested='${nested:-<unreadable>}') — enable it and reboot before tofu apply" >&2
+          exit 1
+        fi
+
+  kata:smoke:
+    desc: Run the Kata smoke test on the sandbox worker (requires kubeconfig-home.yaml export)
+    cmds:
+      - |
+        set -eu
+        [ -f kubeconfig-home.yaml ]
+        if ! kubectl --kubeconfig kubeconfig-home.yaml get ns hermes-sandbox >/dev/null 2>&1; then
+          echo "hermes-sandbox namespace missing — apply kubernetes/infrastructure/home/hermes-sandbox/namespace.yaml first" >&2
+          exit 1
+        fi
+        kubectl --kubeconfig kubeconfig-home.yaml apply -f - <<'EOF'
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: kata-smoke-test
+          namespace: hermes-sandbox
+        spec:
+          runtimeClassName: kata
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: test
+              image: registry.k8s.io/e2e-test-images/agnhost:2.53
+              command: ["sh", "-c", "uname -a; sleep 90"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+        EOF
+        kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
+          wait --for=condition=Ready --timeout=300s pod/kata-smoke-test
+        node=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
+          get pod kata-smoke-test -o jsonpath='{.spec.nodeName}')
+        sandbox_node=$(kubectl --kubeconfig kubeconfig-home.yaml get nodes \
+          -l node.kubernetes.io/instance-type=sandbox-worker \
+          -o jsonpath='{.items[0].metadata.name}')
+        echo "sandbox_node=$sandbox_node scheduled_on=$node"
+        [ "$node" = "$sandbox_node" ] || { echo "FAIL: not scheduled on sandbox node" >&2; exit 1; }
+        rc=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
+          get pod kata-smoke-test -o jsonpath='{.spec.runtimeClassName}')
+        [ "$rc" = "kata" ] || { echo "FAIL: runtimeClassName=$rc" >&2; exit 1; }
+        uname_out=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox logs kata-smoke-test)
+        echo "guest: $uname_out"
+        echo "$uname_out" | grep -qi talos && { echo "FAIL: guest kernel looks like the Talos host kernel (runc fallback?)" >&2; exit 1; }
+        if kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
+          exec kata-smoke-test -- test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token; then
+          echo "OK: no serviceaccount token in guest"
+        else
+          echo "FAIL: serviceaccount token present" >&2
+          exit 1
+        fi
+        kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
+          exec kata-smoke-test -- ls /dev/kvm >/dev/null 2>&1 \
+          && echo "OK: /dev/kvm visible in guest" \
+          || echo "WARN: /dev/kvm not visible in guest (may be fine — Kata qemu only needs host KVM)"
+        echo "KATA SMOKE OK"
+        kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox delete pod kata-smoke-test --wait=false
+
   tofu:run:
     internal: true
     desc: Run OpenTofu with state encryption configured from SOPS

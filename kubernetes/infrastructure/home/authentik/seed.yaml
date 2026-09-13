@@ -393,3 +393,14 @@ data:
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]
           negate: false
+      # ---- base URL / brand domain ----
+      # The "base URL not configured" banner clears once the default Brand has
+      # its real domain (authentik derives base_url from it; env AUTHENTIK_BASE_URL
+      # is NOT read). Required for correct OIDC + MFA redirect URIs.
+      - model: authentik_brands.brand
+        state: present
+        identifiers:
+          domain: authentik-default
+        attrs:
+          domain: authentik.ngoldack.de
+          default: true

@@ -23,5 +23,7 @@ spec:
     - authentik.ngoldack.de
   rules:
     - backendRefs:
-        - name: authentik-server
-          port: 80
+        # portal-bridge, NOT authentik-server — edge envoy (host-netns) only
+        # reaches node-local pods; see portal-bridge.yaml.
+        - name: portal-bridge
+          port: 9100

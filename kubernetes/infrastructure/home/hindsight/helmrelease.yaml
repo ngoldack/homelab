@@ -88,7 +88,7 @@ spec:
         # latency plus 4k max_tokens generation busts the chart-default ~60s
         # budget on a cold gpt-5-nano slot. Raise generously; connect is still
         # capped so a dead route fails fast.
-        HINDSIGHT_API_LLM_TIMEOUT: "300"
+        HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation

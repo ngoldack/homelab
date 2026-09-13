@@ -12,22 +12,24 @@
 # code), but node.kubernetes.io/instance-type is deterministic — set by tofu
 # from each node's own declared role (see tofu/home/terraform.tfvars).
 #
-# ONE taint since the two-worker consolidation: dedicated=nvidia on the P100
-# box. The efficiency worker is deliberately UNTAINTED — it is the only node
-# general workloads can run on, so a taint there would demand tolerations
-# from everything and isolate nothing; QuickSync workloads PULL themselves
-# onto it via hardware/igpu / workload/media labels instead. The old
+# TWO taints since the sandbox carve: dedicated=nvidia on the P100 box, and
+# workload.hermes.io/sandbox=true on the dedicated sandbox worker
+# (wk-main-sandbox), which only Kata Agent Sandbox pods tolerate. The
+# efficiency worker is deliberately UNTAINTED — it is the only node general
+# workloads can run on, so a taint there would demand tolerations from
+# everything and isolate nothing; QuickSync workloads PULL themselves onto
+# it via hardware/igpu / workload/media labels instead. The old
 # dedicated=ai taint on the same node is replaced in place: same key, same
 # effect, --overwrite swaps the value. The old dedicated=media taint died
 # with its node.
 #
 # Idempotent (--overwrite) and safe to re-run: a Job only actually executes
-# once per unique name. Bumped to -4 (Job specs are immutable; the rename is
-# what makes Flux recreate it; prune removes the -3 predecessor).
+# once per unique name. Bumped to -5 (Job specs are immutable; the rename is
+# what makes Flux recreate it; prune removes the -4 predecessor).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: node-taints-4
+  name: node-taints-5
   namespace: kube-system
 spec:
   backoffLimit: 3
@@ -48,4 +50,14 @@ spec:
             - -l
             - node.kubernetes.io/instance-type=gpu-worker
             - dedicated=nvidia:NoSchedule
+            - --overwrite
+        - name: taint-sandbox
+          image: rancher/kubectl:v1.36.2
+          command: ["kubectl"]
+          args:
+            - taint
+            - nodes
+            - -l
+            - node.kubernetes.io/instance-type=sandbox-worker
+            - workload.hermes.io/sandbox=true:NoSchedule
             - --overwrite

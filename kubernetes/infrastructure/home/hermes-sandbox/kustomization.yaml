@@ -1,0 +1,8 @@
+# hermes-sandbox — Kata sandbox namespace: PSA-restricted namespace, the
+# Kata RuntimeClass, the runtime image template + warm pool, and Cilium
+# default-deny (sandboxes may only talk to DNS + approved mirrors/endpoints).
+# Order matters: namespace first (references below assume it exists).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml

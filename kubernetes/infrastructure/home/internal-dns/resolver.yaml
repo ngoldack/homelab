@@ -56,6 +56,7 @@ data:
     immich              IN  A   10.30.0.200
     grafana             IN  A   10.30.0.200
     registry            IN  A   10.30.0.200
+    zot                 IN  A   10.30.0.200
     headlamp            IN  A   10.30.0.200
     authentik           IN  A   10.30.0.200
     *.svc               IN  A   10.30.0.200

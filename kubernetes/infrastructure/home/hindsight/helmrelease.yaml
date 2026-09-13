@@ -44,6 +44,12 @@ spec:
       retries: 3
   upgrade:
     remediation:
+      # Once the release latches "failed" (a transient sts-health blip marked
+      # every history entry failed across the model swap), a plain retry won't
+      # move off it because there's no "last successful" to roll back to.
+      # Force replacement of the current (failed) revision's helm state on the
+      # next reconcile; the deployed resources are already healthy.
+      remediateLastFailure: true
       retries: 3
   # No dependsOn here: 'cnpg-operator' is a Flux Kustomization, not a
   # HelmRelease — the entry Kustomization (clusters/home/hindsight.yaml)

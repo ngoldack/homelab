@@ -1,0 +1,22 @@
+# Node-local portal service: internalTrafficPolicy: Local makes the socket-LB
+# resolve ONLY node-local server endpoints. With the server pair hard-split
+# one-per-node (helmrelease anti-affinity), every caller that goes through
+# this Service — the portal bridges — deterministically gets the local pod,
+# instead of a round-robin coin-flip onto a cross-site pod the overlay here
+# cannot reliably carry (edge portal 503 flapped ~50%: the endpoint lottery).
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-server-local
+  namespace: authentik
+spec:
+  internalTrafficPolicy: Local
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: authentik
+    app.kubernetes.io/name: authentik
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

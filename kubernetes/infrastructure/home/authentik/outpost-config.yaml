@@ -9,6 +9,6 @@ metadata:
   name: authentik-outpost-config
   namespace: authentik
 data:
-  AUTHENTIK_HOST: http://authentik-server.authentik.svc.cluster.local
+  AUTHENTIK_HOST: http://authentik-server-local.authentik.svc.cluster.local
   AUTHENTIK_HOST_BROWSER: https://authentik.ngoldack.de
   AUTHENTIK_INSECURE: "false"

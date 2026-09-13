@@ -12,6 +12,7 @@ resources:
   - outpost-config.yaml
   - outpost-token.yaml
   - outpost.yaml
+  - server-service-local.yaml
   - portal-bridge.yaml
   - httproutes.yaml
   - httproutes-edge.yaml

@@ -25,5 +25,5 @@ spec:
     - backendRefs:
         # portal-bridge, NOT authentik-server — edge envoy (host-netns) only
         # reaches node-local pods; see portal-bridge.yaml.
-        - name: portal-bridge
+        - name: portal-bridge-cloud
           port: 9100

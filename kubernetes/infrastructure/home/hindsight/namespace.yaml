@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hindsight
+  labels:
+    # LAN-only surface: the API + UI are served by the internal Gateway
+    # (10.30.0.200) under publish=lan. No edge-ingress label on purpose —
+    # the self-hosted API has no auth layer of its own (tenant extensions
+    # are the multi-tenant story), so it stays on the trusted network.
+    gateway.ngoldack.de/public-ingress: "true"

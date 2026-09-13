@@ -1,0 +1,29 @@
+# Hindsight agent memory: local LLM (qwen3-27b) + CNPG + pgvector, LAN-only.
+# Depends on cnpg-operator for the Cluster/Database CRDs and on network for
+# the Gateway its routes attach to (same edges as immich/authentik).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: hindsight
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/hindsight
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

@@ -1,0 +1,19 @@
+# Creates the extensions inside the hindsight database (CNPG Database CR,
+# the immich pattern). Hindsight's migrations expect vector (semantic recall)
+# and pg_trgm (entity resolution's trigram match) to exist; the app role is
+# not a superuser, so the operator creates them with ensure: present.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: hindsight-database
+  namespace: hindsight
+spec:
+  name: hindsight
+  owner: hindsight
+  cluster:
+    name: hindsight-database
+  extensions:
+    - name: vector
+      ensure: present
+    - name: pg_trgm
+      ensure: present

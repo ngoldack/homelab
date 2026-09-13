@@ -33,3 +33,5 @@ resources:
   # Gateway its routes attach to.
   - valkey-operator.yaml
   - authentik.yaml
+  # Hindsight agent memory: local LLM + CNPG/pgvector, LAN-only surface.
+  - hindsight.yaml

@@ -1,0 +1,83 @@
+# Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
+# Self-hosted after the Hindsight Cloud credits ran out; the client just
+# repoints base_url.
+#
+# LLM: local-first. The primary (and only) model is the cluster's own
+# qwen3-27b llama.cpp server over the OpenAI-compatible API — no key, no
+# cloud, no rate limit. REASONING_EFFORT=none stops Qwen3's thinking blocks
+# (hindsight needs clean JSON, and reasoning tokens burn the 8k context);
+# STRICT_SCHEMA grammar-enforces structured output, which the docs recommend
+# for self-hosted models that emit prose preambles.
+#
+# Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
+# ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and
+# they need no GPU. The model files (~200 MB) re-download into the container
+# cache on pod restart — accepted; the alternative is a RWO PVC that pins the
+# pods to one node for a 30-second download.
+#
+# DB: CNPG (hindsight-database + the Database CR that owns vector/pg_trgm),
+# password shared with the chart via existingSecret (key postgres-password).
+# The chart's bundled ankane/pgvector subchart is OFF — every relational store
+# here runs on the CNPG operator.
+#
+# metrics.serviceMonitor stays false: those are prometheus-operator CRDs this
+# cluster does not have (the stack is VictoriaMetrics); VMServiceScrapes in
+# monitoring/ scrape api:8888 and worker:8889 directly.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hindsight
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: hindsight
+      version: "0.9.2"
+      sourceRef:
+        kind: HelmRepository
+        name: hindsight
+      interval: 1h
+  targetNamespace: hindsight
+  releaseName: hindsight
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  dependsOn:
+    - name: cnpg-operator
+      namespace: flux-system
+  values:
+    existingSecret: hindsight-env
+    postgresql:
+      enabled: false
+      external:
+        host: hindsight-database-rw
+        port: 5432
+        database: hindsight
+        username: hindsight
+    api:
+      env: &llm-env
+        HINDSIGHT_API_LLM_PROVIDER: openai
+        HINDSIGHT_API_LLM_BASE_URL: http://qwen3-27b.llmkube-system.svc.cluster.local:8080/v1
+        HINDSIGHT_API_LLM_MODEL: qwen3.8-27b
+        HINDSIGHT_API_LLM_REASONING_EFFORT: none
+        HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
+    worker:
+      # Dedicated workers (not the API's internal one): retain/consolidation
+      # LLM chains are long and must not starve recall latency on the API pod.
+      enabled: true
+      replicaCount: 1
+      # The worker runs the LLM calls for retain — it needs the same model
+      # config, and the chart does NOT merge api.env into the worker.
+      env: *llm-env
+    controlPlane:
+      enabled: true
+    nodeSelector:
+      topology.homelab/site: home
+    podDisruptionBudget:
+      enabled: false

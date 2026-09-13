@@ -210,3 +210,25 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# Hindsight's PostgreSQL data directory (../hindsight/). Same NFS-until-
+# NVMe-oF caveat as the immich database; small store, so the frequent-snapshot
+# schedule is copied from there — losing it loses the agent memories' index.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-hindsight-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/hindsight/database"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

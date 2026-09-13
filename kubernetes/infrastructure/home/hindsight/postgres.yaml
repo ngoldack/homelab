@@ -1,0 +1,38 @@
+# Hindsight's Postgres, CloudNativePG like every other relational store here.
+#
+# The app role/database are named hindsight (not the CNPG default "app") and
+# the password comes from OUR secret (postgres-credentials.sops.yaml) via
+# bootstrap.initdb.secret — the same literal password also feeds the chart's
+# existingSecret (key postgres-password), so nothing is auto-generated and a
+# drift between the two fails loudly at connect time (see authentik/postgres.yaml
+# for the identical reasoning).
+#
+# pgvector + pg_trgm ship inside 18-standard-trixie (verified against the live
+# immich-database-1: pg_available_extensions lists both); the CREATE EXTENSION
+# itself is reconciled by the Database CR (database.yaml), the immich pattern.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: hindsight-database
+  namespace: hindsight
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  bootstrap:
+    initdb:
+      database: hindsight
+      owner: hindsight
+      secret:
+        name: hindsight-database-credentials
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nfs-hindsight-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

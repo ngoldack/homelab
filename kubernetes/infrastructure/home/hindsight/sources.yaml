@@ -1,0 +1,10 @@
+# The Hindsight chart is published as an OCI artifact next to the images.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: hindsight
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/vectorize-io/charts

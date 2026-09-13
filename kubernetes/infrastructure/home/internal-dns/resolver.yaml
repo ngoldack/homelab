@@ -22,10 +22,20 @@ metadata:
   namespace: internal-dns
 data:
   Corefile: |
-    ngoldack.de:53 {
-        # TTL comes from $TTL inside the zone file; the file plugin itself
-        # takes only the root path (no ttl parameter — parsing dies on it).
-        file /etc/coredns/db.ngoldack.de
+    # Canonical k8s ordering: the `.` catch-all block FIRST, specific zone
+    # blocks after. (Measured: with the specific block first, CoreDNS 1.14.7
+    # dispatched ngoldack.de queries to the `.` chain — everything forwarded,
+    # the file zone never consulted.)
+    .:5353 {
+        forward . /etc/resolv.conf
+        cache 30
+        errors
+        health :8081
+        prometheus :9253
+    }
+    ngoldack.de:5353 {
+        # single zone file, explicit zone name; TTL lives in $TTL inside it
+        file /etc/coredns/db.ngoldack.de ngoldack.de
         errors
         log
         health :8080 {
@@ -33,13 +43,6 @@ data:
         }
         ready
         prometheus :9153
-    }
-    .:53 {
-        forward . /etc/resolv.conf
-        cache 30
-        errors
-        health :8081
-        prometheus :9253
     }
   db.ngoldack.de: |
     $TTL 5
@@ -98,10 +101,11 @@ spec:
             httpGet:
               path: /health
               port: 8080
+          # `ready` without an address listens on :8181 (NOT the health port)
           readinessProbe:
             httpGet:
               path: /ready
-              port: 8080
+              port: 8181
           resources:
             requests:
               cpu: 10m

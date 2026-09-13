@@ -59,11 +59,20 @@ spec:
       storageClass: truenas-fast-nfs-llmkube-models
       accessMode: ReadWriteOnce
 
-    # The operator itself is a controller — it does no inference and must stay
-    # off the Hetzner ingress node.
+    # Pinned to the GPU worker, NOT just site=home: the model cache PVC is
+    # ReadWriteOnce and the inference pods schedule there, so the controller
+    # (which mounts the cache too, for model bookkeeping) must share that
+    # node — RWO across KubeSpan mounts fine, RWO across NODES is a
+    # Multi-Attach error that left the first inference rollout stuck in
+    # Init forever. Toleration clears dedicated=nvidia.
     controllerManager:
       nodeSelector:
-        topology.homelab/site: home
+        hardware/gpu.model: Tesla-P100
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: nvidia
+          effect: NoSchedule
 
     # The chart ships Grafana dashboards and labels them grafana_dashboard,
     # which is exactly what the Grafana sidecar in ../monitoring/ watches — so

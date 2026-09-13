@@ -20,4 +20,4 @@ spec:
     - backendRefs:
         - name: authentik-proxy
           namespace: authentik
-          port: 9100
+          port: 9000

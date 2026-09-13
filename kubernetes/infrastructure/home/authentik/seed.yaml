@@ -56,6 +56,15 @@ data:
       # authentik ships NO groups scope mapping (verified live: the default
       # set is openid/profile/email/proxy-outpost/entitlements/...); define
       # one so Grafana's role_attribute_path sees membership.
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          name: grafana-edge
+        attrs:
+          slug: grafana-edge
+          meta_icon: application/default
+          launch_url: https://grafana.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
       - model: authentik_outposts.outpost
         state: present
         identifiers:

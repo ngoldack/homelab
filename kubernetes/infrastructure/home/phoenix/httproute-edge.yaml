@@ -1,0 +1,27 @@
+# phoenix.ngoldack.de on the EDGE path, through the authentik outpost — the
+# external LLM-traces UI is identity-gated like hindsight-ui/headlamp. The
+# outpost (authentik-proxy:9000) authenticates then forwards to phoenix-svc
+# (the proxy provider's internal_host, on the app port 6006).
+#
+# Distinct from httproute.yaml (the LAN/public .200 path, outpost-free):
+# httproute.yaml binds the `public` Gateway for in-LAN direct access, this
+# binds the `edge` Gateway for external ingress. Cross-namespace backend to
+# authentik-proxy is pre-authorized by the ReferenceGrant in
+# ../authentik/httproutes-edge.yaml (which lists namespace phoenix).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: phoenix-edge
+  namespace: phoenix
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - phoenix.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000

@@ -8,6 +8,7 @@ resources:
   - sources.yaml
   - helmrelease.yaml
   - httproute.yaml
+  - httproute-edge.yaml
   - httproute-otlp.yaml
   - otlp-gate.yaml
   - otlp-secret.sops.yaml

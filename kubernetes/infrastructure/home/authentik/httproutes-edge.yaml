@@ -21,6 +21,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       namespace: hindsight
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: phoenix
   to:
     - group: ""
       kind: Service

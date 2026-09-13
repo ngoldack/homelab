@@ -615,6 +615,45 @@ LAN only:     client → Hetzner DNS → 10.30.0.200 → Cilium Gateway (`public
              :443 → HTTPRoute → pod   (immich, registry — no auth hop)
 ```
 
+### Authentication — how SSO reaches every app (authentik)
+
+Authentik is the single identity provider and edge authorizer. Two distinct
+paths exist, and an app takes exactly one:
+
+| Path | Apps | How login works |
+| ---- | ---- | ---- |
+| **Edge outpost (proxy)** | headlamp, grafana (UI), hindsight-ui | browser hits the edge Gateway → the Rust **proxy outpost** (pin to the Hetzner cloud node) checks the authentik session, redirects unknown users to the authentik login flow, then proxies to the app's pod over KubeSpan |
+| **OIDC federation** | grafana | the app's own login page redirects to authentik (`/application/o/authorize`), authentic validates, returns a code, the app exchanges it at `/application/o/token/` for an id token + access token (no outpost in the path) |
+
+```mermaid
+sequenceDiagram
+  participant B as Browser / SDK
+  participant E as Edge Gateway (Cilum envoy, cloud)
+  participant A as Authentik
+  participant O as Proxy outpost (cloud)
+  participant P as App pod (home)
+  B->>A: 1. request app.ngoldack.de
+  B->>E: TLS at edge listener
+  E->>O: HTTPRoute -> outpost (proxy provider vhost)
+  O-->>A: no session? -> login flow (RD2)
+  A-->>B: login screen (identify + password + TOTOD/MFA)
+  B-->>A: credentials
+  A-->>O: session cookie issued
+  O->>P: proxies request (upstream = app Service)
+  P-->>B: response
+```
+```mermaid
+flowchart LR
+  subgraph Home[Home LAN + Hetzner]
+    N1[N1 home] --- N2[N2 home] --- N3[N3 home] --- N4[N4 home]
+    N1 ~~~ C[cloud worker]
+  end
+  C -- KubeSpan mesh (WireGuard) --- N1
+  C ---|edge Gateway 2.28.31.116| E[App via authentik]
+  G[Grafana] --OIDC--> A[Authentik]
+  A ---|Cert / flows| G
+  P[Phoenix / Hindsight / LLM] --OTLP--> Ob[Observability]
+```
 - Envoy is an ordinary **pod**, not a host-network bind:
   `gatewayAPI.hostNetwork.enabled` is `false` in `tofu/home/cilium.tf`. It
   used to be on, binding 443 on the Hetzner worker — from that host network

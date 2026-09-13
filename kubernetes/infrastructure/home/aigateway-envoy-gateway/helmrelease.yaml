@@ -38,11 +38,11 @@ spec:
     # release (crds-helmrelease.yaml in this lane) plus tofu's gateway-api-crds.
     # This chart's bundled crds/ (gateway-api bundle v1.5.1) would otherwise
     # collide with tofu's v1.6.1 copies (tcproutes storedVersions rejection).
-    skipCRDs: true
+    crds: Skip
     remediation:
       retries: 3
   upgrade:
-    skipCRDs: true
+    crds: Skip
     remediation:
       retries: 3
   values:

@@ -1,0 +1,29 @@
+# KeeperCluster for langfuse's ClickHouse: the coordinator KeeperNode that the
+# ClickHouseCluster's keeperClusterRef points at (the operator runs Keeper via
+# this separate CR; ClickHouse itself needs a Keeper coordinator). Single
+# replica, small footprint, home node.
+apiVersion: clickhouse.com/v1alpha1
+kind: KeeperCluster
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  replicas: 1
+  containerTemplate:
+    image:
+      repository: clickhouse/clickhouse-keeper
+      tag: 25.7-alpine
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+  podTemplate:
+    nodeSelector:
+      topology.homelab/site: home
+  dataVolumeClaimSpec:
+    resources:
+      requests:
+        storage: 1Gi
+    storageClassName: truenas-fast-nfs

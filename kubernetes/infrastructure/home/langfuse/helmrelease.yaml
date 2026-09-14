@@ -13,11 +13,12 @@
 #                  valkey-langfuse.langfuse.svc.cluster.local:6379, no password
 #                  (ACL-based auth off; redis.auth.password: null -> REDIS_PASSWORD
 #                  omitted and the connection string carries no auth part).
-#   - ClickHouse-> EXTERNAL host only: clickhouse-langfuse.langfuse.svc.cluster.local:9000,
+#   - ClickHouse-> EXTERNAL host only: langfuse-clickhouse-headless.langfuse.svc.cluster.local:9000,
 #                  ClickHouseCluster CR is owned by the separate
 #                  clickhouse-operator Kustomization (dependsOn below), so no CR
 #                  is created here — values reference the expected svc/port so it
-#                  wires up once that lands.
+#                  wires up once that lands. Hostname is the operator's
+#                  `<name>-clickhouse-headless` headless Service for cluster `langfuse`.
 #   - S3         -> SeaweedFS, bundled allInOne (s3.deploy: true), keeping the
 #                  chart's happy path (auto credentials + bucket hook) — the
 #                  simplest self-contained delivery.
@@ -87,8 +88,13 @@ spec:
       auth:
         # No username/password login: authentik is the only way in.
         disableUsernamePassword: true
-      # Global env merged into both the web and worker deployments → these are
-      # the authentik OIDC vars the chart's provider allowlist cannot express.
+      # Global env merged into both the web and worker deployments. Holds the
+      # authentik OIDC vars the chart's provider allowlist cannot express, plus
+      # CLICKHOUSE_PASSWORD (the chart only emits that var when a non-empty
+      # password or existingSecret is set — an empty value here guarantees the
+      # var exists for the migration stage without enabling auth). Names may
+      # not collide with vars the chart renders from the {postgresql,redis,
+      # clickhouse,s3}.auth.* values or validations.yaml fails loudly.
       additionalEnv:
         - name: AUTH_AUTHENTIK_CLIENT_ID
           value: langfuse-oidc
@@ -99,6 +105,10 @@ spec:
               key: AUTH_AUTHENTIK_CLIENT_SECRET
         - name: AUTH_AUTHENTIK_ISSUER
           value: https://authentik.ngoldack.de/application/o/langfuse
+        # Passwordless external ClickHouse: emit the var (empty) so the app's
+        # migration stage doesn't hard-fail on an absent env var.
+        - name: CLICKHOUSE_PASSWORD
+          value: ""
       # Small/normal resources: web + worker keep modest requests, a ceiling
       # that suits the single-node home cluster.
       replicas: 1
@@ -151,13 +161,19 @@ spec:
     # non-clustered external server, and nativePort feeds CLICKHOUSE_MIGRATION_URL.
     clickhouse:
       deploy: false
-      host: clickhouse-langfuse.langfuse.svc.cluster.local
+      host: langfuse-clickhouse-headless.langfuse.svc.cluster.local
       httpPort: 8123
       nativePort: 9000
       database: default
       cluster:
         enabled: false
       auth:
+        # External ClickHouse, passwordless `default` user (the CR omits
+        # settings.defaultUserPassword so the operator renders `no_password`).
+        # Leave auth.password/existingSecret UNSET — the chart otherwise emits
+        # CLICKHOUSE_PASSWORD itself and collides with the additionalEnv
+        # override below (validations.yaml). The var is provided via
+        # langfuse.additionalEnv instead.
         username: default
     # Download/binary uploads go to the chart-bundled SeaweedFS in allInOne mode
     # (s3.deploy: true) on the default `langfuse` bucket. Keeping the bundled

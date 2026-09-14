@@ -6,6 +6,8 @@ resources:
   - postgres.yaml
   - database.yaml
   - valkey.yaml
+  - clickhouse.yaml
+  - keeper.yaml
   - langfuse-secret.sops.yaml
   - sources.yaml
   - helmrelease.yaml

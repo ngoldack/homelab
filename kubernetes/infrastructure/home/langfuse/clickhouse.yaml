@@ -1,0 +1,52 @@
+# Minimal ClickHouseCluster (clickhouse-operator v0.0.7) for langfuse: a single
+# non-replicated server on the home node.
+#
+# Field names verified against the live CRD (`kubectl get crd
+# clickhouseclusters.clickhouse.com`). NOTE this operator's API differs from
+# the Altinity one: no configuration/templates sections; the client-facing
+# Service is `<name>-clickhouse-headless.<ns>.svc.cluster.local`.
+#
+# `keeperClusterRef` references the operator-managed KeeperCluster named
+# `langfuse` (the ClickHouseCluster CR does not run Keeper itself; the
+# KeeperCluster CR is owned by the clickhouse-operator Kustomization). Required
+# by schema — every ClickHouseCluster points at a coordinator KeeperCluster.
+#
+# Password: `spec.settings.defaultUserPassword` is intentionally OMITTED. The
+# operator then renders the `default` ClickHouse user with `no_password`
+# (templates/users.yaml.tmpl), which is exactly the passwordless access
+# langfuse expects (clickhouse.auth.username: default, no password). Setting
+# it would instead emit a CLICKHOUSE_DEFAULT_USER_PASSWORD env via
+# secretKeyRef/configMapKeyRef into the server container.
+#
+# Storage: a single 5Gi PVC claim on the homelab truenas-fast-nfs StorageClass,
+# consistent with the other home workloads.
+apiVersion: clickhouse.com/v1alpha1
+kind: ClickHouseCluster
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  shards: 1
+  replicas: 1
+  containerTemplate:
+    image:
+      repository: clickhouse/clickhouse-server
+      tag: 25.7-alpine
+    # Small/normal resources: modest requests with a memory ceiling that suits
+    # the single-node home cluster.
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+  podTemplate:
+    nodeSelector:
+      topology.homelab/site: home
+  keeperClusterRef:
+    name: langfuse
+  dataVolumeClaimSpec:
+    resources:
+      requests:
+        storage: 5Gi
+    storageClassName: truenas-fast-nfs

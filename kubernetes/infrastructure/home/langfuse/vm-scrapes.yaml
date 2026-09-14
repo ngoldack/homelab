@@ -1,0 +1,20 @@
+# VMServiceScrape so vmagent collects langfuse web metrics into the existing
+# VictoriaMetrics stack. Langfuse's Next.js web server exposes a Prometheus
+# metrics endpoint at /api/public/metrics on the app port 3000 (the langfuse-web
+# Service's only port, name `http`; no dedicated metrics port exists). Matches
+# the phoenix scrape pattern (port-name endpoint + namespaceSelector pin).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  endpoints:
+    - port: http
+      path: /api/public/metrics
+  selector:
+    matchLabels:
+      app: web
+  namespaceSelector:
+    matchNames:
+      - langfuse

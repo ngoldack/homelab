@@ -7,6 +7,7 @@ resources:
   - postgres.yaml
   - secret.sops.yaml
   - oidc-grafana.sops.yaml
+  - oidc-langfuse.sops.yaml
   - seed.yaml
   - helmrelease.yaml
   - outpost-config.yaml

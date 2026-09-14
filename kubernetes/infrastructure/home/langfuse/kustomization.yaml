@@ -11,3 +11,5 @@ resources:
   - langfuse-secret.sops.yaml
   - sources.yaml
   - helmrelease.yaml
+  - httproute-edge.yaml
+  - vm-scrapes.yaml

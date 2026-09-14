@@ -65,9 +65,18 @@ spec:
         - name: seed-secrets
           secret:
             secretName: authentik-oidc-grafana
+        # Langfuse's OIDC client secret, read via !File /secrets-langfuse/…
+        # in the same seed. Kept on its own path (not /secrets) because the
+        # grafana secret already occupies that mount.
+        - name: seed-secrets-langfuse
+          secret:
+            secretName: authentik-oidc-langfuse
       volumeMounts:
         - name: seed-secrets
           mountPath: /secrets
+          readOnly: true
+        - name: seed-secrets-langfuse
+          mountPath: /secrets-langfuse
           readOnly: true
     server:
       # 2 replicas, NOT site-pinned, tolerating the ingress taint: the edge

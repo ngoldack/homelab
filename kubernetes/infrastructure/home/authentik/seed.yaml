@@ -206,7 +206,12 @@ data:
         identifiers:
           name: langfuse-oidc
         attrs:
-          client_id: langfuse
+          # client_id MUST match the AUTH_AUTHENTIK_CLIENT_ID env in
+          # langfuse/helmrelease.yaml (langfuse-oidc): NextAuth sends it to
+          # authentik's authorize/token endpoints, so a mismatch breaks the
+          # handshake with invalid_client. The application slug below
+          # (langfuse) is what shapes the issuer /application/o/langfuse.
+          client_id: langfuse-oidc
           client_type: confidential
           client_secret: !File /secrets-langfuse/client_secret
           # grant_types MUST be pinned (see the grafana-oidc comment): an empty
@@ -452,13 +457,18 @@ data:
           group: !Find [authentik_core.group, [name, akadmin]]
           negate: false
       # ---- login brute-force defense (ReputationPolicy) ----
-      # Declarative home for the live-created `homelab-login-bruteforce` policy.
-      # Bound at FLOW level with `negate: true`: ReputationPolicy.passes() returns
-      # `score <= threshold` (e.g. clean score 0 <= -5 = False), so negate=false
-      # made default-authentication-flow NON-applicable for every clean client —
-      # authorize 404'd for all apps (handle_no_permission -> Http404). Negated,
-      # clean clients pass (policy False -> negated True), genuinely suspicious
-      # clients are blocked.
+      # Declarative home for the live-created `homelab-login-bruteforce` policy
+      # AND its flow-level binding. The policy is re-imported idempotently here;
+      # the binding is NOT declared: a PolicyBinding's natural identifier is the
+      # unique (policy, target, order) set, and a `state: present` binding whose
+      # identifiers don't resolve to the existing row forces a blind CREATE that
+      # collides with the live binding — which aborts the WHOLE blueprint import
+      # the moment the blueprint file's hash changes (every future seed edit
+      # would break). The binding therefore persists live only (set once via the
+      # UI/manually, negate=true so clean clients' score 0 <= -5 = False negates
+      # to True = applicable; suspicious IPs blocked). See commits 50cd960
+      # (same drop-for-health fix) and 3a725a4 (which re-added it and re-latent-
+      # bugged the seed).
       - model: authentik_policies_reputation.reputationpolicy
         state: present
         identifiers:
@@ -467,14 +477,6 @@ data:
           check_ip: true
           check_username: true
           threshold: -5
-      - model: authentik_policies.policybinding
-        state: present
-        identifiers:
-          target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          order: 0
-        attrs:
-          policy: !Find [authentik_policies_reputation.reputationpolicy, [name, homelab-login-bruteforce]]
-          negate: true
       # ---- base URL / brand domain ----
       # The "base URL not configured" banner clears once the default Brand has
       # its real domain (authentik derives base_url from it; env AUTHENTIK_BASE_URL

@@ -46,5 +46,6 @@ resources:
   # on it; hermes (the gateway StatefulSet) depends on both.
   - agent-sandbox.yaml
   - hermes-sandbox.yaml
+  - hermes.yaml
   # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
   - homelab-infra-metrics.yaml

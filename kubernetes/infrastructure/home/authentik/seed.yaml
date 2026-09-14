@@ -38,7 +38,7 @@ data:
           external_host: https://headlamp.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       # ---------- hindsight control-plane UI behind the edge outpost ----------
       # The owning application is what gives the outpost its vhost (learned
@@ -56,7 +56,7 @@ data:
           external_host: https://hindsight-ui.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -85,7 +85,7 @@ data:
           external_host: https://phoenix.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -106,7 +106,7 @@ data:
           external_host: https://grafana.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       # ---------- grafana via OIDC (app federates, no outpost) ----------
       # authentik ships NO groups scope mapping (verified live: the default
@@ -183,7 +183,7 @@ data:
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -291,14 +291,18 @@ data:
           name: mfa-validate
         attrs:
           device_classes: [webauthn, totp, static]
-          # skip during phase 1 (no lockout); NOW configure (phase 3): MFA enforced,
-          # unconfigured users routed to configuration_stages enrollment.
-          not_configured_action: configure
-          # REQUIRED before flipping to 'configure': the enrollment STAGES
-          # (M2M, not a flow) an unconfigured user is routed to. Without these
-          # populated, not_configured_action=configure strands unenrolled users
-          # at this stage with no enrollment path.
-          configuration_stages: [!KeyOf webauthn-enroll, !KeyOf totp-enroll, !KeyOf recovery-enroll]
+          # NOT enforced during the live rollback: providers stay on the stock
+          # flow until the MFA flow is fully proven. `configure` strands users
+          # if configuration_stages doesn't match the enrolled device's stage;
+          # akadmin's passkey lives on the STOCK default-authenticator-webauthn-setup,
+          # so point configuration_stages there (not custom stages).
+          not_configured_action: skip
+          # 2026.8 routes unconfigured users to these enrollment STAGES (M2M).
+          # Match the stock stage the device was enrolled against.
+          configuration_stages:
+            - !Find [authentik_flows.stage, [name, default-authenticator-webauthn-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-totp-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-static-setup]]
       - id: mfa-identification
         model: authentik_stages_identification.identificationstage
         state: present

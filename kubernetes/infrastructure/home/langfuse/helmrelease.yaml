@@ -105,10 +105,13 @@ spec:
               key: AUTH_AUTHENTIK_CLIENT_SECRET
         - name: AUTH_AUTHENTIK_ISSUER
           value: https://authentik.ngoldack.de/application/o/langfuse
-        # Passwordless external ClickHouse: emit the var (empty) so the app's
-        # migration stage doesn't hard-fail on an absent env var.
+        # ClickHouse `default` user runs no_password (the CR omits
+        # settings.defaultUserPassword), so auth is off server-side — but the
+        # app's migration stage hard-fails on an EMPTY CLICKHOUSE_PASSWORD
+        # ("Error: CLICKHOUSE_PASSWORD is not set", it tests non-empty, not
+        # presence). Supply a dummy non-empty value; the server ignores it.
         - name: CLICKHOUSE_PASSWORD
-          value: ""
+          value: "x-no-password"
       # Small/normal resources: web + worker keep modest requests, a ceiling
       # that suits the single-node home cluster.
       replicas: 1
@@ -176,15 +179,18 @@ spec:
         # langfuse.additionalEnv instead.
         username: default
     # Download/binary uploads go to the chart-bundled SeaweedFS in allInOne mode
-    # (s3.deploy: true) on the default `langfuse` bucket. Keeping the bundled
-    # store is the simplest self-contained delivery and matches the chart's
-    # happy path (auto-provisions credentials + bucket hook). No external pool.
+    # (s3.deploy: true) on the default `langfuse` bucket — the chart's happy
+    # path (auto-provisions credentials + bucket hook), self-contained.
     s3:
       deploy: true
       # The bundled SeaweedFS allInOne pod needs a real StorageClass for its
-      # data PVC (the chart default is empty -> PVC never binds -> whole stack
-      # blocks on "unbound PVC"). Use the repo's truenas-fast-nfs and a modest
-      # size (default is 50Gi — overkill for a homelab).
-      dataStorage:
-        size: 10Gi
-        storageClass: truenas-fast-nfs
+      # data PVC. Persistence lives under s3.allInOne.data.* (the sub-chart's
+      # all-in-one-pvc.yaml reads those keys) — NOT s3.dataStorage, which no
+      # template consumes (the earlier dataStorage block was silently ignored,
+      # so the PVC rendered with storageClass "" and never bound, leaving the
+      # s3 pod Pending on "persistentvolumeclaim not found"). truenas-fast-nfs
+      # + a modest size (the chart default is 50Gi — overkill for a homelab).
+      allInOne:
+        data:
+          size: 10Gi
+          storageClass: truenas-fast-nfs

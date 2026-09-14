@@ -32,7 +32,11 @@ spec:
     storageClass: truenas-fast-nfs-hindsight-database
   resources:
     requests:
-      cpu: 100m
+      # Raised from 100m: fact count grows from ~3k into the tens of thousands
+      # and pgvector HNSW index maintenance is CPU-bound. 500m request keeps it
+      # schedulable and leaves headroom for the vector build without starving
+      # other home workloads (requests are what the scheduler guarantees).
+      cpu: 500m
       memory: 512Mi
     limits:
       memory: 2Gi

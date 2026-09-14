@@ -85,14 +85,34 @@ spec:
         # capped so a dead route fails fast.
         HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
+        # Audit logging off by default; enable so the ingest paths are auditable.
+        HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation
       # LLM chains are long and must not starve recall latency on the API pod.
       enabled: true
-      replicaCount: 1
-      # The worker runs the LLM calls for retain — it needs the same model
-      # config, and the chart does NOT merge api.env into the worker.
-      env: *llm-env
+      # Ingest throughput scaling: a single worker serializes every
+      # retain/consolidation chain — the measured bottleneck (LLM call ~3s but
+      # end-to-end 9-14s/diff; 212s under contention). 3 allow parallel chains.
+      # Chart default is 2; we were below it at 1.
+      replicaCount: 3
+      # env written out IN FULL (not `*llm-env`): a YAML anchor substitutes the
+      # whole map and cannot be appended to. The worker needs the same model
+      # config (the chart does NOT merge api.env into the worker) PLUS its
+      # batch/poll tunables.
+      env:
+        HINDSIGHT_API_LLM_PROVIDER: openai
+        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
+        HINDSIGHT_API_LLM_MODEL: z-ai/glm-5.3-flash
+        HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
+        HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
+        HINDSIGHT_API_LLM_TIMEOUT: "600"
+        HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
+        # Tasks claimed per poll cycle (chart default 10). With 3 workers we
+        # raise the claim batch so each worker takes bigger chunks per poll.
+        HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
+        # Audit logging is disabled by default — roll it on for the worker too.
+        HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
     controlPlane:
       enabled: true
     nodeSelector:

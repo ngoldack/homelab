@@ -4,6 +4,8 @@
 #   - cnpg-operator     -> langfuse-database Cluster/Database CRDs
 #   - valkey-operator   -> ValkeyCluster CRD
 #   - authentik         -> the Issuer the OIDC env points at (edge SSO)
+#   - network           -> the edge Gateway its HTTPRoute attaches to
+#   - monitoring-crds   -> the VMServiceScrape CRD vm-scrapes.yaml defines
 #   - clickhouse-operator / seaweedfs-operator -> the OLAP + blob stores the
 #     values reference / bundle (SeaweedFS is bundled by the chart, but its
 #     operator pattern matches the repo's store-operator standing rule).
@@ -23,6 +25,8 @@ spec:
     - name: cnpg-operator
     - name: valkey-operator
     - name: authentik
+    - name: network
+    - name: monitoring-crds
     - name: clickhouse-operator
     - name: seaweedfs-operator
   sourceRef:

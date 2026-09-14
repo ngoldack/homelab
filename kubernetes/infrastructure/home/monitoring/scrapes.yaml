@@ -58,7 +58,7 @@ spec:
     matchLabels:
       cnpg.io/cluster: authentik-database
   podMetricsEndpoints:
-    - port: "9187"
+    - port: metrics
       # Expose the CNPG cluster name as a metric label so backup-age rules
       # can match per cluster (the plugin's barman_cloud_* and the core
       # exporter's pg_wal_archive_status series carry no cluster label of
@@ -79,7 +79,7 @@ spec:
     matchLabels:
       cnpg.io/cluster: immich-database
   podMetricsEndpoints:
-    - port: "9187"
+    - port: metrics
       relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
@@ -96,7 +96,7 @@ spec:
     matchLabels:
       cnpg.io/cluster: hindsight-database
   podMetricsEndpoints:
-    - port: "9187"
+    - port: metrics
       relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
@@ -113,7 +113,7 @@ spec:
     matchLabels:
       cnpg.io/cluster: langfuse-database
   podMetricsEndpoints:
-    - port: "9187"
+    - port: metrics
       relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
@@ -130,7 +130,7 @@ spec:
     matchLabels:
       cnpg.io/cluster: phoenix-database
   podMetricsEndpoints:
-    - port: "9187"
+    - port: metrics
       relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster

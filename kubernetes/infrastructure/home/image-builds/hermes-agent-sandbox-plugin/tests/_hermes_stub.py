@@ -41,10 +41,11 @@ def _make_module(full_name: str, source: str = "") -> types.ModuleType:
 
 
 def install_hermes_stub() -> None:
-    """Idempotently install the hermes_agent stub tree into sys.modules."""
-    if "hermes_agent" not in sys.modules:
-        _make_module("hermes_agent")
-        _make_module("hermes_agent.agent")
-        _make_module(
-            "hermes_agent.agent.terminal_env_provider", _ABC_TERMINAL
-        )
+    """Idempotently install the hermes_agent stub tree into sys.modules.
+
+    The stubbed import paths match the installed v2026.9.7 layout (top-level
+    ``agent`` package), mirrored by src/hermes_agent_sandbox/provider.py.
+    """
+    if "agent" not in sys.modules:
+        _make_module("agent")
+        _make_module("agent.terminal_env_provider", _ABC_TERMINAL)

@@ -1,10 +1,10 @@
 """Hermes terminal-environment provider for the agent_sandbox backend.
 
 Subclasses the real ``TerminalEnvironmentProvider`` ABC from Hermes
-(``hermes_agent.agent.terminal_env_provider`` — the post-decomposition path; the
-compat layer that ever re-exported under the old ``agent.*`` names is removed,
-so this plugin MUST import the new module names only, which ``hermes plugins
-compat`` enforces).
+(``agent.terminal_env_provider`` — the installed distribution's top-level
+layout at v2026.9.7 / 0.21.1: the editable install exposes ``agent``,
+``hermes_cli``, ``gateway``, ``utils`` as top-level packages; verified
+inside the built image).
 
 Classification is the most conservative isolated set:
 
@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
-from hermes_agent.agent.terminal_env_provider import TerminalEnvironmentProvider
+from agent.terminal_env_provider import TerminalEnvironmentProvider
 
 from . import redaction
 from .config import from_env

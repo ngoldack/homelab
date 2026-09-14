@@ -262,3 +262,27 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# Langfuse's PostgreSQL data directory (../langfuse/). The CNPG store for
+# the LLM platform's transactional data; snapshots like the other DBs.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-langfuse-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/langfuse/database"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

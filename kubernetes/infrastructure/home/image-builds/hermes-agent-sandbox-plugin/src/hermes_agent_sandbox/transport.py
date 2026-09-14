@@ -307,6 +307,11 @@ class SandboxTransport:
         target._kid = self._kid
         target._ttl = 60
         self._target = target
+        if self._connector is None:
+            # close() (recycle/teardown) nils the connector; re-attach after
+            # an idle recycle must rebuild it or every command after the
+            # first recycle crashes with AttributeError.
+            self._connector = SdkCommandConnector(self.config)
         self._connector.attach(sandbox_name, pod_ip)
 
     # ---- exec (direct gRPC to the adopted sandbox's ProcessService) ----

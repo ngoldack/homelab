@@ -224,6 +224,28 @@ def test_cwd_within_workspace_used(tmp_path):
     assert transport.runs[1][0] == "cd /workspace && pwd"
 
 
+def test_transport_reattach_after_close_rebuilds_connector(tmp_path):
+    """close() nils the connector; a re-attach (idle recycle) must rebuild
+    it instead of crashing on None."""
+    from hermes_agent_sandbox.transport import SandboxTransport
+
+    (tmp_path / "tok").write_bytes(b"x" * 32)
+    cfg = AgentSandboxConfig(
+        router_url="http://router:1", token_file=str(tmp_path / "tok")
+    )
+    t = SandboxTransport(cfg, secret=b"x" * 32)
+    t.attach("sbx-1", "uid-1", "10.0.0.5")
+    assert t._connector is not None and t._connector._sandbox_name == "sbx-1"
+    t.close()
+    assert t._connector is None
+    # The recycle path: close() then attach() again.
+    t.attach("sbx-2", "uid-2", "10.0.0.6")
+    assert t._connector is not None
+    assert t._connector._sandbox_name == "sbx-2"
+    assert t._connector._pod_ip == "10.0.0.6"
+    t.close()
+
+
 def test_provider_style_creation_lazily_builds_transport(tmp_path, monkeypatch):
     """Provider-created envs pass no transport; the lazy init must attach."""
     import hermes_agent_sandbox.environment as env_mod

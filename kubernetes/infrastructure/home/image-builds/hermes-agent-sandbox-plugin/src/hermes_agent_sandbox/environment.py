@@ -192,14 +192,13 @@ class AgentSandboxEnvironment:
         self._last_use = time.monotonic()
         effective_timeout = self._clamp_timeout(timeout)
         full = f"cd {shlex.quote(target_cwd)} && {command}"
-        try:
-            stdout, stderr, code = self._do_run(full, effective_timeout)
-        except SandboxCommandError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - transport -> recoverable 124
-            log.warning("sandbox exec failed: %s", exc)
-            self._cancel_remote()
-            return self._timeout_result("")
+        # No blind recovery here: _do_run already converts transport
+        # failures into SandboxCommandError (timeout path cancels + 124
+        # THERE). Any exception escaping _do_run is a genuine bug and must
+        # propagate so Hermes logs it — swallowing it as 124 with empty
+        # output (and tearing the claim down via _cancel_remote) would hide
+        # it and destroy a live sandbox mid-task.
+        stdout, stderr, code = self._do_run(full, effective_timeout)
         output = stdout + stderr if stderr and stdout else (stdout or stderr)
         result = {
             "output": self._truncate(output),

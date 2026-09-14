@@ -65,11 +65,17 @@ COPY --from=sandboxd /out/sandboxd /usr/local/bin/sandboxd
 
 # sandboxd runs as UID/GID 10001 (matching the template's runAsUser/fsGroup);
 # /workspace is its --root-dir default and the only writable mount.
+# HOME points at /tmp (a writable emptyDir at runtime): go/python toolchains
+# cache under $HOME/.cache, and /home/sandbox is read-only in this image —
+# without this, `go test` dies with "mkdir /home/sandbox: read-only file
+# system" on the first build-cache write.
 RUN groupadd --gid 10001 sandbox \
     && useradd --uid 10001 --gid 10001 --no-create-home \
         --shell /bin/sh sandbox \
     && mkdir --parents /workspace \
     && chown 10001:10001 /workspace
+
+ENV HOME=/tmp
 
 USER sandbox
 

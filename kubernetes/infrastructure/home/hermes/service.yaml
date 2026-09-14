@@ -14,3 +14,9 @@ spec:
       port: 8642
       targetPort: 8642
       protocol: TCP
+    # Hermes Desktop remote backend (dashboard); reachable via operator
+    # port-forward only — no public route in v1.
+    - name: dashboard
+      port: 9119
+      targetPort: 9119
+      protocol: TCP

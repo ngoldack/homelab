@@ -59,6 +59,21 @@ spec:
               value: http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080
             - name: AGENT_SANDBOX_ROUTER_TOKEN_FILE
               value: /opt/data/router-token
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

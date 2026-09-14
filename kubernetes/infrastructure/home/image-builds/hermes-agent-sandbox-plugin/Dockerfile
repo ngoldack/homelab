@@ -54,7 +54,10 @@ USER hermes
 # image's s6-overlay supervisor. s6's preinit demands /run owned by the
 # container uid and cannot run as a non-root uid under PSA restricted;
 # Kubernetes (StatefulSet restartPolicy) supervises the single gateway
-# process instead. The hermes shim is the base image's own wrapper at
-# /opt/hermes/bin/hermes.
-ENTRYPOINT ["/opt/hermes/bin/hermes"]
-CMD ["gateway", "run"]
+# process instead. The supervisor wrapper additionally starts the web
+# dashboard (the Hermes Desktop remote backend) alongside the gateway.
+# The hermes shim is the base image's own wrapper at /opt/hermes/bin/hermes.
+COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/entrypoint.sh /opt/hermes/bin/agent-sandbox-entrypoint.sh
+RUN chmod 0755 /opt/hermes/bin/agent-sandbox-entrypoint.sh
+ENTRYPOINT ["/opt/hermes/bin/agent-sandbox-entrypoint.sh"]
+CMD []

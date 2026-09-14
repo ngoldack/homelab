@@ -1,7 +1,7 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: a SINGLE OpenRouter model (openai/gpt-5.6-luna at low reasoning effort —
+# LLM: a SINGLE OpenRouter model (z-ai/glm-5.3-flash at low reasoning effort —
 # fast and cost-efficient; strictly JSON via STRICT_SCHEMA). The prior 3-member
 # failover chain (incl. the local qwen3-27b leg) made startup verification
 # cross the chart's 30s liveness budget, crash-looping the API pod mid-boot —
@@ -67,20 +67,16 @@ spec:
       env: &llm-env
         HINDSIGHT_API_LLM_PROVIDER: openai
         HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: openai/gpt-5.6-luna
-        # Low reasoning: gpt-5.6-luna is a fast, cost-efficient OpenAI model
-        # (supported_efforts: max/xhigh/high/medium/low/none). For hindsight's
-        # heavy extraction/consolidation chain, low keeps latency+token cost
-        # down without sacrificing the strict-JSON output (STRICT_SCHEMA
-        # grammar-forces it). Verified the effort values against OpenRouter's
-        # model listing (reasoning.supported_efforts) before pinning.
+        HINDSIGHT_API_LLM_MODEL: z-ai/glm-5.3-flash
+        # GLM-5.3 Flash (z-ai/glm-5.3-flash): fast, cost-efficient, large
+        # context (1.3M). Low reasoning effort keeps latency/token cost down for
+        # hindsight's heavy extraction/consolidation chain while STRICT_SCHEMA
+        # grammar-forces structured output. (Verified 'low' as a supported
+        # reasoning effort for this endpoint on OpenRouter before pinning.)
         # Single OpenRouter model only — no local qwen3-27b failover leg
         # (2026-09-13): the local leg made startup verification cross the
         # chart's 30s liveness budget, crash-looping the pod mid-boot. One
         # reliable OpenRouter model keeps startup fast and singular.
-        # REASONING_EFFORT now set to low (not none): API sends it as
-        # reasoning_effort. Earlier members 400'd on 'none' for their
-        # endpoints; luna explicitly supports 'low' so it is safe here.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; upstream first-token

@@ -63,7 +63,7 @@ spec:
       # can match per cluster (the plugin's barman_cloud_* and the core
       # exporter's pg_wal_archive_status series carry no cluster label of
       # their own).
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
@@ -80,7 +80,7 @@ spec:
       cnpg.io/cluster: immich-database
   podMetricsEndpoints:
     - port: "9187"
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
@@ -97,7 +97,7 @@ spec:
       cnpg.io/cluster: hindsight-database
   podMetricsEndpoints:
     - port: "9187"
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
@@ -114,7 +114,7 @@ spec:
       cnpg.io/cluster: langfuse-database
   podMetricsEndpoints:
     - port: "9187"
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
@@ -131,7 +131,7 @@ spec:
       cnpg.io/cluster: phoenix-database
   podMetricsEndpoints:
     - port: "9187"
-      relabelings:
+      relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---

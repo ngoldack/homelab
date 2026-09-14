@@ -29,20 +29,24 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the pinned agent-sandbox python SDK and the plugin package into the
-# base image's uv-managed venv (pip is not on PATH in the base image). The
-# plugin registers via the ``hermes_agent.plugins`` entry-point group in
-# pyproject.toml — Hermes discovers pip-installed plugins there, so nothing
-# is placed under /opt/data (a PVC overlays that directory at runtime).
-# NOTE: buildkit runs this Dockerfile with the REPO ROOT as context (the
-# --opt=filename path is repo-relative), so every COPY source below is
-# repo-root-relative, mirroring how the runtime image's Dockerfile is built.
+# Install the pinned agent-sandbox python SDK and the plugin package into a
+# SEPARATE plain venv, NOT the base image's uv-managed /opt/hermes/.venv:
+# uv pip refuses to resolve against that venv (uv-managed venv + project
+# coupling in /opt/hermes/pyproject.toml) and the base image has no pip on
+# PATH. python3-venv is guaranteed by the base Dockerfile. The plugin venv's
+# site-packages is exposed to Hermes via PYTHONPATH below; entry-point
+# discovery (hermes_agent.plugins) reads the dist-info off sys.path.
+# NOTE: buildkit runs this Dockerfile with the REPO ROOT as context, so COPY
+# sources below are repo-root-relative.
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml /tmp/plugin-build/
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/src /tmp/plugin-build/src/
-RUN uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python \
-        "k8s-agent-sandbox==1.0.2" \
-    && uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python \
-        /tmp/plugin-build
+RUN python3 -m venv /opt/hermes/plugin-venv \
+    && /opt/hermes/plugin-venv/bin/pip install --no-cache-dir \
+        "k8s-agent-sandbox==1.0.2" /tmp/plugin-build
+
+# Expose the plugin venv's packages to the Hermes process (same 3.13
+# interpreter family; pure-python plugin + prebuilt wheels).
+ENV PYTHONPATH=/opt/hermes/plugin-venv/lib/python3.13/site-packages
 
 USER hermes
 

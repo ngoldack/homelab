@@ -110,7 +110,7 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
         cfg = from_env()
         return AgentSandboxEnvironment(cfg, task_id=task_id, cwd=cwd, timeout=timeout)
 
-    # ---- registration (exactly once per ABC) ----
+    # ---- registration (entry-point module contract) ----
     def register(self, ctx) -> None:  # type: ignore[override]
         ctx.register_terminal_environment_provider(self)
 
@@ -148,3 +148,10 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
             return (False, f"HTTP {exc.code}")
         except Exception as exc:  # noqa: BLE001
             return (False, str(exc))
+
+
+def register(ctx) -> None:
+    """Hermes plugin entry-point contract (plugins_loader.py): the loader
+    imports the entry-point MODULE and calls ``register(ctx)`` on it —
+    the module-level function, not the class method."""
+    ctx.register_terminal_environment_provider(AgentSandboxProvider())

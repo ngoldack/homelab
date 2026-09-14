@@ -21,8 +21,10 @@ test = ["pytest>=8"]
 
 # Hermes discovers installed plugins via this entry-point group (plugins.py
 # discover_entrypoint_manifests): no file placement under /opt/data needed.
+# The value must name the MODULE (plugins_loader calls register(ctx) on it),
+# not an attribute.
 [project.entry-points."hermes_agent.plugins"]
-agent_sandbox = "hermes_agent_sandbox.provider:AgentSandboxProvider"
+agent_sandbox = "hermes_agent_sandbox.provider"
 
 [tool.setuptools.packages.find]
 where = ["src"]

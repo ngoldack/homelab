@@ -3,6 +3,11 @@
 # metrics endpoint at /api/public/metrics on the app port 3000 (the langfuse-web
 # Service's only port, name `http`; no dedicated metrics port exists). Matches
 # the phoenix scrape pattern (port-name endpoint + namespaceSelector pin).
+#
+# Selector targets the SERVICE's metadata.labels (VMServiceScrape matches
+# service labels, not the Service's spec.selector). The chart emits
+# app.kubernetes.io/name=langfuse on the langfuse-web Service — there is no
+# app: web service label (app: web is only the selector used to pick pods).
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
@@ -14,7 +19,7 @@ spec:
       path: /api/public/metrics
   selector:
     matchLabels:
-      app: web
+      app.kubernetes.io/name: langfuse
   namespaceSelector:
     matchNames:
       - langfuse

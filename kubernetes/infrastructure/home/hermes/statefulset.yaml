@@ -28,6 +28,7 @@ spec:
       labels:
         app.kubernetes.io/name: hermes
     spec:
+      serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
       securityContext:
         runAsNonRoot: true

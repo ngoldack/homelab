@@ -48,8 +48,6 @@ RUN python3 -m venv /opt/hermes/plugin-venv \
 # interpreter family; pure-python plugin + prebuilt wheels).
 ENV PYTHONPATH=/opt/hermes/plugin-venv/lib/python3.13/site-packages
 
-USER hermes
-
 # ENTRYPOINT override: run the gateway binary DIRECTLY instead of the base
 # image's s6-overlay supervisor. s6's preinit demands /run owned by the
 # container uid and cannot run as a non-root uid under PSA restricted;
@@ -57,7 +55,10 @@ USER hermes
 # process instead. The supervisor wrapper additionally starts the web
 # dashboard (the Hermes Desktop remote backend) alongside the gateway.
 # The hermes shim is the base image's own wrapper at /opt/hermes/bin/hermes.
+# Installed while still root: /opt/hermes/bin is root-owned.
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/entrypoint.sh /opt/hermes/bin/agent-sandbox-entrypoint.sh
 RUN chmod 0755 /opt/hermes/bin/agent-sandbox-entrypoint.sh
 ENTRYPOINT ["/opt/hermes/bin/agent-sandbox-entrypoint.sh"]
 CMD []
+
+USER hermes

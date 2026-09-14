@@ -1,0 +1,20 @@
+# Hermes plugin manifest for the agent_sandbox terminal backend.
+# schema: PluginManifest (hermes_cli/plugins_manifest.py) — catalogued keys only.
+name: agent_sandbox
+version: 0.1.0
+description: >-
+  Run terminal commands in a Kubernetes Agent Sandbox (kubernetes-sigs/
+  agent-sandbox, Kata runtime) via the hermes-go warm pool and the
+  authenticated sandbox-router.
+kind: backend
+manifest_version: 2
+license: Apache-2.0
+homepage: https://github.com/NousResearch/hermes-agent
+python_dependencies:
+  - k8s-agent-sandbox==1.0.2
+  - cryptography>=42
+  - grpcio>=1.60
+  - protobuf>=4
+requires_env:
+  - AGENT_SANDBOX_ROUTER_URL
+  - AGENT_SANDBOX_ROUTER_TOKEN_FILE

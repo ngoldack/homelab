@@ -88,7 +88,7 @@ spec:
             - port: "443"
               protocol: TCP
 ---
-# hermes-sandbox ingress allowlist — the only caller of sandbox APIs.
+# hermes-sandbox ingress allowlist — the only callers of sandbox APIs.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -97,9 +97,10 @@ metadata:
 spec:
   description: >-
     The only ingress a sandbox accepts: the sandbox-router reaching the
-    runtime API ports. Cilium v2 has no namespaceSelector — cross-namespace
-    matching uses the k8s:io.kubernetes.pod.namespace virtual label (repo
-    pattern from agent-sandbox/cilium-router.yaml).
+    runtime REST ports and the Hermes gateway reaching the runtime gRPC
+    ProcessService (exec). Cilium v2 has no namespaceSelector —
+    cross-namespace matching uses the k8s:io.kubernetes.pod.namespace virtual
+    label (repo pattern from agent-sandbox/cilium-router.yaml).
   endpointSelector:
     matchLabels: {}
   ingress:
@@ -116,5 +117,16 @@ spec:
               protocol: TCP
             - port: "8888"
               protocol: TCP
+            - port: "9090"
+              protocol: TCP
+    # Direct gRPC exec (user-approved fallback: sandboxd v1.0.2 has no HTTP
+    # exec route and the Go router cannot proxy gRPC). The Hermes gateway is
+    # the only pod that mounts the router token and owns claims, so only its
+    # namespace is admitted, and only on the ProcessService port.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
             - port: "9090"
               protocol: TCP

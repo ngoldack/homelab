@@ -11,4 +11,4 @@ metadata:
   name: sandbox-router-auth-keys
   namespace: agent-sandbox-system
 data:
-  keys.json: '{"keys":[{"kid":"hermes-1","publicKey":"CDK3kvm_qpEDTd41aSXpAXr1ZHl3ZdXnQCwFj1uuplc"}]}'
+  keys.json: '{"keys":[{"kid":"hermes-1","publicKey":"xrwuk-mFXjNi86uWVIae_S8huahY6o5xQm6_8DKQjwg"}]}'

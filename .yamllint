@@ -17,6 +17,11 @@ ignore: |
   # Vendored Envoy Gateway CRDs, rendered from gateway-crds-helm (chart template
   # content, not ours — same machine-generated rationale as the tofu gateway-api CRDs).
   kubernetes/**/aigateway-envoy-gateway/envoy-crds.yaml
+  # Vendored Agent Sandbox release manifests (Cilium CRD templates etc.) — fetched
+  # verbatim from kubernetes-sigs/agent-sandbox and never hand-formatted, so they
+  # trip yamllint's indentation rules. Overlays that DO follow repo style live in
+  # agent-sandbox/ above the upstream/ dir and remain linted.
+  kubernetes/infrastructure/home/agent-sandbox/upstream/**
 
 rules:
   line-length:

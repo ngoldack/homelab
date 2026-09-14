@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-agent-sandbox"
+version = "0.1.0"
+description = "Hermes terminal backend that runs commands in a Kubernetes Agent Sandbox (Kata) via hermes-go warm pool and the authenticated router."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "k8s-agent-sandbox==1.0.2",
+    "cryptography>=42",
+    "grpcio>=1.60",
+    "protobuf>=4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

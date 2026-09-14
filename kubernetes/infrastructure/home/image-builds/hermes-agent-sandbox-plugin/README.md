@@ -1,0 +1,57 @@
+# hermes-agent-sandbox
+
+Hermes Agent terminal backend that executes every command in a Kubernetes
+Agent Sandbox (kubernetes-sigs/agent-sandbox v1.0.2) Kata sandbox via the
+`hermes-go` warm pool.
+
+See the plugin `plugin.yaml` for metadata and `src/hermes_agent_sandbox/` for
+implementation; the module docs under `config.py`, `client.py`, `transport.py`
+explain the v2 scoped-token wire format and the claim lifecycle.
+
+## Execution architecture (as deployed)
+
+The pinned stack splits execution and file transfer:
+
+- **Commands — direct gRPC to `sandboxd`, user-approved fallback.** v1.0.2
+  exposes command execution only as the gRPC `ProcessService` on
+  `podIP:9090` (verified: sandboxd's REST surface is `/v1/files`,
+  `/v1/health`, `/v1/metadata`; `sandboxd --help` shows `grpc-port 9090`,
+  `rest-port 8080`). The Go Router is an HTTP-only reverse proxy (no
+  `/execute` API, `ForceAttemptHTTP2: false`), so Router-mediated execution
+  does not exist in v1.0.2. Per user decision, the plugin executes via gRPC
+  straight to the adopted pod's IP. Cilium confines this: ingress to the
+  sandboxes on 9090 is admitted ONLY from `agent-sandbox-system` (Router)
+  and `hermes` (gateway) namespaces (`hermes-sandbox/cilium-policy.yaml`).
+  The gateway's claim ownership is the trust boundary (no random pod can
+  create a claim for the warm pool).
+- **Files — through the Router with v2 scoped tokens.** `fetch_file` uses
+  `GET /v1/files` with a per-request Ed25519 v2 token (`client.py`,
+  byte-parity with the Go verifier in `authorizer.go`/`scopedtoken_v2.go`).
+  Paths keep literal `/` (percent-encoded `%2F` does not survive the Go
+  request reparse and 403s — see `transport.py` comment).
+
+## Operation notes
+
+- The Router token file (`AGENT_SANDBOX_ROUTER_TOKEN_FILE`) holds the raw
+  32-byte Ed25519 seed whose public key lives in
+  `agent-sandbox/router-auth-keys.yaml` (`kid: hermes-1`). Rotation: new
+  seed → new public key there → roll the Router deployment → update the
+  `hermes` Secret.
+- Commands run as `/bin/sh -c <cmd>` with cwd confined to `/workspace`;
+  output capped at 1 MiB with the truncated marker; timeouts cancel the gRPC
+  call and return 124 (Hermes contract); claims are deleted on cleanup and
+  orphan-reconciled past their shutdown deadline.
+- The gRPC channel is plaintext and only ever dials the adopted pod IP on
+  9090 — never the Kubernetes API.
+
+## Tests
+
+- `tests/unit/` — 85 tests, offline (Hermes ABC stubbed via
+  `tests/_hermes_stub.py`; real-import conformance runs in the built image
+  with `hermes plugins compat`).
+- `tests/integration/` — live-cluster suite; run via
+  `hack/hermes-plugin-integration.sh` (requires kubeconfig-home.yaml, a
+  seeded router keypair, and a port-forwarded Router). Exec assertions are
+  gated behind `AGENT_SANDBOX_IN_CLUSTER=1` (sandbox ingress admits only
+  in-cluster namespaces on gRPC); the Phase-7 e2e runs them from the Hermes
+  namespace.

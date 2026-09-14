@@ -1,0 +1,11 @@
+# agent_sandbox Hermes config — INITIAL TEMPLATE ONLY.
+# Why a template (not the live config): /opt/data is a PVC the gateway mounts
+# at runtime; a fresh image must not clobber operator-managed config, so this
+# file ships named *_template and is materialized once by the setup step.
+plugins:
+  - agent_sandbox
+terminal:
+  backend: agent_sandbox
+  cwd: /workspace
+  timeout: 300
+  persistent_shell: false

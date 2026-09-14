@@ -19,6 +19,11 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+# Hermes discovers installed plugins via this entry-point group (plugins.py
+# discover_entrypoint_manifests): no file placement under /opt/data needed.
+[project.entry-points."hermes_agent.plugins"]
+agent_sandbox = "hermes_agent_sandbox.provider:AgentSandboxProvider"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -1,0 +1,25 @@
+# hermes — operator-managed config.yaml overlayed onto /opt/data/config.yaml.
+# Keys are the real v2026.9.7 schema (verified against the official docs and
+# hermes_cli/config_defaults.py at that tag): the model id is the OpenRouter
+# convention "<provider>/<model>" (provider auto-detected from the
+# OPENROUTER_API_KEY env); the terminal backend is our agent_sandbox plugin.
+# No messaging platform is enabled in v1, so there are no platform allowlists
+# to configure; the only access path is the bearer-authenticated API server
+# (API_SERVER_KEY env), and GATEWAY_ALLOW_ALL_USERS does not exist in this
+# release — deny-by-default holds.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-config
+  namespace: hermes
+data:
+  config.yaml: |
+    model: deepseek/deepseek-v4-flash
+    plugins:
+      enabled:
+        - agent_sandbox
+    terminal:
+      backend: agent_sandbox
+      cwd: /workspace
+      timeout: 300
+      persistent_shell: false

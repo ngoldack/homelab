@@ -29,24 +29,20 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the pinned agent-sandbox python SDK (verified on PyPI:
-# k8s-agent-sandbox 1.0.2) and the plugin package itself.
+# Install the pinned agent-sandbox python SDK and the plugin package into the
+# base image's uv-managed venv (pip is not on PATH in the base image). The
+# plugin registers via the ``hermes_agent.plugins`` entry-point group in
+# pyproject.toml — Hermes discovers pip-installed plugins there, so nothing
+# is placed under /opt/data (a PVC overlays that directory at runtime).
 # NOTE: buildkit runs this Dockerfile with the REPO ROOT as context (the
 # --opt=filename path is repo-relative), so every COPY source below is
 # repo-root-relative, mirroring how the runtime image's Dockerfile is built.
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml /tmp/plugin-build/
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/src /tmp/plugin-build/src/
-RUN pip install --no-cache-dir "k8s-agent-sandbox==1.0.2" \
-    && pip install --no-cache-dir /tmp/plugin-build
-
-# Plugin discovery root: place the package under $HERMES_HOME/plugins/agent_sandbox/
-# then copy plugin.yaml next to it (Hermes scans this directory for a manifest).
-RUN mkdir -p /opt/data/plugins/agent_sandbox \
-    && cp -r /tmp/plugin-build/src/hermes_agent_sandbox /opt/data/plugins/agent_sandbox/
-COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/plugin.yaml /opt/data/plugins/agent_sandbox/plugin.yaml
-
-# Initial config template (never clobbered at runtime — a PVC overlays /opt/data).
-COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/config-tpl.yaml /opt/data/config.yaml.template
+RUN uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python \
+        "k8s-agent-sandbox==1.0.2" \
+    && uv pip install --no-cache-dir --python /opt/hermes/.venv/bin/python \
+        /tmp/plugin-build
 
 USER hermes
 

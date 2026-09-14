@@ -1,9 +1,11 @@
-# agent_sandbox Hermes config — INITIAL TEMPLATE ONLY.
-# Why a template (not the live config): /opt/data is a PVC the gateway mounts
-# at runtime; a fresh image must not clobber operator-managed config, so this
-# file ships named *_template and is materialized once by the setup step.
+# agent_sandbox Hermes config — reference shape for the runtime config.yaml
+# (the live file is the hermes/configmap.yaml, mounted over /opt/data).
+# ``plugins.enabled`` is the opt-in allow-list Hermes reads
+# (plugins_discovery._get_enabled_plugins); the plugin registers via the
+# hermes_agent.plugins entry-point group, so no file placement is needed.
 plugins:
-  - agent_sandbox
+  enabled:
+    - agent_sandbox
 terminal:
   backend: agent_sandbox
   cwd: /workspace

@@ -33,3 +33,11 @@ spec:
       memory: 512Mi
     limits:
       memory: 2Gi
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: langfuse-backup-store
+  # backup retention lives on the ObjectStore CR (spec.retentionPolicy "30d"),
+  # not here: spec.backup.retentionPolicy is in-tree-Barman-only and is
+  # ignored when the Barman Cloud plugin owns backups.

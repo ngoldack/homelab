@@ -1,0 +1,59 @@
+# CNPG backup- and WAL-archiving health alerts for the home cluster's five
+# CloudNativePG clusters. These guard the S3 Barman-Cloud-plugin backups and
+# PITR guarantees the per-cluster objectstore/scheduled-backup manifests rely
+# on (authentik, langfuse, immich, phoenix, hindsight).
+#
+# Metric names verified against plugin-barman-cloud v0.15.0 (the plugin
+# supersedes the deprecated cnpg_collector_* backup metrics):
+#   barman_cloud_cloudnative_pg_io_last_available_backup_timestamp — unix
+#       timestamp of the most recent successfully available backup (0 until
+#       the first backup exists, so the age rule also fires on a cluster that
+#       has never backed up)
+#   cnpg_collector_pg_wal_archive_status{value="ready"} — core CNPG exporter:
+#       WAL segments still waiting to be archived (backlog = archiving
+#       stalled)
+#
+# Every CNPG series carries a "cluster" label injected by the relabelings on
+# the five CNPG VMPodScrapes (pod label cnpg.io/cluster -> metric label
+# cluster), so {cluster!=""} selects exactly the five live clusters — and
+# matches nothing on any other exporter (these metric names are CNPG-only).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: data-protection
+  namespace: monitoring
+spec:
+  groups:
+    - name: data-protection
+      rules:
+        - alert: WALArchivingStalled
+          expr: >-
+            cnpg_collector_pg_wal_archive_status{cluster!="",value="ready"} > 20
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archiving stalled for {{ $labels.cluster }}"
+            description: >-
+              Cluster {{ $labels.cluster }} has {{ $value }} WAL segments
+              waiting to be archived for over 30 minutes. A backlog above 20
+              means the barman-cloud WAL archive upload is stalled, so PITR
+              recovery may be incomplete for those WALs.
+        - alert: BackupTooOld
+          expr: >-
+            (time() -
+            barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=""})
+            > 30 * 3600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Last available backup too old for {{ $labels.cluster }}"
+            description: >-
+              The most recent available backup of cluster {{ $labels.cluster }}
+              is {{ printf "%.0f" ((time() - barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) / 3600) }}h
+              old (more than 30h). The daily scheduled backup has not
+              completed in time — check the ScheduledBackup/Backup objects and
+              the plugin sidecar logs; PITR RPO is degraded. A value of
+              1970 (timestamp 0) means the cluster has never had a
+              successful backup.

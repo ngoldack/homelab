@@ -59,6 +59,13 @@ spec:
       cnpg.io/cluster: authentik-database
   podMetricsEndpoints:
     - port: "9187"
+      # Expose the CNPG cluster name as a metric label so backup-age rules
+      # can match per cluster (the plugin's barman_cloud_* and the core
+      # exporter's pg_wal_archive_status series carry no cluster label of
+      # their own).
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
@@ -73,6 +80,9 @@ spec:
       cnpg.io/cluster: immich-database
   podMetricsEndpoints:
     - port: "9187"
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
@@ -87,6 +97,43 @@ spec:
       cnpg.io/cluster: hindsight-database
   podMetricsEndpoints:
     - port: "9187"
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: langfuse-database
+  namespace: langfuse
+spec:
+  namespaceSelector:
+    matchNames: [langfuse]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: langfuse-database
+  podMetricsEndpoints:
+    - port: "9187"
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: phoenix-database
+  namespace: phoenix
+spec:
+  namespaceSelector:
+    matchNames: [phoenix]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: phoenix-database
+  podMetricsEndpoints:
+    - port: "9187"
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
 ---
 # ---- external-dns (both the LAN and edge instances share the
 # app.kubernetes.io/name=external-dns service label, so one scrape covers

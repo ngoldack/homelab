@@ -14,7 +14,12 @@ spec:
   wait: true
   timeout: 10m
   dependsOn:
+    # cert-manager issues the plugin-barman-cloud Issuer/Certificates: its
+    # HelmRelease (added in this directory's app manifests) fails cold
+    # bootstrap otherwise, since the chart requires a working cert-manager
+    # at install time.
     - name: infra-controllers
+    - name: cert-manager
   sourceRef:
     kind: GitRepository
     name: flux-system

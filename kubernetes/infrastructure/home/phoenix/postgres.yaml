@@ -45,3 +45,12 @@ spec:
       memory: 512Mi
     limits:
       memory: 2Gi
+  # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
+  # (objectstore.yaml) owns destination/retention; this reference enables
+  # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-
+  # only, ignored when a plugin owns backups.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: phoenix-backup-store

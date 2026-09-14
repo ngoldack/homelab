@@ -3,8 +3,11 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - postgres-credentials.sops.yaml
+  - phoenix-backup-s3-credentials.sops.yaml
   - postgres.yaml
   - database.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
   - sources.yaml
   - helmrelease.yaml
   - httproute.yaml

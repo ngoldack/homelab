@@ -15,6 +15,9 @@ resources:
   - outpost.yaml
   - server-service-local.yaml
   - portal-bridge.yaml
+  - authentik-backup-s3-credentials.sops.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
   # httproutes.yaml (LAN twin route) retired with the split-horizon design;
   # the ReferenceGrant it also carried now lives in httproutes-edge.yaml.
   - httproutes-edge.yaml

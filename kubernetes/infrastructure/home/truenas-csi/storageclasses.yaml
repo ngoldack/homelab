@@ -84,6 +84,35 @@ parameters:
   pool: "fast"
   datasetPath: "k8s/nfs/monitoring/vmsingle"
   compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Authentik's PostgreSQL data directory (../authentik/). The identity
+# provider's transactional store; snapshots like the other DBs.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-authentik-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/authentik/database"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"
@@ -130,6 +159,11 @@ parameters:
   pool: "fast"
   datasetPath: "k8s/nfs/immich/cache"
   compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"
@@ -183,6 +217,11 @@ parameters:
   pool: "fast"
   datasetPath: "k8s/nfs/llmkube/models"
   compression: "LZ4"
+  snapshot.schedule: "15 3 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "1"
+  snapshot.retentionUnit: "MONTH"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"
@@ -204,6 +243,11 @@ parameters:
   pool: "fast"
   datasetPath: "k8s/nfs/registry/zot"
   compression: "OFF"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"
   forceDelete: "false"
@@ -279,6 +323,79 @@ parameters:
   snapshot.naming: "auto-%Y-%m-%d_%H-%M"
   snapshot.retention: "14"
   snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Langfuse's ClickHouse OLAP store (../langfuse/clickhouse.yaml). Traces/observability
+# data on the durable side of the LLM platform; snapshots like the other DBs.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-langfuse-clickhouse
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/langfuse/clickhouse"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Langfuse's ClickHouse keeper coordination store (../langfuse/keeper.yaml).
+# Small; snapshots like the ClickHouse store it coordinates.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-langfuse-keeper
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/langfuse/keeper"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Langfuse's bundled SeaweedFS S3 object store (../langfuse/helmrelease.yaml,
+# s3.deploy: true allInOne). Binary/download uploads — durable application
+# data; the daily bulk schedule fits write-once-read-many content.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-langfuse-seaweedfs
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/langfuse/seaweedfs"
+  compression: "LZ4"
+  snapshot.schedule: "15 3 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "1"
+  snapshot.retentionUnit: "MONTH"
   snapshot.recursive: "false"
   nfs.mountOptions: "hard,nfsvers=4.1"
   nfs.rootSquash: "false"

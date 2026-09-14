@@ -1,0 +1,16 @@
+---
+# Scheduled CNPG backups for authentik via the Barman Cloud plugin. Schedule is
+# a 6-field CNPG cron (sec min hour dom mon dow): daily at 02:10 UTC.
+# method: plugin routes backups through the barman-cloud plugin named below.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: authentik-daily-backup
+  namespace: authentik
+spec:
+  cluster:
+    name: authentik-database
+  schedule: "0 10 2 * * *"
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

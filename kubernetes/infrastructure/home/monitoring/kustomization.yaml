@@ -11,6 +11,9 @@ resources:
   # kubernetes/clusters/home/monitoring.yaml), so the VM operator CRDs are
   # installed before these CRs are reconciled.
   - scrapes.yaml
+  # CNPG data-protection alerting (WAL archiving + PITR RPO) as VMRule CRs,
+  # same dependency on monitoring-crds as the pod/service scrapes above.
+  - rules.yaml
 
 # One ConfigMap per vendored dashboard. The Grafana sidecar (enabled in
 # helmrelease.yaml) watches every namespace for ConfigMaps carrying

@@ -22,6 +22,11 @@ ignore: |
   # trip yamllint's indentation rules. Overlays that DO follow repo style live in
   # agent-sandbox/ above the upstream/ dir and remain linted.
   kubernetes/infrastructure/home/agent-sandbox/upstream/**
+  # Untracked feature worktree (feature/splithorizondns/) — a scratch copy of
+  # the repo used for split-horizon DNS experiments, including a verbatim copy
+  # of the vendored agent-sandbox upstream manifests. Same never-hand-formatted
+  # rationale as the ignore above; its own state is the user's working tree.
+  feature/**
 
 rules:
   line-length:

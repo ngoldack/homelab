@@ -3,8 +3,11 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - postgres-credentials.sops.yaml
+  - langfuse-backup-s3-credentials.sops.yaml
   - postgres.yaml
   - database.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
   - valkey.yaml
   - clickhouse.yaml
   - keeper.yaml

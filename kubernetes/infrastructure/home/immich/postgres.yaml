@@ -17,7 +17,12 @@ metadata:
   name: immich-database
   namespace: immich
 spec:
-  instances: 1
+  # 2 instances with a strict synchronous quorum: Immich is user-facing
+  # availability-critical (photo library), so the primary's commits wait for
+  # the replica before acking.
+  instances: 2
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
   # Pinned to the home site: every TrueNAS StorageClass reaches the NAS at
   # 10.20.10.10, which is not routable from the Hetzner ingress node.
@@ -53,3 +58,12 @@ spec:
       memory: 512Mi
     limits:
       memory: 2Gi
+  # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
+  # (objectstore.yaml) owns destination/retention; this reference enables
+  # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-
+  # only, ignored when a plugin owns backups.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: immich-backup-store

@@ -16,7 +16,9 @@ metadata:
   name: authentik-database
   namespace: authentik
 spec:
-  instances: 1
+  instances: 2
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
   bootstrap:
     initdb:
       database: authentik
@@ -35,3 +37,11 @@ spec:
       memory: 256Mi
     limits:
       memory: 1Gi
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: authentik-backup-store
+  # backup retention lives on the ObjectStore CR (spec.retentionPolicy "30d"),
+  # not here: spec.backup.retentionPolicy is in-tree-Barman-only and ignored
+  # when the Barman Cloud plugin owns backups.

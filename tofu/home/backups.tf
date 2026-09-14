@@ -39,3 +39,44 @@ output "home_talos_backup_bucket" {
   description = "Hetzner Object Storage bucket for Home Talos etcd snapshots"
   value       = aws_s3_bucket.home_talos_backups.bucket
 }
+
+# --------------------- CNPG (Postgres) backups ------------------------------
+#
+# Every CloudNativePG cluster in this repo archives WAL and takes full
+# backups to this bucket via the Barman Cloud Plugin (ObjectStore CR, see the
+# app tree's objectstore.yaml). Hetzner Object Storage bucket names are
+# globally unique across all customers (documented FAQ), so the bucket carries
+# a random_id suffix exactly like home_talos_backups above. The ObjectStore
+# destinationPaths in the app manifests are authored AFTER this bucket is
+# applied and the resolved name read back from `terraform output
+# home_cnpg_backup_bucket` (or `tofu output`), then made immutable.
+#
+# Retention is enforced by the Barman Cloud plugin's own retentionPolicy on
+# the ObjectStore CR (spec.retentionPolicy, e.g. "30d" — barman deletes
+# expired WAL/backups as part of its retention loop). A bucket lifecycle rule
+# is belt-and-braces only and is NOT configured here for the same Hetzner
+# aws-provider bug documented on home_talos_backups above.
+resource "random_id" "home_cnpg_backup_bucket" {
+  byte_length = 4
+}
+
+resource "aws_s3_bucket" "home_cnpg_backups" {
+  bucket        = "home-cnpg-backups-${random_id.home_cnpg_backup_bucket.hex}"
+  force_destroy = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "home_cnpg_backups" {
+  bucket = aws_s3_bucket.home_cnpg_backups.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+output "home_cnpg_backup_bucket" {
+  description = "Hetzner Object Storage bucket for CloudNativePG backups (read this after apply to fill ObjectStore destinationPaths)"
+  value       = aws_s3_bucket.home_cnpg_backups.bucket
+}

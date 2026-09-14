@@ -1,0 +1,50 @@
+# Barman Cloud ObjectStore for immich's CNPG cluster. WAL archive + base
+# backups land under the app's prefix in the dedicated CNPG backup bucket
+# (bucket name is globally unique on Hetzner and carries the tofu-applied
+# random suffix — see tofu/home/backups.tf). Credentials + region come from
+# the per-app SOPS secret. serverName is intentionally absent: the
+# plugin-barman-cloud CRD forbids it (Barman derives the server name from the
+# cluster, and recovery overrides it via the Cluster plugin parameter).
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: immich-backup-store
+  namespace: immich
+spec:
+  # Barman retention (expired base backups + WAL are pruned by the plugin's
+  # sidecar retention loop). This — not the Cluster's deprecated
+  # spec.backup.retentionPolicy — is where plugin retention lives.
+  retentionPolicy: "30d"
+  configuration:
+    destinationPath: s3://home-cnpg-backups-7cd4e906/immich/
+    endpointURL: https://fsn1.your-objectstorage.com
+    s3Credentials:
+      accessKeyId:
+        name: immich-backup-s3-credentials
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: immich-backup-s3-credentials
+        key: AWS_SECRET_ACCESS_KEY
+      # Hetzner region — boto3 signs with it; it is a secret reference, not a
+      # literal on the ObjectStore.
+      region:
+        name: immich-backup-s3-credentials
+        key: AWS_REGION
+    wal:
+      compression: gzip
+  instanceSidecarConfiguration:
+    # Hetzner Objects (S3-compatible) needs the AWS SDK's newer data-integrity
+    # checksum defaults disabled or uploads fail with x-amz-content-sha256
+    # errors (documented contingency in the plugin docs for S3-compatible
+    # endpoints).
+    env:
+      - name: AWS_REQUEST_CHECKSUM_CALCULATION
+        value: when_required
+      - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+        value: when_required
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi

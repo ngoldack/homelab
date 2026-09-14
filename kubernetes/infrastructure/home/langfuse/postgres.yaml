@@ -1,0 +1,35 @@
+# Langfuse's transactional store on CloudNativePG (same operator every
+# relational store here uses). Langfuse uses Postgres for projects, prompts,
+# datasets and configuration.
+#
+# The app/database are named langfuse; the password comes from OUR secret
+# (postgres-credentials.sops.yaml) via bootstrap.initdb.secret — that same
+# literal feeds the langfuse HelmRelease's POSTGRES_PASSWORD, so a drift fails
+# loudly at connect time. (Holds the durable state; everything else is
+# disposable.)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: langfuse-database
+  namespace: langfuse
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  bootstrap:
+    initdb:
+      database: langfuse
+      owner: langfuse
+      secret:
+        name: langfuse-database-credentials
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nfs-langfuse-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

@@ -1,0 +1,9 @@
+# Langfuse: open-source LLM engineering / observability platform (UI + API +
+# worker), wired into authentik via native OIDC. Sits alongside Phoenix for
+# LLM tracing/prompts/evals. Edge-gated through the outpost (authentik SSO).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: langfuse
+  labels:
+    gateway.ngoldack.de/edge-ingress: "true"

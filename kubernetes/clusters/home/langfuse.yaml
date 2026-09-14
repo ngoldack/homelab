@@ -1,0 +1,38 @@
+# Langfuse LLM platform app (the deployment values + OIDC), wired on top of
+# the raw infras already in langfuse/ (CNPG database, ValkeyCluster, the sops
+# secrets) and the external stores' operators. Depends on:
+#   - cnpg-operator     -> langfuse-database Cluster/Database CRDs
+#   - valkey-operator   -> ValkeyCluster CRD
+#   - authentik         -> the Issuer the OIDC env points at (edge SSO)
+#   - clickhouse-operator / seaweedfs-operator -> the OLAP + blob stores the
+#     values reference / bundle (SeaweedFS is bundled by the chart, but its
+#     operator pattern matches the repo's store-operator standing rule).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: langfuse
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/langfuse
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+    - name: valkey-operator
+    - name: authentik
+    - name: clickhouse-operator
+    - name: seaweedfs-operator
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

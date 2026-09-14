@@ -1,0 +1,167 @@
+# Langfuse — open-source LLM engineering / observability platform (UI + API +
+# worker; the app anywhere Phoenix does tracing). Pinned to the official
+# langfuse-k8s chart 2.1.0 (app 4.24.0) from the plain HTTP repo in
+# sources.yaml.
+#
+# Store topology — every backing store is external, wired through the chart's
+# native v2 value structure (no bundled sub-charts, no Bitnami leftovers):
+#   - Postgres  -> CloudNativePG `langfuse-database` (pooler svc
+#                  langfuse-database-rw:5432, user/db `langfuse`, password from
+#                  postgres-credentials.sops.yaml via postgresql.auth.existingSecret —
+#                  one owner for the password, a drift fails loudly at connect).
+#   - Redis     -> ValkeyCluster `langfuse` (valkey-operator), headless svc
+#                  valkey-langfuse.langfuse.svc.cluster.local:6379, no password
+#                  (ACL-based auth off; redis.auth.password: null -> REDIS_PASSWORD
+#                  omitted and the connection string carries no auth part).
+#   - ClickHouse-> EXTERNAL host only: clickhouse-langfuse.langfuse.svc.cluster.local:9000,
+#                  ClickHouseCluster CR is owned by the separate
+#                  clickhouse-operator Kustomization (dependsOn below), so no CR
+#                  is created here — values reference the expected svc/port so it
+#                  wires up once that lands.
+#   - S3         -> SeaweedFS, bundled allInOne (s3.deploy: true), keeping the
+#                  chart's happy path (auto credentials + bucket hook) — the
+#                  simplest self-contained delivery.
+#
+# Auth: authentik via OIDC. The chart's native `auth.providers` map only
+# accepts a fixed allowlist (auth0/cognito/azureAd/.../keycloak/okta/workos/
+# custom hand-rolled) and REJECTS an `authentik` provider at render time
+# (validations.yaml) — so authentik is expressed instead through the chart's
+# documented env mechanism:
+#   - langfuse.nextauth.*        -> NEXTAUTH_URL / NEXTAUTH_SECRET (WAS: below)
+#   - langfuse.auth.disableUsernamePassword -> AUTH_DISABLE_USERNAME_PASSWORD
+#   - langfuse.additionalEnv (global, merged into both web + worker pods) ->
+#     AUTH_AUTHENTIK_CLIENT_ID / _SECRET / _ISSUER
+# The two secrets (NEXTAUTH_SECRET + AUTH_AUTHENTIK_CLIENT_SECRET) live in
+# langfuse-secret.sops.yaml and are referenced by valueFrom.secretKeyRef, never
+# inlined here.
+#
+# Sign-up is disabled (features.signUpDisabled) so only authentik logins work;
+# namespaces/pooler are the repo's home conventions (nodeSelector to home).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: langfuse
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: langfuse
+      version: "2.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: langfuse
+      interval: 1h
+  targetNamespace: langfuse
+  releaseName: langfuse
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # We route via the edge (authentik SSO on the gateway of the namespace's
+    # edge-ingress) — the chart's Ingress is unneeded.
+    langfuse:
+      logging:
+        level: info
+      features:
+        # Reports basic usage stats; the repo precedent is a standalone site,
+        # so leave the default to avoid a surprise integration.
+        telemetryEnabled: false
+        # Only authentik logins; disable self-service sign-up.
+        signUpDisabled: true
+      nodeSelector:
+        topology.homelab/site: home
+      # NextAuth (OIDC handshake) — URL is the externally resolvable host.
+      nextauth:
+        url: https://langfuse.ngoldack.de
+        # NEXTAUTH_SECRET — pinned in langfuse-secret.sops.yaml.
+        secret:
+          secretKeyRef:
+            name: langfuse-secret
+            key: NEXTAUTH_SECRET
+      auth:
+        # No username/password login: authentik is the only way in.
+        disableUsernamePassword: true
+      # Global env merged into both the web and worker deployments → these are
+      # the authentik OIDC vars the chart's provider allowlist cannot express.
+      additionalEnv:
+        - name: AUTH_AUTHENTIK_CLIENT_ID
+          value: langfuse-oidc
+        - name: AUTH_AUTHENTIK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: AUTH_AUTHENTIK_CLIENT_SECRET
+        - name: AUTH_AUTHENTIK_ISSUER
+          value: https://authentik.ngoldack.de/application/o/langfuse
+      # Small/normal resources: web + worker keep modest requests, a ceiling
+      # that suits the single-node home cluster.
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+      web:
+        service:
+          type: ClusterIP
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+      worker:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+    # PostgreSQL: external CNPG. postgresql.deploy: false + host + existingSecret
+    # (the CNPG bootstrap Secret postgres-credentials.sops.yaml). deploy:false
+    # suppresses the bundled Postgres sub-chart and its PVC.
+    postgresql:
+      deploy: false
+      host: langfuse-database-rw.langfuse.svc.cluster.local
+      port: 5432
+      auth:
+        username: langfuse
+        existingSecret: langfuse-database-credentials
+        secretKeys:
+          userPasswordKey: password
+        database: langfuse
+    # Redis: external ValkeyCluster, headless svc, no password.
+    redis:
+      deploy: false
+      host: valkey-langfuse.langfuse.svc.cluster.local
+      port: 6379
+      auth:
+        # null -> no REDIS_PASSWORD, connection string has no auth segment.
+        username: "default"
+        password: null
+    # ClickHouse: external (host only; the CR is owned by the clickhouse-operator
+    # Kustomization). cluster.enabled:false disables ON CLUSTER DDL for a
+    # non-clustered external server, and nativePort feeds CLICKHOUSE_MIGRATION_URL.
+    clickhouse:
+      deploy: false
+      host: clickhouse-langfuse.langfuse.svc.cluster.local
+      httpPort: 8123
+      nativePort: 9000
+      database: default
+      cluster:
+        enabled: false
+      auth:
+        username: default
+    # Download/binary uploads go to the chart-bundled SeaweedFS in allInOne mode
+    # (s3.deploy: true) on the default `langfuse` bucket. Keeping the bundled
+    # store is the simplest self-contained delivery and matches the chart's
+    # happy path (auto-provisions credentials + bucket hook). No external pool.
+    s3:
+      deploy: true

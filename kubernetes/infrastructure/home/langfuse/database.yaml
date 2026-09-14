@@ -1,0 +1,17 @@
+# Langfuse needs pgvector for embedding search + pg_trgm for fuzzy text
+# matching; created by the CNPG operator (same phoenix/immich pattern).
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: langfuse-database
+  namespace: langfuse
+spec:
+  name: langfuse
+  owner: langfuse
+  cluster:
+    name: langfuse-database
+  extensions:
+    - name: vector
+      ensure: present
+    - name: pg_trgm
+      ensure: present

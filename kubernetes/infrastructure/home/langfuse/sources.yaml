@@ -1,0 +1,12 @@
+# Langfuse's chart is a plain HTTP Helm repository (GitHub Pages), not OCI —
+# official langfuse-k8s chart, pinned to 2.1.0 (app 4.24.0) in the
+# HelmRelease. No `type` field: the default HelmRepository type is the plain
+# `https` chart-repo protocol.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: langfuse
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://langfuse.github.io/langfuse-k8s

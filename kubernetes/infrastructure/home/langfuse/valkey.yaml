@@ -1,0 +1,14 @@
+# Langfuse's cache/queue store via the valkey-operator (standing rule: every
+# new datastore through its operator). Same cluster-mode single-shard topology
+# as authentik's valkey — the operator only speaks cluster mode, shards:1 makes
+# a single node own all slots so a non-cluster-aware client never sees MOVED.
+# The operator creates the headless Service "valkey-<name>" on 6379.
+# No password (ACL-based auth), flat cluster trust.
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: langfuse
+  namespace: langfuse
+spec:
+  shards: 1
+  replicas: 0

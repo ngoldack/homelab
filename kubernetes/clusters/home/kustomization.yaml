@@ -39,8 +39,13 @@ resources:
   - aigateway-envoy-gateway.yaml
   - aigateway-crds.yaml
   - aigateway.yaml
-  # LLM/OTLP observability (Arize Phoenix, deep trace + prompt analytics).
+# LLM observability (Arize Phoenix, deep trace + prompt analytics).
   - phoenix.yaml
+  # Langfuse LLM platform infra process: the app HelmRelease + OIDC wiring sits
+  # here (its CNPG/valkey/secrets raw infras are its own Kustomization, and it
+  # depends on the clickhouse/seaweedfs operators listed above). Placed after
+  # phoenix so both LLM observability stacks are adjacent/canonical entry order.
+  - langfuse.yaml
   # Langfuse LLM platform infra: ClickHouse + SeaweedFS operators (used as the
   # OLAP/blob stores; postgres + valkey come from the existing CNPG/valkey ops).
   - clickhouse-operator.yaml

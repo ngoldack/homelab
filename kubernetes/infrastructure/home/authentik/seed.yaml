@@ -38,7 +38,7 @@ data:
           external_host: https://headlamp.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       # ---------- hindsight control-plane UI behind the edge outpost ----------
       # The owning application is what gives the outpost its vhost (learned
@@ -56,7 +56,7 @@ data:
           external_host: https://hindsight-ui.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -85,7 +85,7 @@ data:
           external_host: https://phoenix.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -106,7 +106,7 @@ data:
           external_host: https://grafana.ngoldack.de/
           cookie_domain: ngoldack.de
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       # ---------- grafana via OIDC (app federates, no outpost) ----------
       # authentik ships NO groups scope mapping (verified live: the default
@@ -183,7 +183,7 @@ data:
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
             - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow-mfa]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
@@ -291,8 +291,9 @@ data:
           name: mfa-validate
         attrs:
           device_classes: [webauthn, totp, static]
-          # skip during phase 1 (no lockout); flipped to configure in phase 3
-          not_configured_action: skip
+          # skip during phase 1 (no lockout); NOW configure (phase 3): MFA enforced,
+          # unconfigured users routed to configuration_stages enrollment.
+          not_configured_action: configure
           # REQUIRED before flipping to 'configure': the enrollment STAGES
           # (M2M, not a flow) an unconfigured user is routed to. Without these
           # populated, not_configured_action=configure strands unenrolled users

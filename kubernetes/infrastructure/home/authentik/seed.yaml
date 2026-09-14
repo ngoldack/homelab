@@ -484,7 +484,7 @@ data:
       - model: authentik_brands.brand
         state: present
         identifiers:
-          domain: authentik-default
+          domain: authentik.ngoldack.de
         attrs:
           domain: authentik.ngoldack.de
           default: true

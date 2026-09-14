@@ -31,8 +31,11 @@ RUN apt-get update \
 
 # Install the pinned agent-sandbox python SDK (verified on PyPI:
 # k8s-agent-sandbox 1.0.2) and the plugin package itself.
-COPY pyproject.toml /tmp/plugin-build/
-COPY src /tmp/plugin-build/src/
+# NOTE: buildkit runs this Dockerfile with the REPO ROOT as context (the
+# --opt=filename path is repo-relative), so every COPY source below is
+# repo-root-relative, mirroring how the runtime image's Dockerfile is built.
+COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml /tmp/plugin-build/
+COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/src /tmp/plugin-build/src/
 RUN pip install --no-cache-dir "k8s-agent-sandbox==1.0.2" \
     && pip install --no-cache-dir /tmp/plugin-build
 
@@ -40,10 +43,10 @@ RUN pip install --no-cache-dir "k8s-agent-sandbox==1.0.2" \
 # then copy plugin.yaml next to it (Hermes scans this directory for a manifest).
 RUN mkdir -p /opt/data/plugins/agent_sandbox \
     && cp -r /tmp/plugin-build/src/hermes_agent_sandbox /opt/data/plugins/agent_sandbox/
-COPY plugin.yaml /opt/data/plugins/agent_sandbox/plugin.yaml
+COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/plugin.yaml /opt/data/plugins/agent_sandbox/plugin.yaml
 
 # Initial config template (never clobbered at runtime — a PVC overlays /opt/data).
-COPY config-tpl.yaml /opt/data/config.yaml.template
+COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/config-tpl.yaml /opt/data/config.yaml.template
 
 USER hermes
 

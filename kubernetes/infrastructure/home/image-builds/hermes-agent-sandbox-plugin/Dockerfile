@@ -50,5 +50,11 @@ ENV PYTHONPATH=/opt/hermes/plugin-venv/lib/python3.13/site-packages
 
 USER hermes
 
-# ENTRYPOINT/CMD intentionally unchanged: the base image's s6 overlay owns
-# process supervision and plugin loading.
+# ENTRYPOINT override: run the gateway binary DIRECTLY instead of the base
+# image's s6-overlay supervisor. s6's preinit demands /run owned by the
+# container uid and cannot run as a non-root uid under PSA restricted;
+# Kubernetes (StatefulSet restartPolicy) supervises the single gateway
+# process instead. The hermes shim is the base image's own wrapper at
+# /opt/hermes/bin/hermes.
+ENTRYPOINT ["/opt/hermes/bin/hermes"]
+CMD ["gateway", "run"]

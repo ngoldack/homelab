@@ -4,10 +4,11 @@
 # for files (v2 scoped tokens), gRPC-execs into adopted sandboxes directly
 # (user-approved fallback), and calls OpenRouter for the model.
 #
-# Hardening (restricted PSA): runAsNonRoot (hermes uid 10000), fsGroup 10000,
-# RuntimeDefault seccomp, drop ALL caps, read-only rootfs, /tmp emptyDir,
-# no hostPath/sockets/kubeconfig. The API server (8642) is enabled privately
-# behind API_SERVER_KEY; there is no public route in v1.
+# Hardening (restricted PSA): runAsNonRoot (hermes uid 10000), fsGroup
+# 10000, RuntimeDefault seccomp, drop ALL caps, read-only rootfs, /tmp
+# emptyDir, no hostPath/sockets/kubeconfig. s6-overlay is bypassed in the
+# image (hermes shim as ENTRYPOINT), so the gateway runs as the unprivileged
+# hermes uid; Kubernetes supervises the single replica.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

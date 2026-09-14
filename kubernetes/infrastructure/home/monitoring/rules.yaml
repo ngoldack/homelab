@@ -51,9 +51,21 @@ spec:
             summary: "Last available backup too old for {{ $labels.cluster }}"
             description: >-
               The most recent available backup of cluster {{ $labels.cluster }}
-              is {{ printf "%.0f" ((time() - barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) / 3600) }}h
-              old (more than 30h). The daily scheduled backup has not
-              completed in time — check the ScheduledBackup/Backup objects and
-              the plugin sidecar logs; PITR RPO is degraded. A value of
-              1970 (timestamp 0) means the cluster has never had a
-              successful backup.
+              is {{ $value | humanizeDuration }} old (more than 30h). The
+              daily scheduled backup has not completed in time — check the
+              ScheduledBackup/Backup objects and the plugin sidecar logs;
+              PITR RPO is degraded. An age of ~56 years (timestamp 0) means
+              the cluster has never had a successful backup.
+        - alert: BackupMetricsAbsent
+          expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=""})
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CNPG backup metrics absent"
+            description: >-
+              No barman_cloud_cloudnative_pg_io backup-age series is being
+              scraped from any CNPG cluster for over 30m — the plugin sidecar
+              is down, the operator is not reconciling, or the scrape pipeline
+              broke. While absent, the BackupTooOld alert is blind, so treat
+              backup coverage as unverifiable until this resolves.

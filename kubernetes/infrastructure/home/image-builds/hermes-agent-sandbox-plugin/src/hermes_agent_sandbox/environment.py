@@ -77,12 +77,18 @@ class AgentSandboxEnvironment:
         )
         self._claims.create_claim(claim_name)
         self._claim_name = claim_name
-        sandbox_name = self._claims.wait_ready(
-            claim_name, self.config.create_timeout_seconds
-        )
-        self._sandbox_name = sandbox_name
-        self._sandbox_uid = self._claims.get_sandbox_uid(sandbox_name)
-        pod_ip = self._claims.get_sandbox_ip(sandbox_name)
+        try:
+            sandbox_name = self._claims.wait_ready(
+                claim_name, self.config.create_timeout_seconds
+            )
+            self._sandbox_name = sandbox_name
+            self._sandbox_uid = self._claims.get_sandbox_uid(sandbox_name)
+            pod_ip = self._claims.get_sandbox_ip(sandbox_name)
+        except Exception:
+            # Never leave a half-adopted claim: delete it and reset so a
+            # subsequent command lazily re-creates cleanly.
+            self._teardown_sandbox()
+            raise
         self._created_at = time.time()
         if self._transport is None:
             # Provider-created environments carry no transport; build the
@@ -99,14 +105,36 @@ class AgentSandboxEnvironment:
     def _recycle(self) -> None:
         """Idle timeout hit: release this claim and force a fresh one next use."""
         log.info("Sandbox idle >%ss; recycling claim", self.config.idle_timeout_seconds)
-        self._delete_claim()
+        self._teardown_sandbox()
+        self._last_use = time.monotonic()
+        self._ensure_ready()  # re-create immediately
+
+    def _teardown_sandbox(self) -> None:
+        """Delete the claim and release transport state (idempotent).
+
+        Claim deletion is the only real kill: the warm pool's
+        shutdownPolicy=Delete tears the Kata guest down, which terminates
+        every process it hosts. Dropping the transport connection alone
+        leaves the remote process running.
+        """
+        if self._claim_name is not None:
+            try:
+                self._claims.delete_claim(self._claim_name)
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
         self._claim_name = None
         self._sandbox_name = None
         self._sandbox_uid = None
         if self._transport is not None:
-            self._transport.close()
-        self._last_use = time.monotonic()
-        self._ensure_ready()  # re-create immediately
+            try:
+                self._transport.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _cancel_remote(self) -> None:
+        """Cancel the remote process for real: tear the sandbox down so the
+        next command lazily creates a fresh claim."""
+        self._teardown_sandbox()
 
     def _delete_claim(self) -> None:
         if self._claim_name is not None:
@@ -201,12 +229,9 @@ class AgentSandboxEnvironment:
             raise SandboxCommandError(f"sandbox transport error: {exc}") from exc
 
     def _cancel_remote(self) -> None:
-        """Best-effort remote process cancellation (idempotent)."""
-        try:
-            if self._transport is not None:
-                self._transport.cancel()
-        except Exception:  # noqa: BLE001
-            pass
+        """Cancel the remote process for real: tear the sandbox down so the
+        next command lazily creates a fresh claim."""
+        self._teardown_sandbox()
 
     def _timeout_result(self, partial: str) -> Dict[str, Any]:
         return {"output": self._truncate(partial), "returncode": 124, "cwd": self.cwd}
@@ -226,6 +251,7 @@ class AgentSandboxEnvironment:
     ) -> None:
         """Copy a file out of the sandbox through the authenticated Router
         (GET /v1/files with a per-request v2 scoped token; sandboxd REST)."""
+        self._ensure_ready()  # builds transport + adopts claim if first op
         try:
             data = self._transport.fetch_file(remote_path)
         except SandboxTransportError as exc:

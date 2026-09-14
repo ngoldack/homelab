@@ -60,6 +60,27 @@ spec:
         - ports:
             - port: "9090"
               protocol: TCP
+    # Kubernetes API for SandboxClaim lifecycle ONLY (approved claim-RBAC:
+    # the in-cluster SDK creates/reads/deletes claims; no other k8s verbs).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-apiserver is served on the k8s Service CIDR; entity resolution may
+    # race, so allow the service subnet explicitly (same pattern as the
+    # router's own allowlist).
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
     # Model API only.
     - toFQDNs:
         - matchName: openrouter.ai

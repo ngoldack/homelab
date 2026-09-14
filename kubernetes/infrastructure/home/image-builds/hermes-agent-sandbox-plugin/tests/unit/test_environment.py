@@ -54,9 +54,6 @@ class FakeTransport:
     def attach(self, name, uid, pod_ip):
         self.attached.append((name, uid, pod_ip))
 
-    def cancel(self):
-        self.cancelled += 1
-
     def close(self):
         self.closed += 1
 
@@ -154,15 +151,27 @@ def test_timeout_cancels_remote_before_124(tmp_path):
             time.sleep(1.2)
             raise RuntimeError("timed out")
 
-    transport = SlowTransport()
+    claims, transport = FakeClaims(), SlowTransport()
     env = AgentSandboxEnvironment(
-        make_env(tmp_path), claims=FakeClaims(), transport=transport
+        make_env(tmp_path), claims=claims, transport=transport
     )
     start = time.monotonic()
     result = env.execute("sleep 100", timeout=1)
     assert result["returncode"] == 124
-    assert transport.cancelled == 1
-    assert time.monotonic() - start < 5
+    # Real cancellation: the claim is DELETED (shutdownPolicy Delete kills
+    # the guest and every process in it — dropping the connection alone
+    # would leave the remote process running), state reset, transport closed.
+    assert claims.deleted == [claims.created[0]]
+    assert env._claim_name is None
+    assert env._sandbox_name is None
+    assert transport.closed == 1
+    # The next command lazily creates a FRESH claim + sandbox.
+    result2 = env.execute("sleep 100", timeout=1)
+    assert result2["returncode"] == 124
+    assert len(claims.created) == 2
+    assert len(claims.deleted) == 2
+    assert len(transport.attached) == 2
+    assert time.monotonic() - start < 60
 
 
 def test_transport_failure_before_timeout_is_command_error(tmp_path):

@@ -293,7 +293,11 @@ data:
           device_classes: [webauthn, totp, static]
           # skip during phase 1 (no lockout); flipped to configure in phase 3
           not_configured_action: skip
-          configure_flow: !KeyOf enroll-flow
+          # REQUIRED before flipping to 'configure': the enrollment STAGES
+          # (M2M, not a flow) an unconfigured user is routed to. Without these
+          # populated, not_configured_action=configure strands unenrolled users
+          # at this stage with no enrollment path.
+          configuration_stages: [!KeyOf webauthn-enroll, !KeyOf totp-enroll, !KeyOf recovery-enroll]
       - id: mfa-identification
         model: authentik_stages_identification.identificationstage
         state: present

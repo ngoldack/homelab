@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: hermes
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:78d620155719214e3750ce2f3815a3c6e78d26c7975e695aa36b2fcf72399882
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:f482a5a8cf745b2e6842646cc10ac375dbc17a1f4e4e8436d222eef38eb73fc5
           args: ["gateway", "run"]
           env:
             - name: OPENROUTER_API_KEY

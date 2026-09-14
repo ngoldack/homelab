@@ -46,6 +46,10 @@ sleep 3
 CLAIMS=$("${KUBECTL[@]}" -n hermes-sandbox get sandboxclaims.extensions.agents.x-k8s.io -o name 2>/dev/null | wc -l | tr -d ' ')
 PODS=$("${KUBECTL[@]}" -n hermes-sandbox get pods 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
 echo "active claims=$CLAIMS sandbox pods=$PODS"
+if [ "$CLAIMS" -lt 1 ]; then
+  echo "FAIL: task ran WITHOUT a sandbox claim (terminal backend not agent_sandbox?)" >&2
+  exit 1
+fi
 
 echo "== cleanup assertions =="
 sleep 10

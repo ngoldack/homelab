@@ -50,6 +50,20 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
     def display_name(self) -> str:
         return "Agent Sandbox (Kubernetes Kata)"
 
+    def env_description(self) -> str:
+        """Injected into the session so the model knows what the sandbox is
+        and what to expect (Hermes TerminalEnvironmentProvider surface)."""
+        return (
+            "a Kubernetes Kata sandbox (agent-sandbox 'hermes-go' warm pool, "
+            "Debian bookworm) with Go 1.26.5 on PATH, git, curl, jq, "
+            "ripgrep; writable /workspace (project root) and /tmp; HOME=/tmp "
+            "so toolchain caches work. Network egress is allowlisted: PyPI, "
+            "GitHub raw content and the Go module proxy only — the "
+            "Kubernetes/Talos/Proxmox APIs, OpenRouter and internal services "
+            "are blocked. Files can additionally be transferred through the "
+            "authenticated sandbox-router REST API."
+        )
+
     @property
     def skip_container_guards(self) -> bool:
         # Sandbox is disposable and network-isolated; commands need no

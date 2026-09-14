@@ -64,6 +64,14 @@ def test_create_environment_scopes_task(env_with_router):
     assert env.timeout == 99
 
 
+def test_env_description_informs_about_sandbox():
+    desc = AgentSandboxProvider().env_description()
+    assert "Kata" in desc
+    assert "/workspace" in desc
+    assert "Go 1.26.5" in desc
+    assert "blocked" in desc
+
+
 def test_register_wires_provider(env_with_router):
     ctx = SimpleNamespace(registered=[])
     ctx.register_terminal_environment_provider = ctx.registered.append

@@ -181,3 +181,10 @@ spec:
     # happy path (auto-provisions credentials + bucket hook). No external pool.
     s3:
       deploy: true
+      # The bundled SeaweedFS allInOne pod needs a real StorageClass for its
+      # data PVC (the chart default is empty -> PVC never binds -> whole stack
+      # blocks on "unbound PVC"). Use the repo's truenas-fast-nfs and a modest
+      # size (default is 50Gi — overkill for a homelab).
+      dataStorage:
+        size: 10Gi
+        storageClass: truenas-fast-nfs

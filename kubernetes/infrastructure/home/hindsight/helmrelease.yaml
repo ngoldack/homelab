@@ -96,6 +96,16 @@ spec:
       # end-to-end 9-14s/diff; 212s under contention). 3 allow parallel chains.
       # Chart default is 2; we were below it at 1.
       replicaCount: 3
+      # Conservative per-worker resources so 3 replicas (3000m limits / 600m
+      # requests total) fit on the shared home node without starving it. The
+      # default 2000m limit x3 would exceed the node's allocatable requests.
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
       # env written out IN FULL (not `*llm-env`): a YAML anchor substitutes the
       # whole map and cannot be appended to. The worker needs the same model
       # config (the chart does NOT merge api.env into the worker) PLUS its

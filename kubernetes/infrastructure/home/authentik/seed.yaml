@@ -402,6 +402,30 @@ data:
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]
           negate: false
+      # ---- login brute-force defense (ReputationPolicy) ----
+      # Declarative home for the live-created `homelab-login-bruteforce` policy.
+      # Bound at FLOW level with `negate: true`: ReputationPolicy.passes() returns
+      # `score <= threshold` (e.g. clean score 0 <= -5 = False), so negate=false
+      # made default-authentication-flow NON-applicable for every clean client —
+      # authorize 404'd for all apps (handle_no_permission -> Http404). Negated,
+      # clean clients pass (policy False -> negated True), genuinely suspicious
+      # clients are blocked.
+      - model: authentik_policies_reputation.reputationpolicy
+        state: present
+        identifiers:
+          name: homelab-login-bruteforce
+        attrs:
+          check_ip: true
+          check_username: true
+          threshold: -5
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          order: 0
+        attrs:
+          policy: !Find [authentik_policies_reputation.reputationpolicy, [name, homelab-login-bruteforce]]
+          negate: true
       # ---- base URL / brand domain ----
       # The "base URL not configured" banner clears once the default Brand has
       # its real domain (authentik derives base_url from it; env AUTHENTIK_BASE_URL

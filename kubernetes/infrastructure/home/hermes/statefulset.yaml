@@ -103,20 +103,44 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/data
-            - name: config
-              mountPath: /opt/data/config.yaml
-              subPath: config.yaml
-              readOnly: true
             - name: router-token
               mountPath: /opt/data/router-token
               subPath: token
               readOnly: true
             - name: tmp
               mountPath: /tmp
+      initContainers:
+        - name: seed-config
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:4549af09b1f4c0c939ef6849f6dafc4b0e3be2c84b1224c6c431855482e773e1
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              mkdir -p /opt/data &&
+              [ -f /opt/data/config.yaml ] || cp /opt/boot/config.yaml /opt/data/config.yaml
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: boot-config
+              mountPath: /opt/boot
+              readOnly: true
       volumes:
-        - name: config
+        - name: boot-config
           configMap:
             name: hermes-config
+            items:
+              - key: config.yaml
+                path: config.yaml
         - name: router-token
           secret:
             secretName: hermes-secret

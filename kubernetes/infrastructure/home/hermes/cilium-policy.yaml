@@ -95,3 +95,23 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # PyPI for Hermes lazy-dep installs (faster-whisper, edge-tts, …).
+    - toCIDRSet:
+        - cidr: 151.101.0.0/16  # Fastly anycast (pypi.org simple index)
+        - cidr: 146.75.0.0/16   # Fastly anycast (files.pythonhosted.org)
+        - cidr: 199.232.0.0/16  # Fastly anycast (additional edge ranges)
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Model catalog + app update fetches (advisory; keeps the dashboard's
+    # model list and update banner working). GitHub raw content ranges.
+    - toCIDRSet:
+        - cidr: 185.199.108.0/22
+        - cidr: 185.199.109.0/22
+        - cidr: 185.199.110.0/22
+        - cidr: 185.199.111.0/22
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

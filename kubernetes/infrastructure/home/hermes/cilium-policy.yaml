@@ -81,10 +81,16 @@ spec:
               protocol: TCP
             - port: "6443"
               protocol: TCP
-    # Model API only.
-    - toFQDNs:
-        - matchName: openrouter.ai
-        - matchName: api.openrouter.ai
+    # Model API. toFQDNs is INERT in this cluster: cilium's DNS proxy runs
+    # without transparent mode (tofu/home/cilium.tf — split-horizon DNS LB
+    # conflict), so FQDN rules never learn IPs (empty `cilium fqdn cache`).
+    # CIDR it instead: OpenRouter is served from Cloudflare anycast ranges.
+    # OPS: revisit via the internal AI gateway (aigateway) when Hermes
+    # supports an OpenAI-compatible base_url; the sandbox stack's github /
+    # proxy.golang.org toFQDNs rules have the same latent inertness.
+    - toCIDRSet:
+        - cidr: 104.18.0.0/15
+        - cidr: 172.64.0.0/13
       toPorts:
         - ports:
             - port: "443"

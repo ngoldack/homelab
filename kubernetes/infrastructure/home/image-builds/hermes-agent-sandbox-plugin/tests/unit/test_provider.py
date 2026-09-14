@@ -7,8 +7,32 @@ from types import SimpleNamespace
 from hermes_agent_sandbox.environment import AgentSandboxEnvironment
 from hermes_agent_sandbox.provider import (
     BACKEND_NAME,
+    SANDBOX_ENV_FACTS,
     AgentSandboxProvider,
+    register,
 )
+
+
+def test_module_register_registers_backend_and_prompt_section():
+    ctx = SimpleNamespace(
+        registered=[], sections={}, register_system_prompt_section=None
+    )
+
+    def _reg_provider(p):
+        ctx.registered.append(p)
+
+    def _reg_section(section_id, content, **kwargs):
+        ctx.sections[section_id] = (content, kwargs)
+
+    ctx.register_terminal_environment_provider = _reg_provider
+    ctx.register_system_prompt_section = _reg_section
+    register(ctx)
+    assert len(ctx.registered) == 1
+    assert isinstance(ctx.registered[0], AgentSandboxProvider)
+    assert "agent_sandbox_env" in ctx.sections
+    content, kwargs = ctx.sections["agent_sandbox_env"]
+    assert content == SANDBOX_ENV_FACTS
+    assert kwargs.get("position") == "after_memory"
 
 
 def test_isolation_classification():
@@ -66,10 +90,12 @@ def test_create_environment_scopes_task(env_with_router):
 
 def test_env_description_informs_about_sandbox():
     desc = AgentSandboxProvider().env_description()
+    assert desc == SANDBOX_ENV_FACTS
     assert "Kata" in desc
     assert "/workspace" in desc
     assert "Go 1.26.5" in desc
-    assert "blocked" in desc
+    assert "DNS only" in desc  # no external egress — honest about it
+    assert "PyPI" not in desc or "no" in desc  # no download promises
 
 
 def test_register_wires_provider(env_with_router):

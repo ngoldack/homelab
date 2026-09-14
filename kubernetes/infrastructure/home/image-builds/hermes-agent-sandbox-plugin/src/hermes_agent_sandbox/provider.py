@@ -34,6 +34,37 @@ log = logging.getLogger(__name__)
 
 BACKEND_NAME = "agent_sandbox"
 
+# One truthful, bounded description of the execution environment. It is
+# rendered into every new session prompt (env_description + system-prompt
+# section) so the model does not hallucinate network or toolchain
+# availability. VERIFIED FACTS: the sandbox's toFQDNs egress rules are
+# inert in this cluster (DNS proxy transparent mode off), so the guest has
+# DNS-only egress; the Go toolchain lives in the hermes-sandbox-runtime
+# image at /usr/local/go (1.26.5); /workspace and /tmp are emptyDir mounts.
+SANDBOX_ENV_FACTS = (
+    "terminal commands run in a Kubernetes Kata sandbox: Debian bookworm "
+    "guest with Go 1.26.5 at /usr/local/go/bin (on PATH), git, curl, jq, "
+    "ripgrep. Writable directories: /workspace (the project root, recreated "
+    "per session — state does not survive sandbox recycle) and /tmp "
+    "(HOME=/tmp, so toolchain caches work). Network: DNS only — there is NO "
+    "external network egress from the sandbox; package/module downloads "
+    "(PyPI, Go proxy, GitHub) fail unless the operator later allows them. "
+    "Kubernetes, Talos, Proxmox and all internal services are unreachable. "
+    "Use existing dependencies and local files; do not attempt downloads."
+)
+
+
+def register(ctx) -> None:
+    """Hermes plugin entry-point contract (plugins_loader.py): the loader
+    imports the entry-point MODULE and calls ``register(ctx)`` on it —
+    the module-level function, not the class method."""
+    ctx.register_terminal_environment_provider(AgentSandboxProvider())
+    ctx.register_system_prompt_section(
+        "agent_sandbox_env",
+        SANDBOX_ENV_FACTS,
+        position="after_memory",
+    )
+
 
 class AgentSandboxProvider(TerminalEnvironmentProvider):
     """`terminal.backend: agent_sandbox` — run commands in a Kubernetes Agent
@@ -52,17 +83,8 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
 
     def env_description(self) -> str:
         """Injected into the session so the model knows what the sandbox is
-        and what to expect (Hermes TerminalEnvironmentProvider surface)."""
-        return (
-            "a Kubernetes Kata sandbox (agent-sandbox 'hermes-go' warm pool, "
-            "Debian bookworm) with Go 1.26.5 on PATH, git, curl, jq, "
-            "ripgrep; writable /workspace (project root) and /tmp; HOME=/tmp "
-            "so toolchain caches work. Network egress is allowlisted: PyPI, "
-            "GitHub raw content and the Go module proxy only — the "
-            "Kubernetes/Talos/Proxmox APIs, OpenRouter and internal services "
-            "are blocked. Files can additionally be transferred through the "
-            "authenticated sandbox-router REST API."
-        )
+        and what to expect (consumed by agent/prompt_builder.py)."""
+        return SANDBOX_ENV_FACTS
 
     @property
     def skip_container_guards(self) -> bool:
@@ -162,10 +184,3 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
             return (False, f"HTTP {exc.code}")
         except Exception as exc:  # noqa: BLE001
             return (False, str(exc))
-
-
-def register(ctx) -> None:
-    """Hermes plugin entry-point contract (plugins_loader.py): the loader
-    imports the entry-point MODULE and calls ``register(ctx)`` on it —
-    the module-level function, not the class method."""
-    ctx.register_terminal_environment_provider(AgentSandboxProvider())

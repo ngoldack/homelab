@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: hermes
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:44da0b19a6845ac849e6caa6d7694a8ba3fd26944960a6bc9e518ef60cdf8f51
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
           args: ["gateway", "run"]
           env:
             - name: OPENROUTER_API_KEY
@@ -115,7 +115,7 @@ spec:
               mountPath: /tmp
       initContainers:
         - name: seed-config
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:44da0b19a6845ac849e6caa6d7694a8ba3fd26944960a6bc9e518ef60cdf8f51
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
           command: ["/bin/sh", "-c"]
           args:
             - >-

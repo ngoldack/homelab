@@ -12,7 +12,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-sandbox-runtime-c1376ef
+  name: build-hermes-sandbox-runtime-2be5991
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -36,7 +36,7 @@ spec:
             - --tlskey=/certs/tls.key
             - build
             - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#c1376ef937716c0fb89d1ece05e326d7e3befae9
+            - --opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile
             - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.2,push=true
             - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache,mode=max

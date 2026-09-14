@@ -106,6 +106,21 @@ spec:
         limits:
           cpu: 1000m
           memory: 2Gi
+      # Spread the 3 worker replicas across the two home nodes (podAntiAffinity):
+      # all 3 can otherwise co-schedule on one 10-core node and, being burstable
+      # to 1000m each, compete for CPU during retain bursts — the exact
+      # contention that showed 212s/diff. Workers are I/O-bound on OpenRouter, so
+      # spreading only helps; preferred (not required) so placement still works if
+      # one home node is full.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: worker
+                topologyKey: kubernetes.io/hostname
       # env written out IN FULL (not `*llm-env`): a YAML anchor substitutes the
       # whole map and cannot be appended to. The worker needs the same model
       # config (the chart does NOT merge api.env into the worker) PLUS its

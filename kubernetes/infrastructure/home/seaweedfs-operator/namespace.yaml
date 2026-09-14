@@ -1,0 +1,7 @@
+# SeaweedFS operator namespace (github.com/seaweedfs/seaweedfs-operator).
+# Reconciles Seaweed (SeaweedFS cluster), SeaweedCSIDriver and related CRs;
+# webhook certs issued by cert-manager.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: seaweedfs-operator

@@ -1,0 +1,13 @@
+# Official ClickHouse operator (github.com/ClickHouse/clickhouse-operator),
+# published as an OCI Helm chart on GHCR. Version pinned from the `helm pull`
+# of oci://ghcr.io/clickhouse/clickhouse-operator-helm (chart 0.0.7, images
+# altinity/clickhouse-operator).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: clickhouse-operator
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/clickhouse

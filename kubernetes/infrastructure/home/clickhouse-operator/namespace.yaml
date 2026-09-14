@@ -1,0 +1,7 @@
+# ClickHouse operator namespace. The operator installs its own CRDs +
+# webhooks (requires cert-manager, present cluster-wide) and a
+# ClickHouseCluster controller in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clickhouse-operator

@@ -41,6 +41,10 @@ resources:
   - aigateway.yaml
   # LLM/OTLP observability (Arize Phoenix, deep trace + prompt analytics).
   - phoenix.yaml
+  # Langfuse LLM platform infra: ClickHouse + SeaweedFS operators (used as the
+  # OLAP/blob stores; postgres + valkey come from the existing CNPG/valkey ops).
+  - clickhouse-operator.yaml
+  - seaweedfs-operator.yaml
   # Agent Sandbox (controller + authenticated Router, self-contained CRDs) is
   # the base; hermes-sandbox (Kata RuntimeClass + template/warm pool) depends
   # on it; hermes (the gateway StatefulSet) depends on both.

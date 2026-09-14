@@ -1,0 +1,30 @@
+# Official ClickHouse operator (github.com/ClickHouse/clickhouse-operator).
+# Installs the ClickHouseCluster / KeeperCluster CRDs, the operator Deployment,
+# RBAC, and a cert-manager-issued webhook (cluster already runs cert-manager).
+# Watches all namespaces by default (watchNamespaces=[]).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: clickhouse-operator
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: clickhouse-operator-helm
+      version: "0.0.7"
+      sourceRef:
+        kind: HelmRepository
+        name: clickhouse-operator
+      interval: 1h
+  targetNamespace: clickhouse-operator
+  releaseName: clickhouse-operator
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values: {}

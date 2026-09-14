@@ -1,0 +1,29 @@
+# ClickHouse operator (github.com/ClickHouse/clickhouse-operator) — provides the
+# ClickHouseCluster / KeeperCluster CRDs for Langfuse's OLAP trace store. Applies
+# before the langfuse app so its ClickHouse CR can dry-run.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: clickhouse-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/clickhouse-operator
+  prune: true
+  wait: true
+  timeout: 5m
+  retryInterval: 2m
+  dependsOn:
+    - name: cert-manager
+    - name: cluster-vars
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

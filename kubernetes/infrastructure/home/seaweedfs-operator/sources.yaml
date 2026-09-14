@@ -1,0 +1,12 @@
+# Official SeaweedFS operator chart (github.com/seaweedfs/seaweedfs-operator),
+# published on GitHub Pages: https://seaweedfs.github.io/seaweedfs-operator/.
+# Pin 0.1.42 from that repo's helm index.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: seaweedfs-operator
+  namespace: flux-system
+spec:
+  type: helm
+  interval: 1h
+  url: https://seaweedfs.github.io/seaweedfs-operator/

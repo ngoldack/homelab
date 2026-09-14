@@ -38,9 +38,9 @@ spec:
             - --frontend=dockerfile.v0
             - --opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.2,push=true
-            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache
+            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3,push=true
+            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v2-v2,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v2
             - --progress=plain
           env:
             - name: DOCKER_CONFIG

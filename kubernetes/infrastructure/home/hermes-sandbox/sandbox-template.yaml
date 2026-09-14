@@ -49,9 +49,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: runtime
-          # Digest-pinned zot ref — manifest digest of the image pushed by
-          # build-hermes-sandbox-runtime-2be5991; re-pin by bumping that Job.
-          image: registry.ngoldack.de/hermes-sandbox-runtime@sha256:47ad67d4d1468798031a65cbc73bc1e7f87dbafef71ba06717822c68d06d122c
+          # Digest-pinned zot ref — manifest digest of hermes-sandbox-runtime:1.0.3
+          # (build-hermes-sandbox-runtime-2be5991); re-pin by bumping that Job.
+          image: registry.ngoldack.de/hermes-sandbox-runtime@sha256:8317b00f8aa3801b9dc5746f18178a0f4ec3df1e1b51a24e8468b1a3352117f1
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

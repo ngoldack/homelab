@@ -3,14 +3,14 @@
 # Hermes base image (nousresearch/hermes-agent:v2026.9.7), installs the
 # agent-sandbox SDK + plugin into a plain venv, and registers the plugin via
 # the hermes_agent.plugins entry point. Pushed digest (pinned in the
-# StatefulSet): sha256:4549af09b1f4c0c939ef6849f6dafc4b0e3be2c84b1224c6c431855482e773e1.
+# StatefulSet): sha256:44da0b19a6845ac849e6caa6d7694a8ba3fd26944960a6bc9e518ef60cdf8f51.
 #
 # RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
 # tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-6d463b3
+  name: build-hermes-agent-sandbox-plugin-4fdc44d
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -32,7 +32,7 @@ spec:
             - --tlskey=/certs/tls.key
             - build
             - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#6d463b375464240f9c0f3a78702cb57745b2f277
+            - --opt=context=https://github.com/ngoldack/homelab.git#4fdc44d6ea0425ebee21968c21a0e450c24fb198
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile
             - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0,push=true
             - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max

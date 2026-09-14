@@ -31,7 +31,12 @@ spec:
   containerTemplate:
     image:
       repository: clickhouse/clickhouse-server
-      tag: 25.7-alpine
+      # 26.4 is the langfuse-k8s chart's recommended server version for
+      # Langfuse v4: the app's ClickHouse migrations (e.g. 0039_create_events_full)
+      # use full-text index syntax `TYPE text(tokenizer = ...)` that ClickHouse
+      # 25.7 cannot parse ("Expected literal"), which left migration 39 dirty
+      # and web/worker crash-looping. Keeper tag must stay aligned (keeper.yaml).
+      tag: "26.4"
     # Small/normal resources: modest requests with a memory ceiling that suits
     # the single-node home cluster.
     resources:

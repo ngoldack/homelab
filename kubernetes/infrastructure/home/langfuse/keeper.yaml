@@ -12,7 +12,9 @@ spec:
   containerTemplate:
     image:
       repository: clickhouse/clickhouse-keeper
-      tag: 25.7-alpine
+      # Aligned with the ClickHouse server tag (clickhouse.yaml) — the chart
+      # pairs keeper "26.4" with server "26.4".
+      tag: "26.4"
     resources:
       requests:
         cpu: 100m

@@ -1,0 +1,60 @@
+# RBAC for the Hermes gateway ServiceAccount in /namespace hermes/.
+#
+# WHY this grant is data-plane-only, and why it exists here at all:
+# The Go sandbox-router is strictly a proxy: it routes to ALREADY-ADOPTED
+# sandboxes and never creates SandboxClaims/Sandboxes. So the gateway itself
+# must create, watch, and delete its own SandboxClaims over the Kubernetes API
+# (in-cluster, using the projected token of ServiceAccount `hermes`). This is
+# the MINIMAL grant that path needs — derived from the actual python SDK
+# callsites (k8s_agent_sandbox.k8s_helper.K8sHelper) this plugin drives:
+#
+#   * create_sandbox_claim / delete_sandbox_claim / wait_for_claim_ready
+#     / list_sandbox_claims / get_sandbox_claim -> SandboxClaim CRUD + watch
+#     (custom object verbs on extensions.agents.x-k8s.io.v1beta1.sandboxclaims).
+#   * SandboxClaim adoption readiness is observed via the SDK's watch
+#     (listNamespacedCustomObject), which the Kubernetes API serves as a
+#     `list` + `watch` on the sandboxclaims collection.
+#   * get_sandbox (custom object get) resolves the adopted Sandbox's
+#     metadata.uid, which the Router's scoped-token-v2 authorization target
+#     requires (the `X-Sandbox-Uid` header + the uid claim). Without `get` on
+#     sandboxes the gateway cannot mint a routable v2 token.
+#
+# NO pods, NO secrets, NO exec, NO port-forward, NO Template/WarmPool mutation,
+# NO cluster-scoped roles, NO other namespaces. Read-only on warmpools is not
+# granted because the gateway addresses the pool by the hardcoded name
+# `hermes-go` inside the claim's warmPoolRef — it never enumerates or reads
+# the pool resource itself.
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ServiceAccount
+metadata:
+  name: hermes
+  namespace: hermes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-claims
+  namespace: hermes-sandbox
+rules:
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hermes-sandbox-claims
+  namespace: hermes-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-claims
+subjects:
+  - kind: ServiceAccount
+    name: hermes
+    namespace: hermes

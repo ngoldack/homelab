@@ -1,0 +1,11 @@
+# hermes — the Hermes gateway namespace. PSA restricted: the gateway holds
+# the router token and the OpenRouter key, so only a hardened pod may run
+# here (restricted is the floor; see the StatefulSet's securityContext).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

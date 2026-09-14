@@ -1,0 +1,16 @@
+# hermes — ClusterIP service for the private OpenAI-compatible API server
+# (port 8642, bearer API_SERVER_KEY). No public route in v1.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes
+  ports:
+    - name: api
+      port: 8642
+      targetPort: 8642
+      protocol: TCP

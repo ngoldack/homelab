@@ -230,7 +230,8 @@ tasks:
         if [ "$nested" = "Y" ] || [ "$nested" = "1" ]; then
           echo "NESTED VIRT OK: kvm_intel.nested=${nested} on pmx-main"
         else
-          echo "NESTED VIRT NOT ENABLED on pmx-main (10.20.10.21, kvm_intel.nested='${nested:-<unreadable>}') — enable it and reboot before tofu apply" >&2
+          echo "NESTED VIRT NOT ENABLED on pmx-main (10.20.10.21, kvm_intel.nested='${nested:-<unreadable>}')" >&2
+          echo "  — enable it and reboot before tofu apply" >&2
           exit 1
         fi
 
@@ -241,7 +242,7 @@ tasks:
         set -eu
         [ -f kubeconfig-home.yaml ]
         if ! kubectl --kubeconfig kubeconfig-home.yaml get ns hermes-sandbox >/dev/null 2>&1; then
-          echo "hermes-sandbox namespace missing — apply kubernetes/infrastructure/home/hermes-sandbox/namespace.yaml first" >&2
+          echo "hermes-sandbox namespace missing — apply hermes-sandbox/namespace.yaml first" >&2
           exit 1
         fi
         kubectl --kubeconfig kubeconfig-home.yaml apply -f - <<'EOF'
@@ -290,7 +291,7 @@ tasks:
         [ "$rc" = "kata" ] || { echo "FAIL: runtimeClassName=$rc" >&2; exit 1; }
         uname_out=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox logs kata-smoke-test)
         echo "guest: $uname_out"
-        echo "$uname_out" | grep -qi talos && { echo "FAIL: guest kernel looks like the Talos host kernel (runc fallback?)" >&2; exit 1; }
+        echo "$uname_out" | grep -qi talos && { echo "FAIL: guest looks like the Talos host kernel" >&2; exit 1; }
         if kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
           exec kata-smoke-test -- test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token; then
           echo "OK: no serviceaccount token in guest"

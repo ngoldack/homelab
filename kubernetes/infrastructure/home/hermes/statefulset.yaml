@@ -1,0 +1,120 @@
+# hermes — hardened single-replica Hermes gateway running the agent_sandbox
+# terminal backend. Holds NO Kubernetes credentials beyond its own claim
+# RBAC (approved scoped grant in rbac.yaml): it talks to the sandbox-router
+# for files (v2 scoped tokens), gRPC-execs into adopted sandboxes directly
+# (user-approved fallback), and calls OpenRouter for the model.
+#
+# Hardening (restricted PSA): runAsNonRoot (hermes uid 10000), fsGroup 10000,
+# RuntimeDefault seccomp, drop ALL caps, read-only rootfs, /tmp emptyDir,
+# no hostPath/sockets/kubeconfig. The API server (8642) is enabled privately
+# behind API_SERVER_KEY; there is no public route in v1.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  serviceName: hermes
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes
+    spec:
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        fsGroup: 10000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hermes
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:25ab901b0729476a0b278d0db96da34f028a9ba14196f1f7d85d01b994e7ec27
+          args: ["gateway", "run"]
+          env:
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: OPENROUTER_API_KEY
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: API_SERVER_KEY
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: API_SERVER_PORT
+              value: "8642"
+            - name: AGENT_SANDBOX_ROUTER_URL
+              value: http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080
+            - name: AGENT_SANDBOX_ROUTER_TOKEN_FILE
+              value: /opt/data/router-token
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            tcpSocket:
+              port: 8642
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: 8642
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8642
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: config
+              mountPath: /opt/data/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: router-token
+              mountPath: /opt/data/router-token
+              subPath: token
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: hermes-config
+        - name: router-token
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: AGENT_SANDBOX_ROUTER_TOKEN
+                path: token
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: truenas-fast-nfs
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,20 +1,20 @@
-# hermes-sandbox — the Kata sandbox namespace + RuntimeClass + runtime
-# template/warm pool. wait:true: hermes (the gateway) applies only after the
-# warm pool reports a ready sandbox; a half-provisioned template must never
-# feed the gateway.
+# hermes — the Hermes gateway. Applies only after the sandbox stack
+# (controller/router) and the warm pool namespace are healthy; the gateway
+# needs both to run its first command.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: hermes-sandbox
+  name: hermes
   namespace: flux-system
 spec:
   interval: 10m
-  path: ./kubernetes/infrastructure/home/hermes-sandbox
+  path: ./kubernetes/infrastructure/home/hermes
   prune: true
   wait: true
   timeout: 20m
   retryInterval: 2m
   dependsOn:
+    - name: hermes-sandbox
     - name: agent-sandbox
     - name: network
   sourceRef:

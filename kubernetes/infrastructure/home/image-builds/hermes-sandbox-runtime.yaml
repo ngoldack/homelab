@@ -1,0 +1,64 @@
+# Build the Hermes sandbox runtime image (sandboxd + Go toolchain) pinned to
+# agent-sandbox v1.0.2 and our repo commit c1376ef (which carries the
+# Dockerfile at kubernetes/infrastructure/home/image-builds/hermes-sandbox-
+# runtime/Dockerfile — see that file for the content WHEREFORE).
+#
+# Context is this same repo pinned by full commit SHA: the Dockerfile at that
+# commit fetches kubernetes-sigs/agent-sandbox v1.0.2 itself (git clone in the
+# build stage), so the whole image is reproducible from two pinned SHAs.
+#
+# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and
+# image tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-hermes-sandbox-runtime-c1376ef
+  namespace: buildkit
+spec:
+  backoffLimit: 2
+  # Go module fetch + sandboxd build + apt install; first build has no
+  # registry cache. 1h is generous without being a hang.
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: buildctl
+          image: moby/buildkit:v0.31.0
+          command:
+            - buildctl
+          args:
+            - --addr=tcp://buildkitd:1234
+            - --tlscacert=/certs/ca.crt
+            - --tlscert=/certs/tls.crt
+            - --tlskey=/certs/tls.key
+            - build
+            - --frontend=dockerfile.v0
+            - --opt=context=https://github.com/ngoldack/homelab.git#c1376ef937716c0fb89d1ece05e326d7e3befae9
+            - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile
+            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.2,push=true
+            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache
+            - --progress=plain
+          env:
+            - name: DOCKER_CONFIG
+              value: /docker
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: docker
+              mountPath: /docker
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: buildctl-client-tls
+        - name: docker
+          secret:
+            secretName: registry-credentials
+            items:
+              - key: .dockerconfigjson
+                path: config.json

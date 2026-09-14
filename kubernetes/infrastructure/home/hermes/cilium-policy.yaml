@@ -1,0 +1,70 @@
+# hermes Cilium policies — default-deny in + out; the gateway's ONLY egress
+# is cluster DNS, the sandbox Router (files, agent-sandbox-system), the
+# adopted sandbox pods (gRPC exec, hermes-sandbox:9090) and the model API.
+# No ingress is needed in v1: the API server is reached via kubectl exec /
+# in-pod loops and nothing in-cluster calls the gateway.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-default-deny
+  namespace: hermes
+spec:
+  description: >-
+    Deny-all baseline for the gateway pod. The allow doc below carves out
+    exactly the egress Hermes needs; nothing is permitted inbound.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+# hermes egress allowlist — DNS, Router (files), sandbox pods (gRPC exec),
+# and the model API only. Deliberately NOT the Kubernetes API, Talos, Proxmox
+# or any management plane: the gateway cannot create pods, exec, port-forward
+# or read secrets even if network access were granted.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-egress-allowlist
+  namespace: hermes
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Router REST for file transfer (v2 scoped tokens).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+            app.kubernetes.io/name: sandbox-router
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Direct gRPC exec into adopted sandboxes (user-approved fallback).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+    # Model API only.
+    - toFQDNs:
+        - matchName: openrouter.ai
+        - matchName: api.openrouter.ai
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

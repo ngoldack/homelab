@@ -119,7 +119,7 @@ before adopting new fields.
 | Claim created but exec fails | Warm pool down (`sandboxwarmpool` replicas); sandbox ingress policy; gRPC port 9090 reachable only from `hermes`/`agent-sandbox-system` |
 | Model calls fail ("offline") | hermes egress: Cloudflare CIDR rule (104.18.0.0/15, 172.64.0.0/13:443); kube-apiserver egress for claims |
 | `router-token` wrong size | Must be exactly 32 bytes; token under `data:` (base64), not stringData |
-| Sessions run LOCAL despite `terminal.backend: agent_sandbox` | A hermes-generated `config.yaml` (with `_config_version:` marker) from an early boot silently reverted the backend; the seed initContainer replaces template-shaped configs once — verify `hermes config get terminal.backend` == `agent_sandbox` |
+| Sessions run LOCAL despite `terminal.backend: agent_sandbox` | A hermes-generated `config.yaml` from an early boot (no terminal key) can shadow the operator config; the seed initContainer only replaces a MISSING file (`[ -f ] \|\| cp`), so fix once by removing the stale file and rolling. Verify `hermes config get terminal.backend` == `agent_sandbox` (TERMINAL_ENV=agent_sandbox is the hard override) |
 | Desktop connects then WS drops (~1s) | Dashboard couldn't persist config (`os.replace` EBUSY on a read-only config mount) — config.yaml must live on the PVC (seeded by initContainer), never a mounted ConfigMap |
 | Sandbox `go test` fails "read-only file system" on build cache | Runtime image must set `HOME=/tmp` (writable emptyDir); runtime ≥1.0.3 has it |
 | `task check` fails | `yamllint`/`tofu fmt`/`kustomize`/sops — run at repo root with `SOPS_AGE_KEY_FILE` set |

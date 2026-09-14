@@ -7,6 +7,5 @@ metadata:
   name: seaweedfs-operator
   namespace: flux-system
 spec:
-  type: helm
   interval: 1h
   url: https://seaweedfs.github.io/seaweedfs-operator/

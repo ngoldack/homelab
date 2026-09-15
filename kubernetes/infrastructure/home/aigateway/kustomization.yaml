@@ -9,6 +9,7 @@ resources:
   - envoyproxy.yaml
   - otel-pipeline.yaml
   - models.yaml
+  - local.yaml
   - mcp-route.yaml
   - openrouter-key.sops.yaml
   - vm-scrapes.yaml

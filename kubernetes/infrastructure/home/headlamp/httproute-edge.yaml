@@ -1,12 +1,9 @@
-# Headlamp behind authentik — now the ONLY path: the LAN twin route
-# (httproute.yaml) was retired with the split-horizon design, so the
-# cluster-admin-bound UI is identity-gated everywhere, which is what its
-# old SECURITY NOTE anticipated. Backend is the edge outpost, not headlamp
-# itself: the outpost checks the session, then proxies straight to
-# headlamp's Service over the mesh.
-#
-# The cross-namespace reference is pre-authorized by the ReferenceGrant in
-# ../authentik/httproutes-edge.yaml.
+# Headlamp via native OIDC — the ONLY path (LAN twin route retired with the
+# split-horizon design; the cluster-admin-bound UI is identity-gated
+# everywhere). Headlamp does its OWN OIDC handshake against authentik, so
+# this backend is headlamp's Service directly (NOT the authentik outpost —
+# the outpost proxy would break headlamp's OIDC callback). Unauthenticated
+# requests are redirected by headlamp to authentik itself.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -21,6 +18,5 @@ spec:
     - headlamp.ngoldack.de
   rules:
     - backendRefs:
-        - name: authentik-proxy
-          namespace: authentik
-          port: 9000
+        - name: headlamp-headlamp
+          port: 80

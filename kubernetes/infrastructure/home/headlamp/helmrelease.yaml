@@ -32,6 +32,20 @@ spec:
   values:
     config:
       watchPlugins: true
+      # Native per-user OIDC login via authentik (see ../authentik/seed.yaml
+      # headlamp-oidc provider). externalSecret injects the whole Secret as
+      # OIDC_* env (chart envFrom); the non-secret OIDC fields are read from
+      # config.oidc.* to toggle the matching args. Client secret + issuer live
+      # in headlamp-oidc.sops.yaml and MUST match the authentik provider.
+      oidc:
+        externalSecret:
+          enabled: true
+          name: headlamp-oidc
+          hasScopes: true
+        callbackURL: https://headlamp.ngoldack.de/oidc-callback
+        usePKCE: true
+        validatorClientID: headlamp-oidc
+        validatorIssuerURL: https://authentik.ngoldack.de/application/o/headlamp-oidc
     pluginsManager:
       enabled: true
       baseImage: node:lts-alpine

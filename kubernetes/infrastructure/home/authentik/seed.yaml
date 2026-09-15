@@ -18,28 +18,48 @@ data:
       sm_email: "authentik default OAuth Mapping: OpenID 'email'"
       sm_groups: "authentik default OAuth Mapping: OpenID 'groups'"
     entries:
-      # ---------- headlamp behind the edge outpost ----------
+      # ---------- headlamp: native OIDC federation (NOT the outpost proxy) ----------
+      # Headlamp does its own OIDC handshake against authentik (per-user
+      # identity inside the UI); the outpost proxy breaks that callback, same
+      # lesson as langfuse/grafana. Provider declared BEFORE the app (ordering
+      # rule). The client secret arrives via !File from the dedicated
+      # seed-secrets-headlamp volume (/secrets-headlamp) and MUST match
+      # ../headlamp/oidc-headlamp.sops.yaml's OIDC_CLIENT_SECRET. The redirect
+      # URI is headlamp's OIDC callback path.
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        identifiers:
+          name: headlamp-oidc
+        attrs:
+          client_id: headlamp-oidc
+          client_type: confidential
+          client_secret: !File /secrets-headlamp/client_secret
+          # grant_types MUST be pinned (see grafana-oidc): an empty model
+          # default [] denies every OIDC login.
+          issuer_mode: per_provider
+          grant_types:
+            - authorization_code
+            - refresh_token
+          redirect_uris:
+            - matching_mode: strict
+              url: https://headlamp.ngoldack.de/oidc-callback
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
         identifiers:
           slug: headlamp
         attrs:
           name: headlamp
-          meta_name: Headlamp (edge)
+          meta_name: Headlamp
           meta_launch_url: https://headlamp.ngoldack.de/
-          provider: !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
-      - model: authentik_providers_proxy.proxyprovider
-        state: present
-        identifiers:
-          name: headlamp-proxy
-        attrs:
-          mode: proxy
-          internal_host: http://headlamp-headlamp.headlamp.svc.cluster.local/
-          external_host: https://headlamp.ngoldack.de/
-          cookie_domain: ngoldack.de
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, headlamp-oidc]]
       # ---------- hindsight control-plane UI behind the edge outpost ----------
       # The owning application is what gives the outpost its vhost (learned
       # the hard way with grafana-proxy: without it the outpost silently
@@ -131,7 +151,6 @@ data:
           # serializer requires config; {} = OutpostConfig dataclass defaults.
           config: {}
           providers:
-            - !Find [authentik_providers_proxy.proxyprovider, [name, headlamp-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]

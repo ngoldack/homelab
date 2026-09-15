@@ -77,6 +77,12 @@ spec:
         - name: seed-secrets-paperless
           secret:
             secretName: authentik-oidc-paperless
+        # Headlamp's OIDC client secret, read via !File /secrets-headlamp/…
+        # in the same seed. Kept on its own path (not /secrets) because the
+        # grafana secret already occupies that mount.
+        - name: seed-secrets-headlamp
+          secret:
+            secretName: authentik-oidc-headlamp
       volumeMounts:
         - name: seed-secrets
           mountPath: /secrets
@@ -86,6 +92,9 @@ spec:
           readOnly: true
         - name: seed-secrets-paperless
           mountPath: /secrets-paperless
+          readOnly: true
+        - name: seed-secrets-headlamp
+          mountPath: /secrets-headlamp
           readOnly: true
     server:
       # 2 replicas, NOT site-pinned, tolerating the ingress taint: the edge

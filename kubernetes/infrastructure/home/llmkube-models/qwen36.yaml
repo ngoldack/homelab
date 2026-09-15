@@ -1,0 +1,89 @@
+# Qwen3.6-35B-A3B on the Tesla P100.
+#
+# PRIMARY serving model (fleet-research winner, 2026-09-15): MoE 256/8+1 active,
+# qwen35moe hybrid attention (10 full-attn of 40 layers, KV ~20 KiB/token), so a
+# real 35B fits in 16 GiB at UD-Q3_K_S (14.30 GiB) fully GPU-resident and decodes
+# ~3x faster than the 27B dense (MoE reads ~8/256 experts/token from HBM2; the
+# measured P100 row for this family is 120.6 t/s at Q2_K_XL + patches + MTP).
+# Quality at Q3_K_S is within benchmark noise of the 27B Q3_K_XL.
+#
+# ENGINE: the freshly-built mainline-image registry.ngoldack.de/llama-p100:0.4.0-p100
+# (llama.cpp v0.4.0 + shinbunbun's 29 P100 patches, CMAKE_CUDA_ARCHITECTURES=60) —
+# the only MEASURED >=20 t/s path on P100. ik sm60-19dfb71-fp16 stays the A/B
+# fallback (swap spec.image to registry.ngoldack.de/ik-llama-server:sm60-19dfb71-fp16).
+#
+# MTP (--spec-type draft-mtp) is NOT enabled here by default: the unsloth
+# MTP-embedded repo ships no UD-Q3_K_S (only I-quants/Q2_K_XL fit 16 GiB), and
+# llama.cpp's own CUDA MoE MTP measurements are ~neutral-to-negative. The
+# non-MTP config below already clears the >=20 t/s target (bandwidth ~47 t/s
+# ideal ceiling; realistic 40-60 t/s). Revisit MTP only if a fitting companion
+# emerges (nDraftMax 2 first, per Pascal-class MTP data).
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: Model
+metadata:
+  name: qwen36-35b
+  namespace: llmkube-system
+spec:
+  source: https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q3_K_S.gguf
+  format: gguf
+  quantization: Q3_K_S
+  prefetch: true
+  prefetchTolerations:
+    - key: dedicated
+      operator: Equal
+      value: nvidia
+      effect: NoSchedule
+  hardware:
+    accelerator: cuda
+    gpu:
+      enabled: true
+      count: 1
+      vendor: nvidia
+      memory: "16Gi"
+      layers: -1
+  resources:
+    cpu: "4"
+    memory: "8Gi"
+---
+apiVersion: inference.llmkube.dev/v1alpha1
+kind: InferenceService
+metadata:
+  name: qwen36-35b
+  namespace: llmkube-system
+spec:
+  modelRef: qwen36-35b
+  replicas: 1
+  # The mainline+patches P100 image (fleet-verified engine). ik sm60 HEAD is the
+  # A/B fallback (see header comment).
+  image: registry.ngoldack.de/llama-p100:0.4.0-p100
+  # REQUIRED: without the nvidia RuntimeClass the pod schedules onto the GPU node
+  # but never gets /dev/nvidia* bind-mounted and runs CPU-only (the ~1 t/s bug,
+  # fixed this session on qwen3-27b).
+  runtimeClassName: nvidia
+  nodeSelector:
+    hardware/gpu.model: Tesla-P100
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: nvidia
+      effect: NoSchedule
+  # 32k context; KV is only ~20 KiB/token on this hybrid arch so 32k costs ~0.6 GiB.
+  # Drop to 16384 only if the loaded model OOMs.
+  contextSize: 32768
+  # Flash attention on: decode-free on P100, quality-clean (ik PR #2144 + the sm_60
+  # fp32 carve-out baked into our images).
+  flashAttention: true
+  # KV quant to f8. V-quant requires FA (Pass ordering); gives cheap headroom.
+  cacheTypeK: q8_0
+  cacheTypeV: q8_0
+  # Single slot: llama.cpp otherwise splits context across N slots (wrong for
+  # single-user serving) AND speculative-decoding/single-stream math assumes it.
+  parallelSlots: 1
+  endpoint:
+    port: 8080
+    type: ClusterIP
+  resources:
+    gpu: 1
+    gpuMemory: "16Gi"
+    cpu: "4"
+    memory: "8Gi"

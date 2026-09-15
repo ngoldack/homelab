@@ -1,0 +1,92 @@
+# llama.cpp (mainline v0.4.0) + shinbunbun's 29 P100 patches — for the Tesla P100.
+#
+# WHY THIS IMAGE
+#
+# The ik_llama sm60 image is the cluster's dense/Pascal workhorse, but the ONLY
+# MEASURED P100 path to >= 20 t/s decode on a Qwen3.8-27B-class model is the
+# shinbunbun/llama-cpp-p100-patches set applied to MAINLINE llama.cpp v0.4.0
+# (not ik — the patches pin mainline blobs at zero fuzz and reject a diverged
+# CUDA backend, and ik was never part of their measurement). README numbers on
+# the P100: Qwen3.5 9B dense Q4_1+MTP 77 -> 136 t/s; Qwen3.6-35B-A3B MoE
+# Q2_K_XL 67 -> 120 t/s. The repo's 27B-class regression/patch tables put the
+# Qwen3.8-27B dense at ~29 t/s short-context WITH MTP, ~20 t/s at 33k ctx.
+# Mainline v0.4.0 natively supports qwen35 (Qwen3.8-27B), qwen35moe
+# (Qwen3.6-35B-A3B) and MTP speculative decoding (--spec-type draft-mtp).
+#
+# BUILD SHAPE
+#
+# This is a self-contained build (hermes-sandbox-runtime precedent): the
+# Dockerfile clones both upstreams at pinned commits and applies the patch set
+# itself, so the operator's build context is just a placeholder (the . origin)
+# and everything reproducible comes from the two pinned SHAs below.
+#
+#   MAINLINE = llama.cpp v0.4.0 = 5ac847190e979e0da7c4a21806630805f396d487
+#   PATCHES  = llama-cpp-p100-patches HEAD = 52469952952ee6446207acc574c72055a0685ac4
+#              (includes the "Rebase the patch set onto llama.cpp v0.4.0" commit)
+#
+# The patch set is 29 patches, numbered 01-31 with gaps at 03 and 06. Apply with
+# -F0 (exact) and STOP at the first failure: fuzzy application silently places
+# hunks wrong. 19/20 of the environment-dialled patches ship OFF (see repo docs);
+# we keep the documented default state and the MTP/sampler flags below.
+#
+# CUDA NOTES
+#
+# CUDA 12.x is mandatory — CUDA 13 dropped Pascal codegen entirely. We pin the
+# same 12.4.1 base family the ik build uses. GGML_CUDA_F16 is NOT set (matches
+# both the ik image and this repo's recipe; sm_60 FP16 storage has a known
+# quality bug — llama.cpp#25593). CUDA_DOCKER_ARCH=60 is the whole point.
+#
+# RE-BUILDING
+#
+# Bump the Job name suffix AND the tag (the Job is immutable). To move the
+# patch set, bump the PATCHES_SHA env below as well as the pin in the Job name.
+
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
+
+ARG CUDA_DOCKER_ARCH=60
+# Pinned upstreams; bump WITH the Job name/tag on rebuild.
+ARG LLAMA_REF=5ac847190e979e0da7c4a21806630805f396d487
+ARG PATCHES_SHA=52469952952ee6446207acc574c72055a0685ac4
+
+RUN apt-get update && \
+    apt-get install -y build-essential git patch curl libcurl4-openssl-dev ninja-build python3-pip \
+ && pip3 install --no-cache-dir cmake \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+RUN git clone https://github.com/ggml-org/llama.cpp llama \
+ && git -C llama checkout ${LLAMA_REF} \
+ && git clone https://github.com/shinbunbun/llama-cpp-p100-patches patches \
+ && git -C patches checkout ${PATCHES_SHA} \
+ && for p in patches/patches/*.patch; do \
+      echo "== applying $p"; \
+      ( cd llama && patch -p1 -F0 < "/work/$p" ) || { echo "PATCH FAILED: $p"; exit 1; }; \
+    done
+
+# Set nvcc architecture
+ENV CUDA_DOCKER_ARCH=${CUDA_DOCKER_ARCH}
+# Enable CUDA and cURL
+ENV GGML_CUDA=1
+ENV LLAMA_CURL=1
+# Listen for requests from the host
+ENV LLAMA_ARG_HOST=0.0.0.0
+
+RUN cd llama && cmake -S . -B build -G Ninja \
+    -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CUDA_ARCHITECTURES="${CUDA_DOCKER_ARCH}" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DLLAMA_CURL=ON \
+ && cmake --build build --target llama-server
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
+
+RUN apt-get update && \
+    apt-get install -y libcurl4-openssl-dev libgomp1 curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /work/llama/build/bin/llama-server /llama-server
+RUN ldconfig
+
+HEALTHCHECK CMD [ "curl", "-f", "http://localhost:8080/health" ]
+
+ENTRYPOINT [ "/llama-server" ]

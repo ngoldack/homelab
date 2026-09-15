@@ -44,6 +44,12 @@ spec:
   storage:
     size: 5Gi
     storageClass: truenas-fast-nfs-authentik-database
+  # WAL archiving is deliberately NOT enabled in this state: the plugin's
+  # restore hook runs barman-cloud-check-wal-archive, which refuses to set up
+  # archiving while the remote archive is ahead of the restoring instance
+  # (base backup + replay). Re-add spec.plugins once the restore is healthy —
+  # see the following commit; spec.backup.retentionPolicy stays absent
+  # (in-tree-Barman-only, ignored by the plugin).
   resources:
     requests:
       cpu: 100m
@@ -58,11 +64,3 @@ spec:
       # 16 MiB segment fills (first restore drill died exactly on this:
       # "recovery ended before configured recovery target was reached").
       archive_timeout: "60"
-  plugins:
-    - name: barman-cloud.cloudnative-pg.io
-      isWALArchiver: true
-      parameters:
-        barmanObjectName: authentik-backup-store
-  # backup retention lives on the ObjectStore CR (spec.retentionPolicy "30d"),
-  # not here: spec.backup.retentionPolicy is in-tree-Barman-only and ignored
-  # when the Barman Cloud plugin owns backups.

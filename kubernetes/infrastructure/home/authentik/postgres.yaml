@@ -19,18 +19,31 @@ spec:
   instances: 2
   minSyncReplicas: 1
   maxSyncReplicas: 1
+  # Destructive storage-class migration via restore-from-backup (the same
+  # procedure run as the first destructive restore drill): storageClassName
+  # is immutable on a bound PVC, so moving the data dir from the generic
+  # truenas-fast-nfs dataset (no snapshot schedule) to the dedicated
+  # truenas-fast-nfs-authentik-database class (6h/14d TrueNAS snapshot task)
+  # requires recreating the volume — bootstrap.recovery rebuilds it from the
+  # Barman backup + archived WAL instead of a manual dump/restore. If this
+  # ever needs to run again, flip bootstrap.recovery.recoveryTarget.targetTime
+  # to a moment covered by archived WAL.
   bootstrap:
-    initdb:
-      database: authentik
-      owner: authentik
-      secret:
-        name: authentik-database-credentials
+    recovery:
+      source: authentik-source
+  externalClusters:
+    - name: authentik-source
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: authentik-backup-store
+          serverName: authentik-database
   affinity:
     nodeSelector:
       topology.homelab/site: home
   storage:
     size: 5Gi
-    storageClass: truenas-fast-nfs
+    storageClass: truenas-fast-nfs-authentik-database
   resources:
     requests:
       cpu: 100m

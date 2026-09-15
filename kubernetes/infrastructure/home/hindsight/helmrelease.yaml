@@ -94,12 +94,15 @@ spec:
       enabled: true
       # Ingest throughput scaling: a single worker serializes every
       # retain/consolidation chain — the measured bottleneck (LLM call ~3s but
-      # end-to-end 9-14s/diff; 212s under contention). 3 allow parallel chains.
-      # Chart default is 2; we were below it at 1.
-      replicaCount: 3
-      # Conservative per-worker resources so 3 replicas (3000m limits / 600m
+      # end-to-end 9-14s/diff; 212s under contention). 2 allow two parallel
+      # chains while keeping the home CPU pool schedulable (the 3-worker setup
+      # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
+      # Chart default is 2.
+      replicaCount: 2
+      # Conservative per-worker resources so 2 replicas (2000m limits / 400m
       # requests total) fit on the shared home node without starving it. The
-      # default 2000m limit x3 would exceed the node's allocatable requests.
+      # default 2000m limit x2 is already near the node's ceiling - keep the
+      # burst capped at 1000m.
       resources:
         requests:
           cpu: 200m
@@ -107,8 +110,8 @@ spec:
         limits:
           cpu: 1000m
           memory: 2Gi
-      # Spread the 3 worker replicas across the two home nodes (podAntiAffinity):
-      # all 3 can otherwise co-schedule on one 10-core node and, being burstable
+      # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
+      # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact
       # contention that showed 212s/diff. Workers are I/O-bound on OpenRouter, so
       # spreading only helps; preferred (not required) so placement still works if

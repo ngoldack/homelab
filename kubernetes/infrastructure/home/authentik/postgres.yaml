@@ -16,9 +16,13 @@ metadata:
   name: authentik-database
   namespace: authentik
 spec:
-  instances: 2
-  minSyncReplicas: 1
-  maxSyncReplicas: 1
+  # Single instance. A homelab IdP doesn't need a standby: the standby adds
+  # NFS storage/compute on the same node, the sync-replica pauses primary
+  # writes on standby hiccups (deprecated sync API), and server/outpost pods
+  # share the node anyway so DB HA buys no real uptime. authentik also now
+  # points at authentik-database-rw; with one instance there is no replica to
+  # route into, removing the intermittent read-only transactional failures.
+  instances: 1
   # Destructive storage-class migration via restore-from-backup (the same
   # procedure run as the first destructive restore drill): storageClassName
   # is immutable on a bound PVC, so moving the data dir from the generic

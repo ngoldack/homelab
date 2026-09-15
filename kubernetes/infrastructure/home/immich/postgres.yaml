@@ -42,6 +42,13 @@ spec:
     # means a dump/restore or a replica swap, not an in-place edit.
     storageClass: truenas-fast-nfs-immich-database
   postgresql:
+    parameters:
+      # Force a WAL segment switch every 60s so archived WAL trails the
+      # primary by at most ~1 minute regardless of write volume — without
+      # it a quiet database leaves its newest WAL unarchived until the
+      # 16 MiB segment fills (first restore drill died exactly on this:
+      # "recovery ended before configured recovery target was reached").
+      archive_timeout: "60"
     shared_preload_libraries:
       - "vchord.so"
     extensions:
@@ -52,12 +59,6 @@ spec:
           - /usr/lib/postgresql/18/lib
         extension_control_path:
           - /usr/share/postgresql/18/
-  resources:
-    requests:
-      cpu: 100m
-      memory: 512Mi
-    limits:
-      memory: 2Gi
   # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
   # (objectstore.yaml) owns destination/retention; this reference enables
   # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-

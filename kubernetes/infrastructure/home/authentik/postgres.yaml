@@ -37,6 +37,14 @@ spec:
       memory: 256Mi
     limits:
       memory: 1Gi
+  postgresql:
+    parameters:
+      # Force a WAL segment switch every 60s so archived WAL trails the
+      # primary by at most ~1 minute regardless of write volume — without
+      # it a quiet database leaves its newest WAL unarchived until the
+      # 16 MiB segment fills (first restore drill died exactly on this:
+      # "recovery ended before configured recovery target was reached").
+      archive_timeout: "60"
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true

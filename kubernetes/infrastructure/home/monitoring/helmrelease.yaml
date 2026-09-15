@@ -66,6 +66,28 @@ spec:
     kubeScheduler:
       enabled: false
 
+    # kube-apiserver /metrics on a busy cluster exceeds the chart default
+    # max_scrape_size (16777216 bytes / 16 MiB) — confirmed live: the apiserver
+    # target is perpetually `down` with "exceeds -promscrape.maxScrapeSize".
+    # Raise the per-endpoint ceiling to 50 MiB, matching the kube-prometheus
+    # default for apiserver scrapes and ~3x headroom over the failing response,
+    # so the control-plane is actually collected. (Setting the global vmagent
+    # -promscrape.maxScrapeSize would apply to every target and buy unbounded
+    # memory; scoping it to this one endpoint is deliberate. The operator CRD
+    # field is snake_case `max_scrape_size`, string bytes — validated via
+    # server-side dry-run that "50Mi" is accepted.)
+    kubeApiServer:
+      vmScrape:
+        spec:
+          endpoints:
+            - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+              port: https
+              scheme: https
+              tlsConfig:
+                caFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                serverName: kubernetes
+              max_scrape_size: "50Mi"
+
     victoria-metrics-operator:
       # The CRDs come from the standalone victoria-metrics-operator-crds
       # release (../monitoring-crds/), so the operator subchart must not also

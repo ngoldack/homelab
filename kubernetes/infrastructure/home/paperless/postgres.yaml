@@ -1,0 +1,62 @@
+# Paperless-ngx's Postgres on CloudNativePG, the same operator every
+# relational store here uses (phoenix/immich/hindsight/authentik). Document
+# metadata, OCR'd full-text content, tags, correspondents and the task queue
+# state all live here; the app's documents themselves are durable content on
+# the media PVC, so this cluster holds the searchable side of that data and
+# is the durable relational state for the app.
+#
+# The app role/database are named paperless (not the CNPG default "app") and
+# the password comes from OUR secret (paperless-database-credentials.sops.yaml)
+# via bootstrap.initdb.secret — that same literal is what the HelmRelease
+# injects as PAPERLESS_DBPASS (envFrom the same SOPS secret), so nothing is
+# auto-generated and a drift between the two fails loudly at connect time.
+# Same reasoning as phoenix/immich.
+#
+# Its own per-app StorageClass (truenas-fast-nfs-paperless-database) so the
+# dataset lands at fast/k8s/nfs/paperless/database with the same 6h/14d
+# snapshot schedule as the other databases and rootSquash off (initdb needs
+# it). Same NFS-for-PG caveat as the immich/hindsight databases (move to
+# block storage once NVMe-oF works).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: paperless-database
+  namespace: paperless
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  bootstrap:
+    initdb:
+      database: paperless
+      owner: paperless
+      secret:
+        name: paperless-database-credentials
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nfs-paperless-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  postgresql:
+    parameters:
+      # Force a WAL segment switch every 60s so archived WAL trails the
+      # primary by at most ~1 minute regardless of write volume — without
+      # it a quiet database leaves its newest WAL unarchived until the
+      # 16 MiB segment fills (first restore drill died exactly on this:
+      # "recovery ended before configured recovery target was reached").
+      archive_timeout: "60"
+  # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
+  # (objectstore.yaml) owns destination/retention; this reference enables
+  # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-
+  # only, ignored when a plugin owns backups.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: paperless-backup-store

@@ -1,0 +1,235 @@
+# Paperless-ngx — the document-management stack (ingest -> OCR -> tagging ->
+# full-text search). Deployed via the bjw-s app-template chart because the
+# upstream paperless-ngx chart cannot express this deployment's shape: every
+# backing store is external (CNPG PostgreSQL in postgres.yaml, Valkey in
+# valkey.yaml), and the three workloads are deliberately hand-declared on
+# app-template rather than mapped onto the official chart's assumed postgres/
+# redis subcharts.
+#
+# The official container is a single multi-process image: webserver, consumer,
+# worker and scheduler all run inside `web` via s6 — there is no separate
+# consumer Deployment. Tika (office/PDF -> text parsing) and Gotenberg
+# (different rendering/format conversion) are the paperless-documented sidecar
+# services, so each gets its own small Deployment and is reached in-cluster by
+# the PAPERLESS_TIKA_ENDPOINT / PAPERLESS_TIKA_GOTENBERG_ENDPOINT vars below.
+#
+# releaseName pinned to `paperless` so the objects are paperless-web /
+# paperless-tika / paperless-gotenberg (not the flux-system-<name>-<controller>
+# stutter) — the PVCS are paperless-data / paperless-media and the tika/gotenberg
+# URLs above depend on those exact Service names.
+#
+# Login is native OIDC via the authentik provider (PAPERLESS_SOCIALACCOUNT_PROVIDERS
+# in paperless-env.sops.yaml) with the break-glass admin left enabled — see
+# httproute.yaml, which backends paperless-web directly (no outpost, unlike
+# phoenix) because paperless speaks OIDC itself.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: paperless
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: paperless
+      interval: 1h
+  targetNamespace: paperless
+  releaseName: paperless
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # All three workloads must run on a LAN worker: they read/write TrueNAS
+    # NFS storage, which the Hetzner ingress nodes cannot reach. Applied once at
+    # the top so web, tika and gotenberg all inherit it.
+    defaultPodOptions:
+      nodeSelector:
+        topology.homelab/site: home
+    controllers:
+      web:
+        type: deployment
+        containers:
+          main:
+            image:
+              repository: ghcr.io/paperless-ngx/paperless-ngx
+              tag: "3.1.3"
+            env:
+              - name: PAPERLESS_URL
+                value: "https://paperless.ngoldack.de"
+              - name: PAPERLESS_TIME_ZONE
+                value: Europe/Berlin
+              - name: PAPERLESS_OCR_LANGUAGE
+                value: deu+eng
+              - name: PAPERLESS_DBENGINE
+                value: postgresql
+              # CNPG primary Service from postgres.yaml — paperless-database-rw.
+              - name: PAPERLESS_DBHOST
+                value: paperless-database-rw
+              - name: PAPERLESS_DBPORT
+                value: "5432"
+              - name: PAPERLESS_DBNAME
+                value: paperless
+              - name: PAPERLESS_DBUSER
+                value: paperless
+              # Credential from the CNPG bootstrap secret — never written to
+              # this repo, and a rotation is picked up on the next restart.
+              - name: PAPERLESS_DBPASS
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-database-credentials
+                    key: password
+              # Valkey from valkey.yaml: valkey-operator Service is
+              # valkey-paperless on 6379 (see the comment there).
+              - name: PAPERLESS_REDIS
+                value: "redis://valkey-paperless.paperless.svc.cluster.local:6379"
+              - name: PAPERLESS_TIKA_ENABLED
+                value: "1"
+              - name: PAPERLESS_TIKA_ENDPOINT
+                value: "http://paperless-tika:9998"
+              - name: PAPERLESS_TIKA_GOTENBERG_ENDPOINT
+                value: "http://paperless-gotenberg:3000"
+              # OIDC login via the authentik provider (seed.yaml). Signups are
+              # restricted to existing authentik users (SOCIALACCOUNT_ALLOW_SIGNUPS
+              # false); the break-glass admin stays reachable with its own login.
+              - name: PAPERLESS_APPS
+                value: allauth.socialaccount.providers.openid_connect
+              - name: PAPERLESS_SOCIAL_AUTO_SIGNUP
+                value: "true"
+              - name: PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS
+                value: "false"
+              - name: PAPERLESS_ADMIN_USER
+                value: admin
+              - name: PAPERLESS_ADMIN_MAIL
+                value: "admin@ngoldack.de"
+            # Secrets that must not appear in git: the secret key and admin
+            # password, plus PAPERLESS_SOCIALACCOUNT_PROVIDERS (which carries
+            # the OIDC client secret). They live in paperless-env.sops.yaml.
+            envFrom:
+              - secretRef:
+                  name: paperless-env
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                memory: 1.5Gi
+            # Moderate probes — the mirror of immich's pattern. Paperless can
+            # be busy (bulk ingest) and the chart's 1s-default timeouts would
+            # kill the container mid-OCR: 10s timeout with 6 failures.
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 15
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 15
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 30
+      tika:
+        type: deployment
+        containers:
+          main:
+            image:
+              repository: docker.io/apache/tika
+              tag: "3.3.1.0"
+            resources:
+              requests:
+                cpu: 128m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+      gotenberg:
+        type: deployment
+        containers:
+          main:
+            image:
+              repository: docker.io/gotenberg/gotenberg
+              tag: "8.34"
+            # Gotenberg's "scripts/convert" path renders documents via
+            # Chromium; disable JS (paperless only needs static HTML -> PDF)
+            # and allowlist the /tmp scratch dir it writes during conversion.
+            command:
+              - gotenberg
+              - --chromium-disable-javascript=true
+              - --chromium-allow-list=file:///tmp/.*
+            resources:
+              requests:
+                cpu: 128m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+    service:
+      web:
+        controller: web
+        ports:
+          http:
+            port: 8000
+      tika:
+        controller: tika
+        ports:
+          http:
+            port: 9998
+      gotenberg:
+        controller: gotenberg
+        ports:
+          http:
+            port: 3000
+    persistence:
+      data:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: truenas-fast-nfs-paperless-data
+        accessMode: ReadWriteMany
+        size: 5Gi
+        # Mounted by web ONLY — tika and gotenberg are stateless and must not
+        # get these volumes, so the mount is scoped per-controller via
+        # advancedMounts rather than globalMounts (which would leak both into
+        # every controller's pod).
+        advancedMounts:
+          web:
+            main:
+              - path: /usr/src/paperless/data
+      media:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: truenas-fast-nfs-paperless-media
+        accessMode: ReadWriteMany
+        size: 100Gi
+        advancedMounts:
+          web:
+            main:
+              - path: /usr/src/paperless/media

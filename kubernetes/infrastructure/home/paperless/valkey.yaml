@@ -1,0 +1,30 @@
+# Paperless-ngx's task-queue broker and cache: Valkey via the official
+# valkey-operator, per the standing rule that every new datastore goes
+# through its operator (CNPG for Postgres, valkey-operator here).
+#
+# The operator only speaks cluster mode (`cluster-enabled: yes` is hard-coded
+# in its pod config) — there is no standalone topology. shards: 1 makes the
+# single node own all 16384 slots, so a non-cluster-aware client (paperless
+# uses django-redis/celery) never sees a MOVED redirect and SELECT 0 is
+# legal. That is the whole compat story; anything wanting DB indexes >0 or
+# cross-key transactions on multiple slots would need a different store.
+#
+# valkey-operator is explicitly pre-production (v0.6.0, v1alpha1 may change)
+# — accepted for a broker/cache whose data is disposable; a wipe costs
+# re-queued tasks and re-warmed caches, not state (documents themselves live
+# on the media PVC and in Postgres).
+#
+# The operator creates the headless Service this references as
+# "valkey-<name>" on 6379 (verified in its controller:
+# headlessServiceName = "valkey-" + cluster.Name) — i.e.
+# valkey-paperless.paperless.svc.cluster.local:6379. No password/AUTH — the
+# operator's auth surface is ACL-based via a separate ValkeyACL CR; flat
+# network trust inside the cluster VLAN, same posture as authentik's Valkey.
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: paperless
+  namespace: paperless
+spec:
+  shards: 1
+  replicas: 0

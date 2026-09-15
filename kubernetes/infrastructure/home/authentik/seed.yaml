@@ -456,6 +456,53 @@ data:
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]
           negate: false
+      # paperless: native OIDC federation, mirrors langfuse-oidc above; the
+      # client secret arrives via !File from the dedicated
+      # seed-secrets-paperless volume (/secrets-paperless) and MUST match
+      # paperless-oidc.sops.yaml's client_secret. The redirect URI is
+      # paperless-ngx's own allauth callback path.
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        identifiers:
+          name: paperless-oidc
+        attrs:
+          client_id: paperless
+          client_type: confidential
+          client_secret: !File /secrets-paperless/client_secret
+          # grant_types MUST be pinned (see the grafana-oidc comment): an empty
+          # model default [] denies every OIDC login.
+          issuer_mode: per_provider
+          grant_types:
+            - authorization_code
+            - refresh_token
+          redirect_uris:
+            - matching_mode: strict
+              url: https://paperless.ngoldack.de/accounts/oidc/authentik/login/callback/
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: paperless
+        attrs:
+          name: paperless
+          meta_name: Paperless
+          meta_launch_url: https://paperless.ngoldack.de/
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, paperless-oidc]]
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, paperless]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
       # ---- login brute-force defense (ReputationPolicy) ----
       # Declarative home for the live-created `homelab-login-bruteforce` policy
       # AND its flow-level binding. The policy is re-imported idempotently here;

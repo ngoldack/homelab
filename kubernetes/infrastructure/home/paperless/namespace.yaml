@@ -1,0 +1,14 @@
+# Paperless-ngx: self-hosted document management (OCR, tagging, full-text
+# search). Documents are uploaded and landed via the mobile/desktop apps and
+# the web UI — there is no third-party WAN integration that needs to reach
+# it, so like immich this is a LAN-resident service and deliberately NOT for
+# public WAN exposure.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: paperless
+  labels:
+    gateway.ngoldack.de/public-ingress: "true"
+    # edge-ingress so the paperless.ngoldack.de route can attach to the edge
+    # Gateway; exposure is still gated by authentik SSO in front of the app.
+    gateway.ngoldack.de/edge-ingress: "true"

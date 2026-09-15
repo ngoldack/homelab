@@ -1,0 +1,22 @@
+# Daily base backup of paperless's Postgres via the Barman Cloud plugin. WAL
+# archiving itself is continuously enabled by the Cluster's plugins[]
+# reference (isWALArchiver), so this schedule only snapshots the data
+# directory — PITR covers everything in between.
+#
+# CNPG's cron format has SIX fields (sec min hour dom mon dow), unlike
+# Kubernetes CronJobs. There is no timeZone field: the schedule runs on the
+# operator pod's clock (UTC), so this is 02:29 UTC — the app's staggered slot
+# in the 02:0x window. concurrencyPolicy does not exist here; the operator
+# skips an overlapping run.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: paperless-daily-backup
+  namespace: paperless
+spec:
+  cluster:
+    name: paperless-database
+  schedule: "0 29 2 * * *"
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

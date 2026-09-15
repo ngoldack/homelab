@@ -41,6 +41,9 @@ resources:
   - aigateway.yaml
 # LLM observability (Arize Phoenix, deep trace + prompt analytics).
   - phoenix.yaml
+  # Paperless-ngx document management (app-template chart on CNPG + valkey +
+  # TrueNAS storage); phoenix-style entry, no monitoring-crds dependency.
+  - paperless.yaml
   # Langfuse LLM platform infra process: the app HelmRelease + OIDC wiring sits
   # here (its CNPG/valkey/secrets raw infras are its own Kustomization, and it
   # depends on the clickhouse/seaweedfs operators listed above). Placed after

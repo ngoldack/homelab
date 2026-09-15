@@ -1,0 +1,14 @@
+# The bjw-s app-template chart repo — a schema-only Helm chart whose entire
+# job is to turn a declarative values tree (controllers/service/persistence)
+# into plain Deployments, Services and PVCs. Paperless-ngx's own chart cannot
+# express this deployment's shape (external CNPG, external Valkey, separate
+# tika/gotenberg), so all three workloads are hand-declared on app-template
+# instead — see helmrelease.yaml.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: paperless
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://bjw-s-labs.github.io/helm-charts

@@ -12,24 +12,22 @@
 # code), but node.kubernetes.io/instance-type is deterministic — set by tofu
 # from each node's own declared role (see tofu/home/terraform.tfvars).
 #
-# TWO taints since the sandbox carve: dedicated=nvidia on the P100 box, and
-# workload.hermes.io/sandbox=true on the dedicated sandbox worker
-# (wk-main-sandbox), which only Kata Agent Sandbox pods tolerate. The
-# efficiency worker is deliberately UNTAINTED — it is the only node general
-# workloads can run on, so a taint there would demand tolerations from
-# everything and isolate nothing; QuickSync workloads PULL themselves onto
-# it via hardware/igpu / workload/media labels instead. The old
-# dedicated=ai taint on the same node is replaced in place: same key, same
-# effect, --overwrite swaps the value. The old dedicated=media taint died
-# with its node.
+# The nvidia container is REMOVED (2026-09-15): the P100/gpu-worker became
+# the only schedulable home node with spare CPU once the general worker (
+# talos-3bi) saturated at ~97% cpu requests, so hindsight and other general
+# pods need to spill onto it until home-pool headroom returns. The
+# dedicated=nvidia taint it carried was deleted live (see flux reconcile +
+# kubectl taint delete) so general workloads can schedule; it can be
+# re-added by restoring this container when the gpu pool is no longer the
+# spill-over. Only the sandbox taint remains applied.
 #
 # Idempotent (--overwrite) and safe to re-run: a Job only actually executes
-# once per unique name. Bumped to -5 (Job specs are immutable; the rename is
-# what makes Flux recreate it; prune removes the -4 predecessor).
+# once per unique name. Bumped to -6 (Job specs are immutable; the rename is
+# what makes Flux recreate it; prune removes the -5 predecessor).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: node-taints-5
+  name: node-taints-6
   namespace: kube-system
 spec:
   backoffLimit: 3
@@ -41,16 +39,6 @@ spec:
       # runs kubectl directly as the container's entrypoint — no shell
       # dependency anywhere.
       containers:
-        - name: taint-nvidia
-          image: rancher/kubectl:v1.36.2
-          command: ["kubectl"]
-          args:
-            - taint
-            - nodes
-            - -l
-            - node.kubernetes.io/instance-type=gpu-worker
-            - dedicated=nvidia:NoSchedule
-            - --overwrite
         - name: taint-sandbox
           image: rancher/kubectl:v1.36.2
           command: ["kubectl"]

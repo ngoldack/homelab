@@ -131,6 +131,22 @@ spec:
                   app.kubernetes.io/name: authentik
                   app.kubernetes.io/component: server
               topologyKey: kubernetes.io/hostname
+      # Deterministic ingress/home straddle: exactly one server replica in
+      # the `ingress` role domain and one in the home domain, DoNotSchedule.
+      # Without this the scheduler puts both replicas on home nodes (they
+      # have the most free CPU), leaving the ingress node with NO local
+      # server upstream — the edge portal-bridge (internalTrafficPolicy:
+      # Local) then 502s every authentik path. The 2026-09-15 nvidia-taint
+      # removal made the home pool large enough to trigger exactly this, so
+      # the straddle is now load-bearing.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: node.homelab/role
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: authentik
+              app.kubernetes.io/component: server
       tolerations:
         - key: dedicated
           operator: Equal

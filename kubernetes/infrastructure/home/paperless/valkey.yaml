@@ -1,30 +1,80 @@
-# Paperless-ngx's task-queue broker and cache: Valkey via the official
-# valkey-operator, per the standing rule that every new datastore goes
-# through its operator (CNPG for Postgres, valkey-operator here).
+# Paperless-ngx's message broker. NOT the valkey-operator: that operator only
+# speaks cluster mode (`cluster-enabled: yes` is hard-coded in its pod config),
+# and paperless' celery worker issues multi-key transactions that a
+# cluster-protocol server rejects with `CROSSSLOT Keys in request don't hash
+# to the same slot` even at shards:1 (authentik/valkey.yaml documents the same
+# limitation). So a standalone single-replica valkey Deployment instead — the
+# immich chart runs its own valkey deployment rather than the operator for the
+# same reason.
 #
-# The operator only speaks cluster mode (`cluster-enabled: yes` is hard-coded
-# in its pod config) — there is no standalone topology. shards: 1 makes the
-# single node own all 16384 slots, so a non-cluster-aware client (paperless
-# uses django-redis/celery) never sees a MOVED redirect and SELECT 0 is
-# legal. That is the whole compat story; anything wanting DB indexes >0 or
-# cross-key transactions on multiple slots would need a different store.
-#
-# valkey-operator is explicitly pre-production (v0.6.0, v1alpha1 may change)
-# — accepted for a broker/cache whose data is disposable; a wipe costs
-# re-queued tasks and re-warmed caches, not state (documents themselves live
-# on the media PVC and in Postgres).
-#
-# The operator creates the headless Service this references as
-# "valkey-<name>" on 6379 (verified in its controller:
-# headlessServiceName = "valkey-" + cluster.Name) — i.e.
-# valkey-paperless.paperless.svc.cluster.local:6379. No password/AUTH — the
-# operator's auth surface is ACL-based via a separate ValkeyACL CR; flat
-# network trust inside the cluster VLAN, same posture as authentik's Valkey.
-apiVersion: valkey.io/v1alpha1
-kind: ValkeyCluster
+# headless-less: a plain ClusterIP Service named valkey-paperless on 6379, the
+# name PAPERLESS_REDIS in paperless/helmrelease.yaml points at. No password —
+# flat network trust inside the cluster VLAN, same posture as the operator's
+# no-AUTH default.
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: paperless
+  name: valkey-paperless
   namespace: paperless
 spec:
-  shards: 1
-  replicas: 0
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey-paperless
+  template:
+    metadata:
+      labels:
+        app: valkey-paperless
+    spec:
+      # Change to the LAN worker like the paperless pods: it persists on the
+      # NAS via the PVC below, which the Hetzner ingress nodes cannot reach.
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: main
+          image: docker.io/valkey/valkey:9-alpine
+          # AOF off, snapshot every 60s if >=1 write — the data is a celery
+          # broker/queue, disposable; keep it simple like the compose default.
+          args: ["--save", "60 1"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: valkey-paperless
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-paperless
+  namespace: paperless
+spec:
+  selector:
+    app: valkey-paperless
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-paperless
+  namespace: paperless
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-fast-nfs-paperless-data
+  resources:
+    requests:
+      storage: 2Gi

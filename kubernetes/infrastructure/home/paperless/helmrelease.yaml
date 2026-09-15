@@ -94,8 +94,9 @@ spec:
                   secretKeyRef:
                     name: paperless-database-credentials
                     key: password
-              # Valkey from valkey.yaml: valkey-operator Service is
-              # valkey-paperless on 6379 (see the comment there).
+              # Standalone valkey Service from valkey.yaml — valkey-paperless on
+              # 6379 (see the comment there; not the valkey-operator, which
+              # forces cluster mode and breaks celery's multi-key txn).
               - name: PAPERLESS_REDIS
                 value: "redis://valkey-paperless.paperless.svc.cluster.local:6379"
               - name: PAPERLESS_TIKA_ENABLED

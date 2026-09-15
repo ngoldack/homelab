@@ -1,9 +1,11 @@
 # Paperless-ngx DMS: web (webserver+consumer run in-process in the single
 # app-template deployment) + separate gotenberg/tika OCR sidecars, on CNPG
-# postgres + valkey + TrueNAS storage. Depends on cnpg-operator for the
-# Cluster CRDs, on valkey-operator for the ValkeyCluster CR, and on network
-# for the edge Gateway its HTTPRoute attaches to. No monitoring-crds
-# dependency: there is no metrics endpoint to scrape.
+# postgres + standalone valkey + TrueNAS storage. Depends on cnpg-operator for
+# the Cluster CRDs, and on network for the edge Gateway its HTTPRoute attaches
+# to. (No valkey-operator dep: the broker is a standalone Deployment in
+# valkey.yaml, NOT a ValkeyCluster CR — the operator forces cluster mode which
+# rejects celery's multi-key transactions.) No monitoring-crds dependency:
+# there is no metrics endpoint to scrape.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -19,7 +21,6 @@ spec:
   dependsOn:
     - name: cnpg-operator
     - name: network
-    - name: valkey-operator
   sourceRef:
     kind: GitRepository
     name: flux-system

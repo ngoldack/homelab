@@ -32,13 +32,14 @@ locals {
   # mounts "/", so the only thing keeping it off this node is a positive
   # nodeSelector on the home site label (see the truenas-csi HelmRelease).
   #
-  # tailscale is included purely as an independent admin path. It is NOT given
-  # --advertise-routes/--accept-routes: cp-main advertises this cluster's own
-  # pod/service CIDRs into the tailnet, and accepting those here would put
-  # Tailscale's ip rule (pref 5270 -> table 52) ahead of KubeSpan's (pref
-  # 32500), hijacking cluster traffic onto a 1280-MTU tun with asymmetric
-  # return paths.
-  cloud_base_extensions = ["siderolabs/tailscale"]
+  # Tailscale was deliberately REMOVED from the cloud worker: with the
+  # extension installed, KubeSpan harvested the tailnet's addresses as
+  # cross-site endpoints, nesting WireGuard(1420) inside Tailscale(1280) and
+  # black-holing large cross-site packets. Without the extension there is no
+  # tailnet interface to harvest, so KubeSpan advertises only the node's
+  # direct public endpoint. Home nodes keep tailscale as the out-of-band
+  # admin path.
+  cloud_base_extensions = []
 
   cloud_extension_sets = {
     for name, node in var.cloud_nodes :
@@ -230,8 +231,7 @@ data "talos_machine_configuration" "cloud_worker" {
           # Same load-bearing reason as the Proxmox nodes: without an Image
           # Factory installer reference, Talos installs the stock installer on
           # first boot and silently discards every extension baked into the
-          # image — here that would drop tailscale, the only independent admin
-          # path onto this node.
+          # image.
           image = data.talos_image_factory_urls.cloud[each.key].urls.installer
         }
         network = {
@@ -278,17 +278,6 @@ data "talos_machine_configuration" "cloud_worker" {
           each.value.node_labels,
         )
       }
-    }),
-    # Tailscale purely as an out-of-band admin path, with no route flags — see
-    # the comment on local.cloud_base_extensions for why accepting routes here
-    # would hijack cluster traffic.
-    yamlencode({
-      apiVersion = "v1alpha1"
-      kind       = "ExtensionServiceConfig"
-      name       = "tailscale"
-      environment = [
-        "TS_AUTHKEY=${local.secrets["tailscale_auth_key"]}",
-      ]
     }),
   ]
 }

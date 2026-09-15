@@ -24,6 +24,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       namespace: phoenix
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: aigateway
   to:
     - group: ""
       kind: Service

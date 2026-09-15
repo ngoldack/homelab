@@ -1,12 +1,19 @@
 # Envoy AI Gateway (theagentrouter.ai, "formerly Envoy AI Gateway") control
 # plane: the ai-gateway-controller Deployment, its CRDs, and the model-route
-# CRs that describe the two DeepSeek routes via OpenRouter.
+# CRs that describe the DeepSeek routes via OpenRouter.
 #
-# LAN-only by design: nothing here attaches to the network/ public Gateway
-# (no public-ingress/edge-ingress labels). The data plane's LB Service is
-# labelled dns.ngoldack.de/scope=internal so Cilium L2-announcements hand it
-# a reachable LAN VIP (see envoyproxy.yaml).
+# Two exposure layers, independent:
+#   * LAN data plane (envoyproxy.yaml): the LB Service keeps
+#     dns.ngoldack.de/scope=internal so Cilium L2-announcements hand it a
+#     LAN VIP (10.30.0.201). This is the in-cluster / LAN path to all models.
+#   * Public edge (httproute-edge.yaml): a single hostname (llm.ngoldack.de)
+#     fronts ONLY the local P100 model through the authentik edge outpost
+#     (Basic-auth). The namespace carries gateway.ngoldack.de/edge-ingress so
+#     the edge Gateway (network/edge.yaml, allowedRoutes from: Selector)
+#     accepts routes from here.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: aigateway
+  labels:
+    gateway.ngoldack.de/edge-ingress: "true"

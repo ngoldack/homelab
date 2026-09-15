@@ -10,6 +10,7 @@ resources:
   - otel-pipeline.yaml
   - models.yaml
   - local.yaml
+  - httproute-edge.yaml
   - mcp-route.yaml
   - openrouter-key.sops.yaml
   - vm-scrapes.yaml

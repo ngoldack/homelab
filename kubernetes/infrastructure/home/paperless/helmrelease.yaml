@@ -116,6 +116,14 @@ spec:
                 value: "true"
               - name: PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS
                 value: "true"
+              # Grant SSO users admin via the authentik groups claim
+              # (id_token.groups): the app is gated to the authentik group
+              # `akadmin` (seed.yaml PolicyBinding), so every paperless SSO
+              # user is an admin. Login-time sync also auto-grants is_staff.
+              - name: PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS
+                value: "true"
+              - name: PAPERLESS_SOCIAL_ACCOUNT_SYNC_SUPERUSER_GROUP
+                value: "akadmin"
               - name: PAPERLESS_ADMIN_USER
                 value: admin
               - name: PAPERLESS_ADMIN_MAIL

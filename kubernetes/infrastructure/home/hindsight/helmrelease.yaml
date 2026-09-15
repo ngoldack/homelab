@@ -65,6 +65,18 @@ spec:
         database: hindsight
         username: hindsight
     api:
+      # Conservative cpu REQUEST (500m chart default vs ~284m free on the sole
+      # untolerated home node talos-3bi) was stalling the API replacement pod
+      # at 97% node cpu requests. The API is latency-sensitive I/O (recall),
+      # not CPU-bound: request 200m (same as the workers) so it schedules;
+      # limits stay generous for burst.
+      resources:
+        requests:
+          cpu: 200m
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
       env: &llm-env
         HINDSIGHT_API_LLM_PROVIDER: openai
         HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1

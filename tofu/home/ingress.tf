@@ -245,6 +245,16 @@ data "talos_machine_configuration" "cloud_worker" {
           # leave the node sitting in maintenance mode.
           kubespan = {
             enabled = true
+            # Exclude Tailscale's address spaces so cross-site peers use the
+            # direct public endpoint, not the 1280-MTU tailnet nest.
+            filters = {
+              endpoints = [
+                "!100.64.0.0/10",       # Tailscale IPv4 (CGNAT)
+                "!fd7a:115c:a1e0::/48", # Tailscale IPv6 ULA
+                "0.0.0.0/0",
+                "::/0",
+              ]
+            }
           }
         }
         kubelet = {

@@ -18,7 +18,7 @@ runbook and the drill log; keep the measured table current with every drill.
 | Langfuse ClickHouse + keeper | single-node stores | TrueNAS snapshots (classes exist) | classes `truenas-fast-nfs-langfuse-{clickhouse,keeper}` 6h/14d | 14d |
 | Langfuse SeaweedFS (S3 binaries) | allInOne store | TrueNAS snapshots (class exists) | class `truenas-fast-nfs-langfuse-seaweedfs` daily/1mo | 1mo |
 | Immich originals | TrueNAS pool `tank` | TrueNAS Periodic Snapshot Task | `truenas-tank-nfs-immich-library` daily/1mo | 1mo |
-| etcd (Talos) | 3-node? control plane | talos-backup CronJob → Hetzner S3, age-encrypted | n/a (object store) | bucket-side |
+| etcd (Talos) | single-node control plane | talos-backup CronJob → Hetzner S3, age-encrypted | n/a (object store) | bucket-side |
 
 All CNPG backups land in the dedicated Hetzner Object Storage bucket
 `home-cnpg-backups-7cd4e906` (fsn1, versioned), one prefix per app, managed by

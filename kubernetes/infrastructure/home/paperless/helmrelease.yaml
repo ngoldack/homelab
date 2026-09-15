@@ -105,15 +105,17 @@ spec:
                 value: "http://paperless-tika:9998"
               - name: PAPERLESS_TIKA_GOTENBERG_ENDPOINT
                 value: "http://paperless-gotenberg:3000"
-              # OIDC login via the authentik provider (seed.yaml). Signups are
-              # restricted to existing authentik users (SOCIALACCOUNT_ALLOW_SIGNUPS
-              # false); the break-glass admin stays reachable with its own login.
+              # OIDC login via the authentik provider (seed.yaml). The
+              # authentik APP binding (akadmin group) is what restricts access;
+              # allauth must be allowed to auto-create the paperless user on
+              # first SSO login (ALLOW_SIGNUPS=false would reject the first
+              # login with no pre-existing user).
               - name: PAPERLESS_APPS
                 value: allauth.socialaccount.providers.openid_connect
               - name: PAPERLESS_SOCIAL_AUTO_SIGNUP
                 value: "true"
               - name: PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS
-                value: "false"
+                value: "true"
               - name: PAPERLESS_ADMIN_USER
                 value: admin
               - name: PAPERLESS_ADMIN_MAIL

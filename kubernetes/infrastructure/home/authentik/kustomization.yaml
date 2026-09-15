@@ -8,6 +8,7 @@ resources:
   - secret.sops.yaml
   - oidc-grafana.sops.yaml
   - oidc-langfuse.sops.yaml
+  - paperless-oidc.sops.yaml
   - seed.yaml
   - helmrelease.yaml
   - outpost-config.yaml

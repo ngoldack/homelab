@@ -30,25 +30,25 @@ resources:
 # disableNameSuffixHash is on because the sidecar keys off the label, not the
 # name, and a hash-suffixed name churns on every content change for no benefit.
 configMapGenerator:
-  - name: grafana-dashboard-home
-    namespace: monitoring
-    files: [dashboards/home.json]
-    options:
-      labels:
-        grafana_dashboard: "1"
-      annotations:
-        kustomize.toolkit.fluxcd.io/substitute: disabled
-  - name: grafana-dashboard-k8s-overview
-    namespace: monitoring
-    files: [dashboards/k8s-overview.json]
-    options:
-      labels:
-        grafana_dashboard: "1"
-      annotations:
-        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-node-exporter-full
     namespace: monitoring
     files: [dashboards/node-exporter-full.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-k8s-views-global
+    namespace: monitoring
+    files: [dashboards/k8s-views-global.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-k8s-views-pods
+    namespace: monitoring
+    files: [dashboards/k8s-views-pods.json]
     options:
       labels:
         grafana_dashboard: "1"

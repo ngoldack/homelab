@@ -16,7 +16,11 @@ Sources, all pinned:
                         appVersion of the chart we run)
   vmagent.json          same tag
   vmalert.json          same tag
-  node-exporter-full    grafana.com dashboard 1860, revision 37
+  node-exporter-full    grafana.com dashboard 1860, revision 45
+  k8s-views-global      dotdc/grafana-dashboards-kubernetes @ v3.0.6
+                        (k8s-views-global, uid k8s_views_global)
+  k8s-views-pods        dotdc/grafana-dashboards-kubernetes @ v3.0.6
+                        (k8s-views-pods, uid k8s_views_pods)
   cnpg.json             grafana.com dashboard 20417 (CloudNativePG), revision 4
   external-dns.json     grafana.com dashboard 15038 (External DNS), revision 3
   cert-manager.json     grafana.com dashboard 11001 (cert-manager), revision 1
@@ -40,7 +44,11 @@ refreshed:
     for a datasource at import time; the Grafana sidecar performs no such
     prompt, so a dashboard keeping them imports with every panel unbound.
   - `${DS_PROMETHEUS}` rewritten to `VictoriaMetrics`, the datasource name and
-    uid this stack provisions (type prometheus, isDefault).
+    uid this stack provisions (type prometheus, isDefault). Any remaining
+    `datasource` references (string or object form) are normalized to
+    `{"type":"prometheus","uid":"VictoriaMetrics"}`, and templating variables
+    of `type: datasource` are dropped (they are import prompts, like
+    `__inputs`).
   - `id` removed so Grafana assigns its own; a baked-in id collides on import.
 
 They are surfaced by the Grafana sidecar, which watches for ConfigMaps

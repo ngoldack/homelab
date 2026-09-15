@@ -1,14 +1,91 @@
-# Langfuse's cache/queue store via the valkey-operator (standing rule: every
-# new datastore through its operator). Same cluster-mode single-shard topology
-# as authentik's valkey — the operator only speaks cluster mode, shards:1 makes
-# a single node own all slots so a non-cluster-aware client never sees MOVED.
-# The operator creates the headless Service "valkey-<name>" on 6379.
-# No password (ACL-based auth), flat cluster trust.
-apiVersion: valkey.io/v1alpha1
-kind: ValkeyCluster
+# Langfuse's cache/queue store. NOT the valkey-operator: that operator only
+# speaks cluster mode (`cluster-enabled: yes` is hard-coded in its pod config —
+# confirmed live: `cluster_enabled:1` on the langfuse pod, and the CRD exposes
+# no standalone/mode toggle; its `mode` fields are PDB/spread scheduling only).
+# Langfuse's worker (bullmq) issues multi-key queue operations that a
+# cluster-protocol server rejects with `CROSSSLOT Keys in request don't hash
+# to the same slot` even at shards:1 — the paperless broker hit the identical
+# failure and moved to a standalone Deployment for the same reason (see
+# ../paperless/valkey.yaml, which documents the limitation).
+#
+# Standalone single-replica valkey Deployment. The Service is deliberately
+# named `valkey-langfuse` — the same name the ValkeyCluster operator created —
+# so REDIS_CONNECTION_STRING in helmrelease.yaml
+# (redis://valkey-langfuse.langfuse.svc.cluster.local:6379/0) keeps working
+# unchanged. No password: flat trust inside the cluster VLAN, same posture as
+# the operator's no-AUTH default.
+#
+# Persistence: bullmq queues hold ingestion state until workers drain them, so
+# the data survives a pod reschedule via PVC (the operator's empty `persistence`
+# default left that to its own machinery). The exporter sidecar the operator
+# ran (oliver006/redis_exporter on 9121, scraped by
+# monitoring/scrapes.yaml's `valkey` podScrape for the authentik cluster) is
+# NOT reproduced here — that scrape pins
+# app.kubernetes.io/component=valkey-node, labels this Deployment does not
+# carry, so nothing breaks; authentik keeps its own operator-managed exporter.
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: langfuse
+  name: valkey-langfuse
   namespace: langfuse
 spec:
-  shards: 1
-  replicas: 0
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey-langfuse
+  template:
+    metadata:
+      labels:
+        app: valkey-langfuse
+    spec:
+      # NAS-backed PVC below; the Hetzner ingress nodes cannot reach it.
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: main
+          image: docker.io/valkey/valkey:9-alpine
+          # AOF off, snapshot every 60s if >=1 write — queue data is
+          # drainable, so the paperless posture (simple snapshots) fits.
+          args: ["--save", "60 1"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: valkey-langfuse
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-langfuse
+  namespace: langfuse
+spec:
+  selector:
+    app: valkey-langfuse
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-langfuse
+  namespace: langfuse
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-fast-nfs
+  resources:
+    requests:
+      storage: 2Gi

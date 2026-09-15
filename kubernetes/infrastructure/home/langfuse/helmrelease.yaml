@@ -9,10 +9,12 @@
 #                  langfuse-database-rw:5432, user/db `langfuse`, password from
 #                  postgres-credentials.sops.yaml via postgresql.auth.existingSecret —
 #                  one owner for the password, a drift fails loudly at connect).
-#   - Redis     -> ValkeyCluster `langfuse` (valkey-operator), headless svc
+#   - Redis     -> standalone valkey Deployment (valkey.yaml), svc
 #                  valkey-langfuse.langfuse.svc.cluster.local:6379, no password
-#                  (ACL-based auth off; redis.auth.password: null -> REDIS_PASSWORD
-#                  omitted and the connection string carries no auth part).
+#                  (flat cluster trust; REDIS_CONNECTION_STRING carries no auth
+#                  part). NOT the valkey-operator: its pods hard-code cluster
+#                  mode, which bullmq's multi-key queue ops break against
+#                  (CROSSSLOT) — ../paperless hit the identical failure.
 #   - ClickHouse-> EXTERNAL host only: langfuse-clickhouse-headless.langfuse.svc.cluster.local:9000,
 #                  ClickHouseCluster CR is owned by the separate
 #                  clickhouse-operator Kustomization (dependsOn below), so no CR

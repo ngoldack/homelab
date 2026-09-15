@@ -160,19 +160,6 @@ data "talos_machine_configuration" "controlplane" {
             # (API/discovery/general traffic), not as a second CNI.
             kubespan = {
               enabled = true
-              # Stop KubeSpan advertising the tailnet addresses as cross-site
-              # endpoints: nesting WireGuard(1420) inside Tailscale(1280)
-              # black-holes large cross-site packets. Exclude Tailscale's
-              # address spaces (CGNAT + IPv6 ULA) so peers use the direct
-              # public/LAN endpoints instead.
-              filters = {
-                endpoints = [
-                  "!100.64.0.0/10",       # Tailscale IPv4 (CGNAT)
-                  "!fd7a:115c:a1e0::/48", # Tailscale IPv6 ULA
-                  "0.0.0.0/0",
-                  "::/0",
-                ]
-              }
             }
           }
         }
@@ -282,19 +269,6 @@ data "talos_machine_configuration" "worker" {
             # (API/discovery/general traffic), not as a second CNI.
             kubespan = {
               enabled = true
-              # Stop KubeSpan advertising the tailnet addresses as cross-site
-              # endpoints: nesting WireGuard(1420) inside Tailscale(1280)
-              # black-holes large cross-site packets. Exclude Tailscale's
-              # address spaces (CGNAT + IPv6 ULA) so peers use the direct
-              # public/LAN endpoints instead.
-              filters = {
-                endpoints = [
-                  "!100.64.0.0/10",       # Tailscale IPv4 (CGNAT)
-                  "!fd7a:115c:a1e0::/48", # Tailscale IPv6 ULA
-                  "0.0.0.0/0",
-                  "::/0",
-                ]
-              }
             }
           }
         }

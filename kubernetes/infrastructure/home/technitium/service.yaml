@@ -1,0 +1,34 @@
+# LAN resolver entry: DNS on LAN VIP 10.30.0.203, L2-announced by home nodes.
+# The admin web console (5380) rides the same VIP (LAN/Teleport only — no
+# public route for DNS or admin).
+apiVersion: v1
+kind: Service
+metadata:
+  name: technitium
+  namespace: dns
+  labels:
+    # Selects this Service into the Cilium L2 announcement policy
+    # (../network/l2-announcement.yaml), which ARP-answers the VIP below on
+    # ens18.
+    dns.ngoldack.de/scope: internal
+  annotations:
+    # .203 is the next free address in the lan pool (.200 public gateway,
+    # .201 ai-gateway envoy, .202 vmsingle-push).
+    io.cilium/lb-ipam-ips: "10.30.0.203"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/instance: technitium
+  ports:
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: web
+      port: 5380
+      targetPort: 5380
+      protocol: TCP

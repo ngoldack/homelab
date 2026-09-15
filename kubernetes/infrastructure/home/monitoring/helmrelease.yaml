@@ -43,6 +43,29 @@ spec:
     remediation:
       retries: 3
   values:
+    # Chart-conformance: syncJob runs a network-fetch hook Job (plus its own
+    # ServiceAccount/ClusterRole) on every install/upgrade to populate the
+    # defaultDashboards/defaultRules it is NOT gated on — which are both off
+    # here. It would add an egress dependency and cluster-wide RBAC for
+    # zero effect, so disable it.
+    syncJob:
+      enabled: false
+
+    # Talos does not expose these control-plane endpoints the way the chart's
+    # default scrape config expects, so they stay `down` forever and pollute
+    # the Kubernetes Views APIServer/control-plane panels:
+    #   - kubeEtcd: no service endpoints at all (Talos etcd wants client certs,
+    #     not the chart's bearer-token + CA path). Confirmed: zero etcd targets.
+    #   - kubeControllerManager / kubeScheduler: :10257/:10259 connection
+    #     refused (Talos serves no http-metrics on those ports).
+    # (kubeApiServer + kubelet + coredns remain enabled and healthy.)
+    kubeEtcd:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+
     victoria-metrics-operator:
       # The CRDs come from the standalone victoria-metrics-operator-crds
       # release (../monitoring-crds/), so the operator subchart must not also

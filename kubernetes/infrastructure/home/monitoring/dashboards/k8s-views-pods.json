@@ -5,8 +5,8 @@
       {
         "builtIn": 1,
         "datasource": {
-          "type": "prometheus",
-          "uid": "VictoriaMetrics"
+          "type": "datasource",
+          "uid": "grafana"
         },
         "enable": true,
         "hide": true,
@@ -22,8 +22,8 @@
       },
       {
         "datasource": {
-          "type": "prometheus",
-          "uid": "VictoriaMetrics"
+          "type": "datasource",
+          "uid": "grafana"
         },
         "enable": true,
         "hide": false,
@@ -40,8 +40,8 @@
       },
       {
         "datasource": {
-          "type": "prometheus",
-          "uid": "VictoriaMetrics"
+          "type": "datasource",
+          "uid": "grafana"
         },
         "enable": true,
         "hide": false,

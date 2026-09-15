@@ -48,7 +48,10 @@ refreshed:
     `datasource` references (string or object form) are normalized to
     `{"type":"prometheus","uid":"VictoriaMetrics"}`, and templating variables
     of `type: datasource` are dropped (they are import prompts, like
-    `__inputs`).
+    `__inputs`). EXCEPTION: `annotations.list[]` entries keep their built-in
+    Grafana datasource `{"type":"datasource","uid":"grafana"}` (the "Annotations
+    & Alerts"/tag queries run against the internal datasource, not Prometheus;
+    binding them to VictoriaMetrics makes every annotation query error on load).
   - `id` removed so Grafana assigns its own; a baked-in id collides on import.
 
 They are surfaced by the Grafana sidecar, which watches for ConfigMaps

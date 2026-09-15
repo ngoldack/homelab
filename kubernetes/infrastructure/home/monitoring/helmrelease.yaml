@@ -73,9 +73,11 @@ spec:
     # default for apiserver scrapes and ~3x headroom over the failing response,
     # so the control-plane is actually collected. (Setting the global vmagent
     # -promscrape.maxScrapeSize would apply to every target and buy unbounded
-    # memory; scoping it to this one endpoint is deliberate. The operator CRD
-    # field is snake_case `max_scrape_size`, string bytes — validated via
-    # server-side dry-run that "50Mi" is accepted.)
+    # memory; scoping it to this one endpoint is deliberate.) The value must be
+    # a plain byte count, NOT a "50Mi" suffix string: the vmagent promscrape
+    # engine parses max_scrape_size with strconv.ParseFloat and rejects any
+    # "50Mi"/"50MB" form ("invalid syntax"), silently skipping the whole scrape
+    # job (confirmed live in vmagent logs). 52428800 = 50 MiB exactly.
     kubeApiServer:
       vmScrape:
         spec:
@@ -86,7 +88,7 @@ spec:
               tlsConfig:
                 caFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
                 serverName: kubernetes
-              max_scrape_size: "50Mi"
+              max_scrape_size: "52428800"
 
     victoria-metrics-operator:
       # The CRDs come from the standalone victoria-metrics-operator-crds

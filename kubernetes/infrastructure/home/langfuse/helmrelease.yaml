@@ -106,10 +106,16 @@ spec:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
         - name: AUTH_AUTHENTIK_ISSUER
-          # Trailing slash REQUIRED: authentik's per_provider issuer is
-          # /application/o/<slug>/ and NextAuth strictly matches the iss
-          # claim (same go-oidc strict-match lesson as headlamp, 13f5198).
-          value: https://authentik.ngoldack.de/application/o/langfuse/
+          # NO trailing slash: langfuse uses openid-client, whose discovery
+          # does resolveWellKnownUri = issuer + "/.well-known/openid-configuration"
+          # (string append) — a trailing slash yields .../langfuse//.well-known/...
+          # (double slash), which authentik 404s, so sign-in dies in NextAuth
+          # with error=OAuthSignin before ever reaching authentik. The
+          # headlamp trailing-slash lesson (13f5198) was for go-oidc's strict
+          # iss match, which does not apply here: openid-client validates the
+          # ID-token iss against the DISCOVERED metadata issuer, which keeps
+          # the slash either way.
+          value: https://authentik.ngoldack.de/application/o/langfuse
         # ClickHouse `default` user runs no_password (the CR omits
         # settings.defaultUserPassword), so auth is off server-side — but the
         # app's migration stage hard-fails on an EMPTY CLICKHOUSE_PASSWORD

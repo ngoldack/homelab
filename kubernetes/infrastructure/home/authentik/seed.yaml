@@ -581,6 +581,40 @@ data:
           # The default group: every registrant lands here and inherits
           # nothing, until an admin adds them to a gating group.
           create_users_group: !Find [authentik_core.group, [name, users]]
+          # Inactive until the email-verification stage (order 30) confirms
+          # the address; its activate_user_on_success flips the account on.
+          create_users_as_inactive: true
+      # Email verification as a separate step AFTER user creation: a token
+      # mail goes to the address captured by the prompt; the link completes
+      # the flow's remaining stages. Global SMTP settings (EMAIL__* env from
+      # the authentik-config Secret) are used; the account activates only on
+      # successful token validation.
+      - id: reg-email-verify
+        model: authentik_stages_email.emailstage
+        state: present
+        identifiers:
+          name: home-registration-email-verification
+        attrs:
+          use_global_settings: true
+          activate_user_on_success: true
+          token_expiry: "hours=48"
+          subject: "Aktiviere deinen ngoldack.de Account"
+      - id: reg-mfa
+        model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+        state: present
+        identifiers:
+          name: home-registration-mfa-enrollment
+        attrs:
+          # Registration is a fresh user with NO devices: 'configure' routes
+          # them into the SAME enrollment stages the login flow uses. Classes
+          # must match the login-time stage exactly (webauthn/totp/static —
+          # duo/sms/email would strand: no setup stage exists for them).
+          not_configured_action: configure
+          device_classes: [webauthn, totp, static]
+          configuration_stages:
+            - !Find [authentik_flows.stage, [name, default-authenticator-webauthn-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-totp-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-static-setup]]
       - id: reg-login
         model: authentik_stages_user_login.userloginstage
         state: present
@@ -602,6 +636,18 @@ data:
         state: present
         identifiers:
           order: 30
+          stage: !KeyOf reg-email-verify
+          target: !KeyOf reg-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 40
+          stage: !KeyOf reg-mfa
+          target: !KeyOf reg-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 100
           stage: !KeyOf reg-login
           target: !KeyOf reg-flow
       # Expose the 'Sign up' link on the login page by pointing the stock

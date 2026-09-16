@@ -1,0 +1,38 @@
+# The agentgateway CRDs (AgentgatewayBackend / AgentgatewayPolicy /
+# AgentgatewayParameters) live in the agentgateway-crds chart v1.5.0.
+#
+# Registered FIRST in kustomization.yaml so the CRDs exist before the
+# GatewayClass (owned by the agentgateway controller) and the Gateway /
+# AgentgatewayParameters / AgentgatewayBackend CRs in the main lane reconcile
+# with valid schemas. This follows the CRD-before-CR split pattern used
+# for aigateway (see aigateway-crds/helmrelease.yaml).
+#
+# No explicit crds: install.crds defaults to Create for the chart's first
+# reconcile, upgrade.crds defaults to Skip (helm upgrade behavior), matching
+# aigateway-crds's pattern.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agentgateway-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  chart:
+    spec:
+      chart: agentgateway-crds
+      version: "v1.5.0"
+      sourceRef:
+        kind: HelmRepository
+        name: agentgateway
+        namespace: flux-system
+      interval: 1h
+  targetNamespace: agentgateway
+  releaseName: agentgateway-crds
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3

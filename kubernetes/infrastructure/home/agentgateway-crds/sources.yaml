@@ -1,0 +1,14 @@
+# The OCI repo for both agentgateway charts (agentgateway + agentgateway-crds,
+# v1.5.0). Like aigateway-crds, each of the two lanes carries an identical
+# copy of this flux-system HelmRepository — two Flux Kustomizations must not
+# CLAIM the same resource uniquely, but applying the identical object from
+# two lanes is idempotent and harmless (the aigateway pattern today).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agentgateway
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://cr.agentgateway.dev/charts

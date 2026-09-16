@@ -1,0 +1,75 @@
+# LLM chain backend for the agentgateway data plane — tiered fallback.
+#
+# Mirrors the aigateway lane's chat-chain (EAG pattern) from the canonical
+# repo commit 1812b9c. The plan's original tiers (syn:small/text →
+# deepseek-v4 → openrouter-flash) match exactly; the reverse substituion
+# model string "deepseek/deepseek-v4-flash-latest" is mirrored verbatim.
+#
+# Groups are priority order: the gateway tries providers from the first
+# group onward; when a provider's upstream fails (connect failure or retriable
+# status), the gateway moves to the next priority group — the same tiered
+# behavior the old EAG chain got from prioritized backendRefs + the
+# BackendTrafficPolicy's retriable-status-codes trigger. Tiers and model
+# strings mirror aigateway/chat-chain.yaml exactly (including the leading `~`
+# on the OpenRouter latest-alias).
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: chat-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-small
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: syn:small:text
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: synthetic-large
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: syn:large:text
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: synthetic-hf-deepseek
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:deepseek-ai/DeepSeek-V4.1-Flash
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: openrouter-flash
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: ~deepseek/deepseek-v4-flash-latest
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai

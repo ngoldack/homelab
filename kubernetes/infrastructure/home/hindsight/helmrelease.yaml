@@ -1,12 +1,14 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: a SINGLE OpenRouter model (~deepseek/deepseek-v4-flash-latest
-# at low reasoning effort — fast and cost-efficient; strictly JSON via
-# STRICT_SCHEMA). The prior 3-member
-# failover chain (incl. the local qwen3-27b leg) made startup verification
-# cross the chart's 30s liveness budget, crash-looping the API pod mid-boot —
-# removed 2026-09-13. One working model keeps startup fast and singular.
+# LLM: OpenRouter DIRECT (2026-09-16) — single model
+# ~deepseek/deepseek-v4-flash-latest at low reasoning effort, strictly JSON
+# via STRICT_SCHEMA. The prior 3-member failover chain (incl. the local
+# qwen3-27b leg) made startup verification cross the chart's 30s liveness
+# budget, crash-looping the API pod mid-boot — removed 2026-09-13. The
+# in-cluster Envoy AI Gateway hop (model "chat") was removed 2026-09-16
+# because the aigateway controller is crash-looping and its routes 500;
+# restore it once the gateway is healthy (see the api env block).
 #
 # Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
 # ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and
@@ -79,25 +81,26 @@ spec:
           memory: 4Gi
       env: &llm-env
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # Routed through the Envoy AI Gateway, NOT OpenRouter directly: the
-        # gateway's "chat" model is the tiered chain
-        # syn:small -> syn:large -> DeepSeek-V4.1-Flash -> OpenRouter
-        # (../aigateway/chat-chain.yaml), so provider failover is the
-        # gateway's job and hindsight only ever names one model.
-        HINDSIGHT_API_LLM_BASE_URL: http://envoy-aigateway-aigateway-d6fc2393.envoy-gateway-system.svc.cluster.local/v1
-        HINDSIGHT_API_LLM_MODEL: "chat"
-        # The gateway authenticates every request with a JWT (SecurityPolicy on
-        # the aigateway Gateway, validated against authentik's JWKS). This
-        # static token is minted from the aigateway-oidc client_credentials
-        # grant with a long validity and lives in secret.sops.yaml — rotate it
-        # when it expires (see that file's comment for the one-liner).
+        # OpenRouter DIRECT (2026-09-16): the in-cluster Envoy AI Gateway's
+        # controller is crash-looping and its routes 500, so hindsight talks
+        # to OpenRouter alone until the gateway is healthy again.
+        # HINDSIGHT_API_LLM_API_KEY in secret.sops.yaml must therefore be a
+        # dedicated OpenRouter key (sk-or-v1-…), NOT the aigateway JWT this
+        # block used to authenticate with.
+        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
+        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
+        # "~deepseek/deepseek-v4-flash-latest" is OpenRouter's always-current
+        # DeepSeek V4 Flash alias — user-confirmed 2026-09-16 (the bare ID
+        # deepseek/deepseek-v4-latest does not exist on OpenRouter; the "~"
+        # prefix is mandatory for the always-latest aliases). Reasoning stays
+        # low + STRICT_SCHEMA so extraction remains fast and strictly JSON.
         #
-        # Chain composition rationale: small does the bulk of extraction cheaply;
-        # large (GLM-5.3) and DeepSeek-V4.1 cover harder chunks; OpenRouter's
-        # deepseek-v4-flash-latest is the last resort if Synthetic is down.
-        # Deliberately no local P100 leg: its latency made startup verification
-        # cross the chart's 30s liveness budget and crash-loop the pod
-        # (2026-09-13).
+        # Previously this block pointed at the in-cluster Envoy AI Gateway
+        # (model "chat", JWT auth); that gateway's controller is crash-looping
+        # and its routes 500, so hindsight is on OpenRouter direct until it is
+        # healthy again. To restore: BASE_URL back to
+        # http://envoy-aigateway-aigateway-d6fc2393.envoy-gateway-system.svc.cluster.local/v1,
+        # MODEL "chat", and swap the key back to the aigateway JWT.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; upstream first-token
@@ -151,10 +154,11 @@ spec:
       # batch/poll tunables.
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # Same gateway chain as the api (see the api env block for rationale);
-        # written out in full because a YAML anchor cannot be appended to.
-        HINDSIGHT_API_LLM_BASE_URL: http://envoy-aigateway-aigateway-d6fc2393.envoy-gateway-system.svc.cluster.local/v1
-        HINDSIGHT_API_LLM_MODEL: "chat"
+        # OpenRouter direct, same model as the api (see the api env block for
+        # rationale); written out in full because a YAML anchor cannot be
+        # appended to.
+        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
+        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"

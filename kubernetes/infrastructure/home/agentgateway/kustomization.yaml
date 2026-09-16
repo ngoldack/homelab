@@ -33,6 +33,4 @@ resources:
   - langfuse-otel.sops.yaml
   - openrouter-key.sops.yaml
   - synthetic-key.sops.yaml
-  - secrets.yaml
-  - secrets.sops.yaml
   - otel-collector.yaml

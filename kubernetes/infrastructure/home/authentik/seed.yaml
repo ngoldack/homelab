@@ -166,6 +166,9 @@ data:
           client_id: aigateway-oidc
           client_type: confidential
           client_secret: !File /secrets-aigateway/client_secret
+          # Serializer requires redirect_uris even for client_credentials
+          # (machine flow has no redirect) — an empty list satisfies it.
+          redirect_uris: []
           issuer_mode: per_provider
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, aigateway-oidc-signing]]
           grant_types:
@@ -398,12 +401,12 @@ data:
           name: mfa-validate
         attrs:
           device_classes: [webauthn, totp, static]
-          # NOT enforced during the live rollback: providers stay on the stock
-          # flow until the MFA flow is fully proven. `configure` strands users
-          # if configuration_stages doesn't match the enrolled device's stage;
-          # akadmin's passkey lives on the STOCK default-authenticator-webauthn-setup,
-          # so point configuration_stages there (not custom stages).
-          not_configured_action: skip
+          # ENFORCED (2026-09-16): users without a device are routed into
+          # enrollment before they can proceed — MFA is mandatory for every
+          # login. configuration_stages MUST list a setup stage matching each
+          # allowed device_class (akadmin's passkey was enrolled against the
+          # stock webauthn setup stage); a mismatch strands the user.
+          not_configured_action: configure
           # 2026.8 routes unconfigured users to these enrollment STAGES (M2M).
           # Match the stock stage the device was enrolled against.
           configuration_stages:
@@ -417,6 +420,27 @@ data:
           name: mfa-identification
         attrs:
           user_fields: [email, username]
+      # ENFORCEMENT on the STOCK flow: default-authentication-mfa-validation
+      # (order 30 of default-authentication-flow) is the validate stage every
+      # provider actually reaches, since all providers keep
+      # authentication_flow=default-authentication-flow. 'configure' routes
+      # unenrolled users into MFA enrollment instead of skipping — MFA is
+      # mandatory. device_classes/configuration_stages pinned to the webauthn/
+      # totp/static trio (the classes the config stages can enroll; duo/sms/
+      # email removed — no backend for them, a listed class with no matching
+      # setup stage strands the user at login). Full-update serializer: every
+      # live attr must be restated or a re-created stage loses it.
+      - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+        state: present
+        identifiers:
+          name: default-authentication-mfa-validation
+        attrs:
+          not_configured_action: configure
+          device_classes: [webauthn, totp, static]
+          configuration_stages:
+            - !Find [authentik_flows.stage, [name, default-authenticator-webauthn-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-totp-setup]]
+            - !Find [authentik_flows.stage, [name, default-authenticator-static-setup]]
       - id: mfa-login
         model: authentik_stages_user_login.userloginstage
         state: present

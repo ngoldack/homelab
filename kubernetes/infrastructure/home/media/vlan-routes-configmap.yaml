@@ -1,0 +1,39 @@
+# Routing for pods that carry the vlan-2080 macvlan interface.
+#
+# The goal state inside such a pod:
+#   - default route via the VLAN 2080 gateway  -> all internet egress leaves
+#     as VPN traffic (UniFi routes that network through the VPN)
+#   - cluster pod CIDR, service CIDR and the cluster VLAN stay on eth0
+#     -> Service DNS, pod-to-pod API calls (Prowlarr -> Sonarr) and NFS all
+#     keep working over the fast local path
+#
+# The CNI itself cannot express this: attaching a second interface never
+# removes eth0's default route, and the macvlan annotation has no metric
+# control. Hence a tiny init container (NET_ADMIN) that rewrites the routing
+# table once, before the app starts. Runs per pod start; nothing persists.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vlan-routes
+  namespace: media
+data:
+  attach.sh: |
+    #!/bin/sh
+    set -eu
+
+    # eth0's gateway is the node-side peer (Cilium's veth address); capture it
+    # before the default route is torn down.
+    GW=$(ip -4 route show default dev eth0 | awk '/via/ {print $3; exit}')
+    test -n "$GW"
+
+    # VPN egress first, then re-add the local exceptions.
+    ip route del default || true
+    ip route add default via 10.20.80.1 dev net1
+
+    # 172.20.0.0/16 = pod CIDR, 172.21.0.0/16 = service CIDR,
+    # 10.30.0.0/24  = cluster VLAN (nodes, LB VIPs, TrueNAS).
+    ip route add 172.20.0.0/16 via "$GW" dev eth0
+    ip route add 172.21.0.0/16 via "$GW" dev eth0
+    ip route add 10.30.0.0/24 via "$GW" dev eth0
+
+    ip -4 route

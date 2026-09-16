@@ -22,6 +22,10 @@ ignore: |
   # trip yamllint's indentation rules. Overlays that DO follow repo style live in
   # agent-sandbox/ above the upstream/ dir and remain linted.
   kubernetes/infrastructure/home/agent-sandbox/upstream/**
+  # Vendored Multus CNI DaemonSet (k8snetworkplumbingwg/multus-cni v4.3.1) — fetched
+  # verbatim and only pinned/patched minimally, so its upstream formatting trips
+  # yamllint. Our own multus Kustomization lives beside it and remains linted.
+  kubernetes/infrastructure/home/multus/multus-daemonset-thick.yml
   # Untracked feature worktree (feature/splithorizondns/) — a scratch copy of
   # the repo used for split-horizon DNS experiments, including a verbatim copy
   # of the vendored agent-sandbox upstream manifests. Same never-hand-formatted

@@ -214,12 +214,28 @@ locals {
       # a Talos guest reports lo/bond0/dummy0/teql0/tunl0/sit0/ip6tnl0 before
       # its real NIC (confirmed live via the QEMU agent's own
       # network-get-interfaces output), so a fixed index like [1] picks up
-      # an empty/irrelevant interface instead. Take the first interface
-      # that actually has an address and isn't loopback.
-      current_ip = try([
-        for iface in proxmox_virtual_environment_vm.talos_nodes[key].ipv4_addresses :
-        iface[0] if length(iface) > 0 && !startswith(iface[0], "127.")
-      ][0], null)
+      # an empty/irrelevant interface instead.
+      #
+      # It also reports addresses from EVERY interface the guest runs —
+      # cilium_host's 172.20.x/w32 and, on nodes running the tailscale
+      # extension (cp-main), the 100.100.x CGNAT address. Taking the first
+      # non-loopback entry pointed `node` at 100.100.108.66 and every apply
+      # hung dialing an address no operator host can route (observed live,
+      # 2026-09-16). Prefer an address inside the node's own cluster subnet
+      # (the static IP's /24) first; fall back to first-non-loopback.
+      current_ip = coalesce(
+        try([
+          for iface in proxmox_virtual_environment_vm.talos_nodes[key].ipv4_addresses :
+          iface[0]
+          if length(iface) > 0 && !startswith(iface[0], "127.")
+          && inst.ip != null
+          && startswith(iface[0], "${join(".", slice(split(".", inst.ip), 0, 3))}.")
+        ][0], null),
+        try([
+          for iface in proxmox_virtual_environment_vm.talos_nodes[key].ipv4_addresses :
+          iface[0] if length(iface) > 0 && !startswith(iface[0], "127.")
+        ][0], null),
+      )
     }
   }
 
@@ -229,6 +245,36 @@ locals {
     total_memory_gb = sum([for inst in local.vm_instances : inst.memory]) / 1024
     total_cpu_cores = sum([for inst in local.vm_instances : inst.cpu_cores])
     gpu_nodes       = [for name, node in var.nodes : name if node.gpu]
+  }
+
+  # Workers that carry the VLAN 2080 ("Obfuscated") second NIC — UniFi
+  # auto-VPN-routes this network, so download/indexer pods egress via it.
+  # Control plane and cloud (Hetzner) nodes never get it.
+  vlan2080_nodes = [
+    for name, node in var.nodes :
+    name if node.talos_role == "worker" && coalesce(node.host, var.proxmox_node) == "pmx-main"
+  ]
+  # Static IPs for the VLAN 2080 interface, keyed by node name.
+  # .1 is the UniFi gateway; .2-.4 are the three home workers.
+  vlan2080_ips = {
+    wk-main-efficiency  = "10.20.80.2"
+    wk-main-performance = "10.20.80.3"
+    wk-main-sandbox     = "10.20.80.4"
+  }
+
+  # Deterministic MACs for every VM NIC. Critical: this CHANGES the primary
+  # NIC's MAC on existing VMs (Proxmox previously auto-generated it), so the
+  # first apply after this change updates each VM's network config in place —
+  # nodes keep their static Talos IP (address is config, not DHCP), but ARP
+  # caches refresh and UniFi may briefly show new clients. Plan accordingly
+  # (one node at a time if uptime matters).
+  nic_macs = {
+    for pair in flatten([
+      for name in keys(var.nodes) : [
+        { key = "${name}-primary", mac = "52:54:00:${substr(sha256("${name}-primary"), 0, 2)}:${substr(sha256("${name}-primary"), 2, 2)}:${substr(sha256("${name}-primary"), 4, 2)}" },
+        { key = "${name}-vlan2080", mac = "52:54:00:${substr(sha256("${name}-vlan2080"), 0, 2)}:${substr(sha256("${name}-vlan2080"), 2, 2)}:${substr(sha256("${name}-vlan2080"), 4, 2)}" },
+      ]
+    ]) : pair.key => pair.mac
   }
 }
 
@@ -379,9 +425,32 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
 
   # Primary NIC — on the dedicated VM VLAN (10.30.0.0/24, VLAN 3000), tagged
   # on the host's VM bridge. The VLAN ID comes from the public network variable.
+  # MACs are PINNED (see mac_address comment below): the Talos machine config
+  # selects each NIC by hardwareAddr, which requires Proxmox to assign a
+  # stable, known MAC.
   network_device {
-    bridge  = var.proxmox_nodes[each.value.host].bridge
-    vlan_id = var.network.vlan_id
+    bridge      = var.proxmox_nodes[each.value.host].bridge
+    vlan_id     = var.network.vlan_id
+    mac_address = local.nic_macs["${each.key}-primary"]
+  }
+
+  # Second NIC — VLAN 2080 ("Obfuscated"), UniFi auto-VPN-routed. Same bridge,
+  # different tag: the bridge tags the frame on veth egress, nothing host-side.
+  # Only the home workers carry it (control plane and Hetzner never do).
+  #
+  # mac_address: Talos's virtio_net deviceSelector is AMBIGUOUS once a VM has
+  # two virtio NICs (a multi-match selector is a config error / bond risk),
+  # and interface names are ens18/ens19 — not stable across a NIC reorder.
+  # Pinning the MACs here makes the Talos hardwareAddr selectors
+  # ordering-proof and deterministic. 52:54:00 is Proxmox's KVM default OUI;
+  # the low bytes hash the node name + role so the two NICs never collide.
+  dynamic "network_device" {
+    for_each = contains(local.vlan2080_nodes, each.key) ? [1] : []
+    content {
+      bridge      = var.proxmox_nodes[each.value.host].bridge
+      vlan_id     = 2080
+      mac_address = local.nic_macs["${each.key}-vlan2080"]
+    }
   }
 
   # Root disk (Where Talos OS will be installed during apply/bootstrap)

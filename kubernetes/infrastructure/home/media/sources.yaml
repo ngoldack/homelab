@@ -1,0 +1,19 @@
+# The bjw-s app-template chart (schema-only: turns a declarative values tree
+# into Deployments/Services/CronJobs). None of the media apps ship an upstream
+# chart that fits this deployment's shape (shared NFS library volume, per-pod
+# VLAN attachment), so all of them are hand-declared on app-template — see
+# helmrelease.yaml.
+#
+# OCI, not the HTTPS index: https://bjw-s-labs.github.io/helm-charts/index.yaml
+# now 404s (the project moved its publishing to GHCR; the pre-existing
+# `paperless` HelmRepository still works only off source-controller's cached
+# index artifact). OCI is the upstream-documented location.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: media
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 2h
+  url: oci://ghcr.io/bjw-s-labs/helm

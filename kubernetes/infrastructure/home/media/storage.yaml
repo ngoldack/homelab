@@ -1,0 +1,109 @@
+# Storage for the media stack.
+#
+# ONE shared library volume for downloads + imported media: Sonarr/Radarr
+# import by hardlink or atomic rename, which only works when
+# /data/usenet/complete and /data/media/* are the same filesystem. Layout:
+#
+#   /data/usenet/incomplete   SABnzbd's in-progress downloads
+#   /data/usenet/complete     finished downloads (import source)
+#   /data/media/movies        Radarr's library
+#   /data/media/tv            Sonarr's library
+#
+# All app /config directories are NFS so they survive rescheduling; each app
+# gets its own PVC. Sizes are generous ceilings — the driver provisions
+# datasets, nothing preallocates.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-library
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-tank-nfs-media-library
+  resources:
+    requests:
+      storage: 4Ti
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyseerr-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarr-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: radarr-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prowlarr-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bazarr-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sabnzbd-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-config
+  resources:
+    requests:
+      storage: 10Gi

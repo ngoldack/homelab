@@ -62,3 +62,9 @@ resources:
   - hermes.yaml
   # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
   - homelab-infra-metrics.yaml
+  # Multus secondary-CNI meta-plugin: prerequisite for the media namespace's
+  # VLAN 2080 macvlan attachments (no CRD/Gateway deps of its own).
+  - multus.yaml
+  # Media stack: Jellyfin/Jellyseerr + the *arr download chain, with the
+  # download pods' egress VPN-routed via VLAN 2080.
+  - media.yaml

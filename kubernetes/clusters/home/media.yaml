@@ -1,0 +1,33 @@
+# The media stack (Jellyfin + Jellyseerr + the *arr download chain).
+#
+# dependsOn network for the Gateway its HTTPRoutes attach to and multus for
+# the NetworkAttachmentDefinition CRD + DaemonSet every VLAN-attached pod
+# needs. The StorageClasses its PVCs reference are applied by
+# infra-controllers — exactly as paperless does, a missing SC only parks the
+# PVC in Pending, so no dependency edge is needed for it.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: media
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/media
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+    - name: multus
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

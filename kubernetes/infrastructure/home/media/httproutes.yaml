@@ -1,0 +1,147 @@
+# LAN-only surfaces for the media stack, all on the `public` Gateway
+# (10.30.0.200, ARP-announced on the cluster VLAN) and labelled
+# dns.ngoldack.de/publish=lan so the LAN external-dns instance owns the
+# records. Deliberately NOT on the edge Gateway: these are household
+# services, and the download chain's VPN egress already lives in the
+# datapath, not in the ingress path.
+#
+# Hostnames use the repo's canonical service-URL scheme,
+# {app}.{namespace}.svc.{domain} — e.g. jellyfin.media.svc.ngoldack.de —
+# which the *.svc.${CLUSTER_DOMAIN} wildcard certificate already covers
+# (network/certificate.yaml).
+#
+# Auth is the apps' own login pages (Jellyfin/Jellyseerr/*arr all ship one);
+# authentik is not in front of these, matching the immich/paperless posture
+# for LAN-resident services.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jellyfin
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - jellyfin.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-jellyfin
+          port: 8096
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jellyseerr
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - jellyseerr.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-jellyseerr
+          port: 5055
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sabnzbd
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - sabnzbd.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-sabnzbd
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sonarr
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - sonarr.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-sonarr
+          port: 8989
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: radarr
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - radarr.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-radarr
+          port: 7878
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prowlarr
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - prowlarr.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-prowlarr
+          port: 9696
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bazarr
+  namespace: media
+  labels:
+    dns.ngoldack.de/publish: lan
+spec:
+  parentRefs:
+    - name: public
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - bazarr.media.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: media-bazarr
+          port: 6767

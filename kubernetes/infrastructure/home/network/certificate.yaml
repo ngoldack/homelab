@@ -15,7 +15,11 @@ spec:
   # matches exactly ONE label, so it does NOT cover anything under svc. — hence
   # keeping "*.svc.${CLUSTER_DOMAIN}" alongside it rather than replacing it, so
   # existing svc. names keep working while shorter names become possible.
+  # The media stack uses the full {app}.{namespace}.svc.{domain} scheme
+  # (jellyfin.media.svc.ngoldack.de), which is FOUR labels — one namespace
+  # wildcard per consuming namespace.
   dnsNames:
     - "*.${CLUSTER_DOMAIN}"
     - "*.svc.${CLUSTER_DOMAIN}"
+    - "*.media.svc.${CLUSTER_DOMAIN}"
     - "${CLUSTER_DOMAIN}"

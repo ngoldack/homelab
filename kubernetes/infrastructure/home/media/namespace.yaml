@@ -1,0 +1,24 @@
+# The media stack: Jellyfin (+ Jellyseerr) for playback/requests, and the
+# *arr download automation chain (Prowlarr indexers -> Sonarr/Radarr ->
+# SABnzbd) with Recyclarr keeping the quality profiles in sync.
+#
+# LAN-resident by design (same posture as immich/paperless): these are
+# household services reached on the 10.30.0.200 VIP, not WAN-exposed —
+# hence public-ingress only, no edge-ingress label.
+#
+# The download/indexer pods additionally carry a Multus macvlan interface on
+# VLAN 2080 (UniFi "Obfuscated", auto-VPN-routed); see nad-vlan-2080.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: media
+  labels:
+    gateway.ngoldack.de/public-ingress: "true"
+    # Talos enforces PodSecurity `baseline` cluster-wide, and baseline forbids
+    # adding NET_ADMIN — but the download pods' vlan-routes init container
+    # needs exactly that to install the VPN default route. Same explicit
+    # override (enforce privileged, keep audit/warn at baseline as signal)
+    # as the buildkit namespace uses for its privileged builder.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

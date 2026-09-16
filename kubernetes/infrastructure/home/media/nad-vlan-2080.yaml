@@ -1,0 +1,31 @@
+# VLAN 2080 ("Obfuscated") attachment for the download/indexer pods.
+#
+# macvlan children of each node's second NIC (ens19, Proxmox-tagged 2080).
+# UniFi routes that network through a VPN automatically, so a pod whose
+# default route lives on net1 has its internet egress obfuscated — the reason
+# SABnzbd/Prowlarr/Sonarr/Radarr/Bazarr are attached and Jellyfin is not.
+#
+# Per-pod addressing comes from the pod annotation, not from this spec:
+#   k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.201/24"]}]'
+# Static IPAM (Talos ships no static/macvlan plugin; the multus DaemonSet's
+# install-cni-plugins init container adds them).
+#
+# The default route is NOT set here — the vlan-routes ConfigMap's init script
+# owns routing, because it must also keep the cluster CIDRs on eth0.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: vlan-2080
+  namespace: media
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "vlan-2080",
+      "type": "macvlan",
+      "master": "ens19",
+      "mode": "bridge",
+      "ipam": {
+        "type": "static"
+      }
+    }

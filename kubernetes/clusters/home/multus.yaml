@@ -1,0 +1,21 @@
+# Multus, the secondary-CNI meta-plugin. It attaches extra interfaces to pods
+# that opt in via the k8s.v1.cni.cncf.io/networks annotation — the media stack
+# uses it to give download/indexer pods a macvlan interface on the VLAN 2080
+# NIC (their VPN-routed egress path). Cilium stays the primary CNI; the
+# tofu-owned Cilium release runs with cni.exclusive=false precisely so this
+# 00-multus.conf survives (see tofu/home/cilium.tf).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: multus
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/multus
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

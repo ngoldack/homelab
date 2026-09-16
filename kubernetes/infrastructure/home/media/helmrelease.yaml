@@ -178,6 +178,40 @@ spec:
             securityContext:
               capabilities:
                 add: ["NET_ADMIN"]
+          host-whitelist:
+            image:
+              repository: linuxserver/sabnzbd
+              tag: "5.1.3"
+            command:
+              - sh
+              - -c
+              - |
+                python3 - <<'PY'
+                import pathlib, re
+                p = pathlib.Path("/config/sabnzbd.ini")
+                want = ["localhost", "media-sabnzbd.media",
+                        "media-sabnzbd.media.svc.cluster.local",
+                        "sabnzbd.media.svc.ngoldack.de"]
+                if not p.exists():
+                    p.write_text("[misc]\nhost_whitelist = localhost\n")
+                def repl(m):
+                    cur = [x.strip() for x in m.group(1).split(",") if x.strip()]
+                    merged = cur + [w for w in want if w not in cur]
+                    return "host_whitelist = " + ",".join(merged)
+                s = p.read_text()
+                s2, n = re.subn(r'^host_whitelist\s*=\s*(.*)$', repl, s, flags=re.M)
+                p.write_text(s2)
+                print("merged host_whitelist entries:", n)
+                PY
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+            resources:
+              requests:
+                cpu: 10m
+                memory: 30Mi
+              limits:
+                memory: 80Mi
         containers:
           main:
             image:
@@ -723,6 +757,8 @@ spec:
         advancedMounts:
           sabnzbd:
             main:
+              - path: /config
+            host-whitelist:
               - path: /config
       sonarr-config:
         type: persistentVolumeClaim

@@ -18,10 +18,20 @@ metadata:
     aigateway.envoyproxy.io/gateway-config: otel-phoenix
 spec:
   gatewayClassName: aigateway
+  infrastructure:
+    # REQUIRED for the EnvoyProxy CR below to be read at all: Envoy Gateway
+    # only binds an EnvoyProxy through Gateway.spec.infrastructure.parametersRef
+    # (or the GatewayClass's), or its lowest-priority config default — there is
+    # NO "same name as the Gateway" auto-discovery in EG v1.8.x
+    # (provider/kubernetes/controller.go: GetEnvoyProxy(gtw.Namespace,
+    # gtw.Spec.Infrastructure.ParametersRef.Name)). Without this ref the
+    # generated Service keeps defaults: no LAN VIP, no dns.ngoldack.de/scope
+    # label, externalTrafficPolicy Local.
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: aigateway
   listeners:
     - name: http
       protocol: HTTP
       port: 80
-  # The generated Envoy data-plane Service inherits nothing here; the LB
-  # address + LAN labels live on the EnvoyProxy CR's envoyService, which
-  # Envoy Gateway merges into the generated Service.

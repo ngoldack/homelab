@@ -36,7 +36,7 @@ spec:
         name: paperless-database-credentials
   storage:
     size: 10Gi
-    storageClass: truenas-fast-nfs-paperless-database
+    storageClass: truenas-fast-nvmeof-paperless-database
   resources:
     requests:
       cpu: 100m

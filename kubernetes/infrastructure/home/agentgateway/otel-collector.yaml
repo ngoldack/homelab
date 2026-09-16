@@ -72,7 +72,7 @@ spec:
         otlphttp:
           endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
           headers:
-            Authorization: "Basic ${env:LANGFUSE_AUTH}"
+            Authorization: "Basic $${env:LANGFUSE_AUTH}"
       service:
         pipelines:
           traces:
@@ -86,5 +86,6 @@ spec:
   # retry_on_failure + sending_queue: Langfuse is behind langfuse-web; a
   # transient 5xx must not drop spans.
   #
-  # NOTE: exporters.otlphttp.headers is written literally — the collector
-  # expands ${env:VAR} in config at startup (default confmap resolver).
+  # NOTE: $$ escapes the ${env:VAR} so Flux's strict envsubst (postBuild)
+  # passes it through literally; the COLLECTOR then expands it at startup
+  # from the LANGFUSE_AUTH env injected via extraEnvs above.

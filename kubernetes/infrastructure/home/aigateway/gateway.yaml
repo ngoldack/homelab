@@ -14,8 +14,6 @@ kind: Gateway
 metadata:
   name: aigateway
   namespace: aigateway
-  annotations:
-    aigateway.envoyproxy.io/gateway-config: otel-phoenix
 spec:
   gatewayClassName: aigateway
   infrastructure:

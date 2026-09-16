@@ -87,35 +87,6 @@ data:
           meta_name: Hindsight (memory UI)
           meta_launch_url: https://hindsight-ui.ngoldack.de/
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
-      # ---------- phoenix UI behind the edge outpost (proxy path) ----------
-      # Same two-way wiring as hindsight/grafana: edge route -> outpost ->
-      # phoenix UI. The provider MUST precede the app !Finding it. The
-      # internal_host points at phoenix-svc:6006 (the chart serves the UI on
-      # the app port; no separate 8080). Outpost-proxy only: research confirmed
-      # Phoenix is an OAuth2 authorization server (not an OIDC consumer), so a
-      # grafana-style native federation is not possible — the outpost gates the
-      # whole UI.
-      - model: authentik_providers_proxy.proxyprovider
-        state: present
-        identifiers:
-          name: phoenix-proxy
-        attrs:
-          mode: proxy
-          internal_host: http://phoenix-svc.phoenix.svc.cluster.local:6006/
-          external_host: https://phoenix.ngoldack.de/
-          cookie_domain: ngoldack.de
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      - model: authentik_core.application
-        state: present
-        identifiers:
-          slug: phoenix-edge
-        attrs:
-          name: phoenix-edge
-          meta_name: Phoenix (LLM traces, edge)
-          meta_launch_url: https://phoenix.ngoldack.de/
-          provider: !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:
@@ -205,7 +176,6 @@ data:
           providers:
             - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
-            - !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
       # grafana behind the SAME edge outpost (proxy provider; the edge envoy
       # cannot dial grafana's home pod directly — pod->pod only, measured
       # 20/20). Distinct from the OIDC federation below, which serves the
@@ -700,14 +670,6 @@ data:
         state: present
         identifiers:
           target: !Find [authentik_core.application, [slug, hindsight-ui]]
-          order: 0
-        attrs:
-          group: !Find [authentik_core.group, [name, akadmin]]
-          negate: false
-      - model: authentik_policies.policybinding
-        state: present
-        identifiers:
-          target: !Find [authentik_core.application, [slug, phoenix-edge]]
           order: 0
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]

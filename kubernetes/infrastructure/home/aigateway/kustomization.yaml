@@ -7,7 +7,6 @@ resources:
   - gatewayclass.yaml
   - gateway.yaml
   - envoyproxy.yaml
-  - otel-pipeline.yaml
   - models.yaml
   - local.yaml
   - synthetic.yaml

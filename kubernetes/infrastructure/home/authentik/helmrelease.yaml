@@ -83,6 +83,12 @@ spec:
         - name: seed-secrets-headlamp
           secret:
             secretName: authentik-oidc-headlamp
+        # aigateway's OIDC client secret, read via !File
+        # /secrets-aigateway/client_secret in the same seed (the M2M
+        # client_credentials provider). Its own path, like the others.
+        - name: seed-secrets-aigateway
+          secret:
+            secretName: authentik-oidc-aigateway
       volumeMounts:
         - name: seed-secrets
           mountPath: /secrets
@@ -95,6 +101,9 @@ spec:
           readOnly: true
         - name: seed-secrets-headlamp
           mountPath: /secrets-headlamp
+          readOnly: true
+        - name: seed-secrets-aigateway
+          mountPath: /secrets-aigateway
           readOnly: true
     server:
       # 2 replicas, NOT site-pinned, tolerating the ingress taint: the edge

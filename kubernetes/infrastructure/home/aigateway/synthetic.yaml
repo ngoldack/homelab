@@ -10,6 +10,7 @@
 # x-ai-eg-model header; EAG routes on that header):
 #   - default  -> syn:large:text       (GLM-5.3-Flash, 524k ctx, has vision)
 #   - small    -> syn:small:text       (GLM-4.7-Flash, 196k ctx, text only)
+#   - large    -> hf:deepseek-ai/DeepSeek-V4.1-Flash (524k ctx, vision)
 #   - vision   -> hf:moonshotai/Kimi-K3 (524k ctx, vision)
 #
 # "default" is the plain-OpenAI-SDK default chat model; "small" is the cheap
@@ -110,6 +111,13 @@ spec:
             - type: Exact
               name: x-ai-eg-model
               value: small
+      backendRefs:
+        - name: synthetic
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: large
       backendRefs:
         - name: synthetic
     - matches:

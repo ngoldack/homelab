@@ -666,7 +666,7 @@ flowchart LR
   C ---|edge Gateway 2.28.31.116| E[App via authentik]
   G[Grafana] --OIDC--> A[Authentik]
   A ---|Cert / flows| G
-  P[Phoenix / Hindsight / LLM] --OTLP--> Ob[Observability]
+  P[Hindsight / LLM] --OTLP--> Ob[Observability]
 ```
 - Envoy is an ordinary **pod**, not a host-network bind:
   `gatewayAPI.hostNetwork.enabled` is `false` in `tofu/home/cilium.tf`. It

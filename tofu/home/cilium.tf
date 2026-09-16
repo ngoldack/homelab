@@ -39,6 +39,12 @@ resource "helm_release" "cilium" {
     ipam = {
       mode = "kubernetes"
     }
+    # Multus (secondary CNI meta-plugin) needs to own /etc/cni/net.d/
+    # 00-multus.conf; with exclusive mode on, Cilium deletes/renames other
+    # CNI configs on startup (silently, siderolabs/talos#10468).
+    cni = {
+      exclusive = false
+    }
     kubeProxyReplacement = true
     k8sServiceHost       = "127.0.0.1"
     k8sServicePort       = 7445

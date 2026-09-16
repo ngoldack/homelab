@@ -512,3 +512,57 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: WaitForFirstConsumer
+---
+# Media stack (../media/): the shared library volume. Downloads AND the
+# imported library live on ONE filesystem on purpose — Sonarr/Radarr import
+# by hardlink/atomic-rename only when source and target are on the same
+# mount, and that is what keeps imports cheap instead of copying multi-GB
+# files. Tank (bulk), daily snapshot: media is re-downloadable but the
+# imported/curated library is not worth losing to a bad bulk operation.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-tank-nfs-media-library
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "tank"
+  datasetPath: "k8s/nfs/media/library"
+  compression: "LZ4"
+  snapshot.schedule: "15 3 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "1"
+  snapshot.retentionUnit: "MONTH"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Media stack application state (../media/): /config directories for
+# Jellyfin, Jellyseerr, SABnzbd and the *arr apps — indexer configs, quality
+# profiles, API keys, download history. Small, precious, and frequently
+# rewritten, so fast pool + the same 6h/14d schedule as paperless's data.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-media-config
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/media/config"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

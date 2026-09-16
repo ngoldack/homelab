@@ -363,12 +363,38 @@ resource "talos_machine_configuration_apply" "worker" {
         network = {
           interfaces = [
             {
-              deviceSelector = { driver = "virtio_net" }
+              # Primary NIC: VLAN 3000 (10.30.0.x), MAC pinned in main.tf so
+              # hardwareAddr is unambiguous even with two virtio NICs present
+              # (a bare driver selector would multi-match).
+              deviceSelector = { hardwareAddr = local.nic_macs["${each.key}-primary"] }
               addresses      = ["${local.talos_nodes[each.key].ip}/${var.network.subnet_prefix}"]
               routes         = [{ network = "0.0.0.0/0", gateway = var.network.gateway }]
+            },
+            {
+              # VLAN 2080 "Obfuscated" second NIC (Proxmox-side tag). Static
+              # address only — NO routes: the node must keep its normal
+              # default via the VLAN 3000 gateway. Kubernetes pods reach this
+              # NIC via Multus macvlan; the node itself never routes via it.
+              deviceSelector = { hardwareAddr = local.nic_macs["${each.key}-vlan2080"] }
+              addresses = [
+                "${local.vlan2080_ips[each.key]}/24"
+              ]
             }
           ]
           nameservers = var.network.nameservers
+        }
+        # Kubelet picks its node address from the FIRST address-bearing
+        # interface once several exist, and with the VLAN 2080 NIC present it
+        # chose 10.20.80.x — flipping every worker's InternalIP onto the
+        # UniFi-auto-VPN network that Cilium's tunnel endpoints and
+        # cross-site traffic must never use (learned live, 2026-09-16).
+        # validSubnets pins the kubelet node IP back to the cluster VLAN.
+        kubelet = {
+          nodeIP = {
+            validSubnets = [
+              "${join(".", slice(split(".", local.talos_nodes[each.key].ip), 0, 3))}.0/${var.network.subnet_prefix}"
+            ]
+          }
         }
       }
     }),

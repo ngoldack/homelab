@@ -41,11 +41,13 @@ spec:
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
           args: ["gateway", "run"]
           env:
-            - name: OPENROUTER_API_KEY
+            # LLM credential for the agentgateway custom provider
+            # (config.yaml custom_providers -> OPENAI_API_KEY convention).
+            - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: hermes-secret
-                  key: OPENROUTER_API_KEY
+                  key: OPENAI_API_KEY
             - name: API_SERVER_KEY
               valueFrom:
                 secretKeyRef:

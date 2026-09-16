@@ -14,7 +14,18 @@ metadata:
   namespace: hermes
 data:
   config.yaml: |
-    model: deepseek/deepseek-v4-flash
+    # LLM via the agentgateway (agentgateway.dev data plane, ns agentgateway):
+    # custom OpenAI-compatible provider, base_url at the in-cluster Service.
+    # Auth is the aigateway-oidc client_credentials JWT — same issuer/audience
+    # the old gateway used, so the stored token in hermes-secret keeps
+    # validating (HERMES_LLM_JWT env -> OPENAI_API_KEY on the pod).
+    # model "local" routes to the P100 (qwen36-35b) via local-p100 backend;
+    # /v1/chat/completions only — hermes does not use the /v1/chat chain
+    # prefix (that route is for hindsight-style single-model clients).
+    model: local
+    custom_providers:
+      - name: agentgateway
+        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1
     plugins:
       enabled:
         - agent_sandbox

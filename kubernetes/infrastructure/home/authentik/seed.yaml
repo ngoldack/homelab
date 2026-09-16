@@ -963,6 +963,8 @@ data:
           name: jellyfin-ldap
           base_dn: dc=ldap,dc=ngoldack,dc=de
           bind_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
         identifiers:

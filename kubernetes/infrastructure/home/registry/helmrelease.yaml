@@ -123,7 +123,6 @@ spec:
             "gc": true,
             "gcDelay": "1h",
             "gcInterval": "24h",
-            "deleteEnabled": true,
             "dedupe": false
           },
           "http": {
@@ -165,6 +164,7 @@ spec:
               }
             },
             "sync": {
+              "enable": true,
               "registries": [
                 {
                   "urls": ["https://registry-1.docker.io"],

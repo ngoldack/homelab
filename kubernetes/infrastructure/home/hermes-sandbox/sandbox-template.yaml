@@ -29,15 +29,10 @@ spec:
       runtimeClassName: kata
       # Sandboxes hold no cluster credentials — nothing to mount, ever.
       automountServiceAccountToken: false
-      # Schedule only on the sandbox worker; its NoSchedule taint keeps every
-      # other workload off it in return.
+      # Label-pin to the (mixed-use) sandbox node. The label only attracts;
+      # there is no taint, so other workloads still schedule there too.
       nodeSelector:
         workload.hermes.io/sandbox: "true"
-      tolerations:
-        - key: workload.hermes.io/sandbox
-          operator: Equal
-          value: "true"
-          effect: NoSchedule
       # Non-root 10001 end to end (image user, pod and container security
       # contexts) so nothing in a session can escalate via a UID mismatch.
       securityContext:

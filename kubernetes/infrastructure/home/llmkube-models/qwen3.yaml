@@ -29,13 +29,8 @@ spec:
   # here: the NAS currently sustains single-digit MB/s, so a 13GB pull is slow
   # and should happen exactly once.
   prefetch: true
-  # The prefetch Job has to be able to land on the GPU node, which carries
-  # dedicated=nvidia:NoSchedule.
-  prefetchTolerations:
-    - key: dedicated
-      operator: Equal
-      value: nvidia
-      effect: NoSchedule
+  # The prefetch Job targets the GPU node by label (untainted since
+  # 2026-09-15 — placement is by label only).
   hardware:
     accelerator: cuda
     gpu:
@@ -70,16 +65,10 @@ spec:
   # but never gets /dev/nvidia* bind-mounted and runs CPU-only (~1 t/s). This was
   # the real pre-optimization bug, fixed 2026-09-15.
   runtimeClassName: nvidia
-  # The P100 box is the only node with a GPU, and it is reserved for this:
-  # instance-type selects it, the toleration gets past dedicated=nvidia:NoSchedule,
-  # and without the toleration the pod would sit Pending forever with no error.
+  # The P100 box is the only node with a GPU: the nodeSelector (with the
+  # nvidia RuntimeClass) is what puts the pod there; the node is untainted.
   nodeSelector:
     hardware/gpu.model: Tesla-P100
-  tolerations:
-    - key: dedicated
-      operator: Equal
-      value: nvidia
-      effect: NoSchedule
   # 8k to start. Context is the other consumer of VRAM besides weights, and
   # with ~2.8GB spare the KV cache is what will run out first — raise this only
   # after confirming actual VRAM use.

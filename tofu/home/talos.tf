@@ -225,6 +225,7 @@ data "talos_machine_configuration" "controlplane" {
   )
 }
 
+
 data "talos_machine_configuration" "worker" {
   for_each = local.worker_instances
 
@@ -312,9 +313,8 @@ data "talos_machine_configuration" "worker" {
     # node this repo has ever tainted, brand-new ones included — so Talos's
     # own NodeApplyController can never land this, and it also blocks that
     # same controller's label patch (labels+taints ride one atomic PATCH).
-    # Taints are applied instead by a Flux-managed Job
-    # (kubernetes/infrastructure/home/node-taints/), selecting nodes by the
-    # labels below rather than by name.
+    # No in-repo taint mechanism exists any more (the Flux node-taints Job
+    # was retired 2026-09-16); placement is label-based.
     length(local.node_labels[each.key]) > 0 ? [
       yamlencode({
         machine = {

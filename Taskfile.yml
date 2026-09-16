@@ -216,7 +216,7 @@ tasks:
           TOFU_ARGS: validate
 
   sandbox:preflight:
-    desc: Verify pmx-main nested virtualization before creating wk-main-sandbox
+    desc: Verify pmx-main nested virtualization before Kata on wk-main-performance
     cmds:
       - |
         set -eu
@@ -282,7 +282,7 @@ tasks:
         node=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
           get pod kata-smoke-test -o jsonpath='{.spec.nodeName}')
         sandbox_node=$(kubectl --kubeconfig kubeconfig-home.yaml get nodes \
-          -l node.kubernetes.io/instance-type=sandbox-worker \
+          -l workload.hermes.io/sandbox=true \
           -o jsonpath='{.items[0].metadata.name}')
         echo "sandbox_node=$sandbox_node scheduled_on=$node"
         [ "$node" = "$sandbox_node" ] || { echo "FAIL: not scheduled on sandbox node" >&2; exit 1; }

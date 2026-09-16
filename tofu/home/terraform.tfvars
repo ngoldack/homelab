@@ -16,7 +16,6 @@ network = {
     cp-main             = "10.30.0.10"
     wk-main-efficiency  = "10.30.0.23"
     wk-main-performance = "10.30.0.22"
-    wk-main-sandbox     = "10.30.0.24"
   }
 }
 
@@ -90,7 +89,7 @@ nodes = {
     # 6 GiB: etcd + apiserver + scheduler/controller-manager + the Talos
     # runtime itself, with room for an apiserver burst. Raised from 4 in the
     # two-worker consolidation; fleet total stays inside the allocatable
-    # budget (6 + 28 + 36 + 12 = 82 of 90).
+    # budget (6 + 28 + 48 = 82 of 90).
     memory     = 6144
     disk_size  = 32
     talos_role = "controlplane"
@@ -162,29 +161,24 @@ nodes = {
     }
   }
 
-  # Dedicated AI/inference worker — the x16 P100 and, since the 2026-09-13
-  # sandbox carve, 10 of the 16 P-class threads and 36 GiB.
+  # AI/inference worker — the x16 P100 and, since the 2026-09-16 sandbox
+  # merge, all 16 P-class threads and 48 GiB (the pre-carve shape restored;
+  # Kata sandbox workloads also land here, label-pinned).
   #
   # 48 GiB, not 64: the VM stopped starting at 64 ("QEMU exited with code 1"
-  # = allocation failure — see the host reserved block above). The sandbox
-  # carve (user decision 2026-09-13) lowers this node to 36 GiB and 10
-  # threads so it fully funds wk-main-sandbox (6 P-class threads + 12 GiB):
-  # llama.cpp offload still fits (27B-Q4 weights ~17 GiB + KV + runtime)
-  # with headroom, and inference is memory-bandwidth-bound, so 10 P-threads
-  # suffice. 10 + 6 = 16 keeps the P-class exactly full (this class carries
-  # no host reserve).
+  # = allocation failure — see the host reserved block above).
   # Kept in sync with the live VM, which was resized by hand first: without
   # this line the next apply would push it straight back to the old size and
   # break the node again.
-  # Fleet total: 6 (cp) + 28 (eff) + 36 (perf) + 12 (sandbox) = 82 GiB
-  # committed, ~12 GiB real host slack.
+  # Fleet total: 6 (cp) + 28 (eff) + 48 (perf) = 82 GiB committed, ~12 GiB
+  # real host slack.
   wk-main-performance = {
     host      = "pmx-main"
     vm_id     = 105
-    cpu_cores = 10
+    cpu_cores = 16
     cpu_class = "performance"
 
-    memory     = 36864
+    memory     = 49152
     disk_size  = 96
     talos_role = "worker"
     gpu        = true
@@ -199,6 +193,11 @@ nodes = {
     extensions = [
       "siderolabs/nonfree-kmod-nvidia-lts",
       "siderolabs/nvidia-container-toolkit-lts",
+      # Kata Containers — containerd runtime + QEMU microVM machinery, baked
+      # into the boot image via Image Factory (merged from the old dedicated
+      # sandbox worker on 2026-09-16; this node's extension list forms its own
+      # schematic/ISO in main.tf).
+      "siderolabs/kata-containers",
     ]
     hostpci = [
       {
@@ -207,58 +206,17 @@ nodes = {
         rombar = true
       }
     ]
-    # Tainted dedicated=nvidia (applied by a Flux Job, not Talos — see
-    # kubernetes/infrastructure/home/node-taints/): the taint names the
-    # capability it gates (CUDA/P100 workloads carry the matching
-    # toleration), replacing the old role-name "ai" now the iGPU workload
-    # lives on the efficiency worker. This
-    # node.kubernetes.io/instance-type label is what that Job selects on.
+    # GPU workload placement is by label + nvidia RuntimeClass (the old
+    # dedicated=nvidia taint was deleted live 2026-09-15; no taint applies).
+    # Sandbox workloads pin via workload.hermes.io/sandbox=true only —
+    # non-sandbox pods also schedule here.
     node_labels = {
       "node.kubernetes.io/instance-type" = "gpu-worker"
       "workload/ai-inference"            = "true"
-    }
-  }
-
-  # Dedicated sandbox worker for the Hermes / Kubernetes Agent Sandbox stack.
-  # Every code-execution sandbox runs as a Kata QEMU microVM (separate guest
-  # kernel) on THIS node only, which requires nested hardware virtualization:
-  # the fleet CPU type is already `host` (main.tf) and pmx-main must report
-  # kvm_intel.nested=Y — enforced by `task sandbox:preflight` before apply.
-  #
-  # Capacity (user decision 2026-09-13): carved ENTIRELY from
-  # wk-main-performance — its cpu_cores 16 -> 10 and memory 49152 -> 36864
-  # fund these 6 performance-class threads (deterministically class_alloc'd
-  # to ids 10-15, declared after the AI node above) plus 12 GiB. Fleet RAM:
-  # 6 + 28 + 36 + 12 = 82 GiB, preserving the ~12 GiB real host slack the
-  # P100-boot OOM history requires.
-  #
-  # Tainted workload.hermes.io/sandbox=true:NoSchedule by the Flux
-  # node-taints Job (selected on instance-type=sandbox-worker, same
-  # mechanism as dedicated=nvidia); only the Kata RuntimeClass-scheduled
-  # sandbox pods tolerate it, so nothing else lands here.
-  wk-main-sandbox = {
-    host      = "pmx-main"
-    vm_id     = 106
-    cpu_cores = 6
-    cpu_class = "performance"
-    memory    = 12288
-    disk_size = 64
-
-    talos_role = "worker"
-
-    # Kata Containers — containerd runtime + QEMU microVM machinery, baked
-    # into the boot image via Image Factory. This node's extension list
-    # (defaults + kata) forms its own schematic/ISO automatically in
-    # main.tf; other nodes' images are untouched.
-    extensions = [
-      "siderolabs/kata-containers",
-    ]
-
-    node_labels = {
-      "node.kubernetes.io/instance-type" = "sandbox-worker"
       "workload.hermes.io/sandbox"       = "true"
     }
   }
+
 }
 
 

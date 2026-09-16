@@ -64,15 +64,10 @@ spec:
     # (which mounts the cache too, for model bookkeeping) must share that
     # node — RWO across KubeSpan mounts fine, RWO across NODES is a
     # Multi-Attach error that left the first inference rollout stuck in
-    # Init forever. Toleration clears dedicated=nvidia.
+    # Init forever. The node is untainted; the nodeSelector alone places it.
     controllerManager:
       nodeSelector:
         hardware/gpu.model: Tesla-P100
-      tolerations:
-        - key: dedicated
-          operator: Equal
-          value: nvidia
-          effect: NoSchedule
 
     # The chart ships Grafana dashboards and labels them grafana_dashboard,
     # which is exactly what the Grafana sidecar in ../monitoring/ watches — so

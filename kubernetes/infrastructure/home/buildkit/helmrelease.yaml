@@ -97,19 +97,14 @@ spec:
     # dedicated media worker this list used to carry is consolidated into
     # wk-main-efficiency.)
     #
-    # The honest cost: this is the P100 inference node, carrying
-    # dedicated=nvidia:NoSchedule, so the toleration below is what lets the builder
-    # land there and a build WILL compete with llama.cpp for CPU. Builds are
-    # occasional and the resource limit caps the damage; run one when the model
-    # is idle. The CPU request is small so the pod is nearly free while idle —
-    # buildkitd uses almost nothing between builds.
+    # The honest cost: this is the P100 inference node (untainted since
+    # 2026-09-15; placement is by label only), so the builder lands there and
+    # a build WILL compete with llama.cpp for CPU. Builds are occasional and
+    # the resource limit caps the damage; run one when the model is idle. The
+    # CPU request is small so the pod is nearly free while idle — buildkitd
+    # uses almost nothing between builds.
     nodeSelector:
       node.kubernetes.io/instance-type: gpu-worker
-    tolerations:
-      - key: dedicated
-        operator: Equal
-        value: nvidia
-        effect: NoSchedule
 
     resources:
       requests:

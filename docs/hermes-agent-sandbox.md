@@ -2,9 +2,11 @@
 
 Production-minded Hermes Agent deployment: every model-generated terminal
 command executes inside a Kubernetes Agent Sandbox Pod (kubernetes-sigs/
-agent-sandbox v1.0.2, SIG Apps) on the dedicated Kata worker
-`wk-main-sandbox` (Proxmox VM `wk-main-sandbox`, 6 vCPU / 12 GiB, nested
-virt, `siderolabs/kata-containers` extension).
+agent-sandbox v1.0.2, SIG Apps) on the shared Kata-capable worker
+`wk-main-performance` (16 vCPU / 48 GiB, nested virt,
+`siderolabs/kata-containers` extension, label-pinned via
+`workload.hermes.io/sandbox=true`; mixed use — GPU inference lands there
+too).
 
 ## Architecture
 

@@ -38,7 +38,7 @@ its former ingress role is now the LAN VIP described above.
 │                              # image-builds, immich, cnpg-operator,
 │                              # valkey-operator, authentik (+ edge outpost),
 │                              # llmkube, monitoring, headlamp,
-│                              # talos-backup, node-taints
+│                              # talos-backup
 └── tofu/
     └── home/                  # Proxmox + Talos + Hetzner ingress, hand-rolled
         ├── main.tf            # Proxmox VMs, ISOs, Image Factory schematics
@@ -107,7 +107,6 @@ network:
     cp-main: 10.30.0.10
     wk-main-efficiency: 10.30.0.23
     wk-main-performance: 10.30.0.22
-    wk-main-sandbox: 10.30.0.24
 ```
 
 ### Home node roles and capacity
@@ -115,20 +114,20 @@ network:
 `pmx-main` (i9-13900HX: 8 P-cores/16 threads = "performance", 16 E-cores =
 "efficiency", 96 GiB installed / 94 GiB usable) runs a **deliberately
 consolidated LAN fleet**: every VM that is not the P100 box shares one
-general-purpose worker, plus a dedicated Kata sandbox worker.
+general-purpose worker; the P100 worker also hosts the Kata sandbox
+workloads (label-pinned, mixed use).
 
-| node | class | threads | RAM | passthrough | taint |
+| node | class | threads | RAM | passthrough | labels/taint |
 | --- | --- | --- | --- | --- | --- |
 | `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
 | `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | Intel UHD 770 iGPU | — (general node) |
-| `wk-main-performance` | performance | 10 (0–9) | 36 GiB | Tesla P100 | `dedicated=nvidia` |
-| `wk-main-sandbox` | performance | 6 (10–15) | 12 GiB | nested KVM (Kata) | `workload.hermes.io/sandbox` |
+| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | Tesla P100, nested KVM (Kata) | no taint; `workload.hermes.io/sandbox=true`, `workload/ai-inference` labels |
 
 Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
 82 GiB committed, so the host really keeps ~12 with ARC capped at
 1 GiB). E-threads sum to exactly 14/14 — cp 4 + worker 10; P-threads sum to
-exactly 16/16 — perf 10 + sandbox 6 — **adding another node means taking
-capacity from an existing one**.
+exactly 16/16 — all on the performance worker. **Adding another node means
+taking capacity from an existing one.**
 
 Design of the consolidation:
 
@@ -138,20 +137,23 @@ Design of the consolidation:
   PULL onto it by capability label — `hardware/igpu: Intel-UHD-Graphics-770`
   (derived by tofu from the `intel-igpu` hostpci mapping) plus
   `workload/media` — e.g. Immich's machine-learning component.
-* The P100 worker keeps a hard `dedicated=nvidia:NoSchedule` (applied by the
-  node-taints Flux Job, selected on `instance-type=gpu-worker`); only
-  inference and the builder tolerate it. Since the 2026-09-13 sandbox carve
-  it runs 36 GiB / 10 P-threads: llama.cpp offload still fits (27B-Q4
-  weights ~17 GiB + KV) with headroom, and inference is memory-bandwidth
-  bound — see the tfvars comment (the 48 GiB size was kept for proven boot
-  reliability; 64 GiB starved the host).
-* The sandbox worker exists for ONE workload family: Hermes/Agent Sandbox
-  code execution, every sandbox a Kata QEMU microVM with its own guest
-  kernel. It needs nested hardware virtualization on pmx-main
-  (`kvm_intel.nested=Y`, fleet CPU type is already `host`) — `task
-  sandbox:preflight` enforces that before apply. The
-  `workload.hermes.io/sandbox=true:NoSchedule` taint (same node-taints Job)
-  keeps every non-sandbox workload off it.
+* The P100 worker carries a label-only sandbox pin
+  (`workload.hermes.io/sandbox=true`); since the 2026-09-16 merge of the
+  old dedicated sandbox worker it also runs the Kata
+  Hermes/Agent-Sandbox code-execution sandboxes — every sandbox a Kata QEMU
+  microVM with its own guest kernel, needing nested hardware
+  virtualization on pmx-main (`kvm_intel.nested=Y`, fleet CPU type is
+  already `host`); `task sandbox:preflight` enforces that. The label only
+  ATTRACTS sandboxes; there is no sandbox taint, so general and GPU
+  workloads still schedule on the node. It is currently **untainted**: the
+  `dedicated=nvidia` taint was deleted live on 2026-09-15 so general pods
+  could spill onto this node, and the Flux node-taints Job that applied it
+  was retired entirely on 2026-09-16 — GPU placement now relies on the
+  `workload/ai-inference` label, the nvidia RuntimeClass, and admission
+  policies. It runs 48 GiB / 16 P-threads (pre-carve shape): llama.cpp
+  offload still fits (27B-Q4 weights ~17 GiB + KV) with headroom — see the
+  tfvars comment (the 48 GiB size was kept for proven boot reliability; 64
+  GiB starved the host).
 * BuildKit is rootless, so the P100 node's machine config raises
   `user.max_user_namespaces` via `machine.sysctls` (Talos ships it at 0 as
   a hardening default; rootless buildkitd refuses to start otherwise).
@@ -454,18 +456,15 @@ KUBECONFIG=kubeconfig-home.yaml flux bootstrap github \
   --personal
 ```
 
-One thing Flux still can't do for itself: Talos's own controller can never
-self-apply a node taint (Kubernetes' NodeRestriction admission plugin forbids
-a node from setting its own taints — confirmed on a brand-new node's very
-first join, not just pre-existing ones). Rather than a manual `kubectl taint`
-step, `kubernetes/infrastructure/home/node-taints/` is a Flux-managed
-one-shot Job that does it instead, selecting nodes by their
-`node.kubernetes.io/instance-type` label rather than by name (Talos assigns
-each node a random generated hostname, so there's no stable name to target).
-This is the one place in this repo that runs `kubectl` directly rather than
-through tofu or a native Kubernetes resource — because nothing else *can* set
-a taint here — but it's still 100% Flux-applied code, not an operator running
-anything by hand.
+Node taints: the old Flux-managed `node-taints` one-shot Job was retired on
+2026-09-16 (its last remaining taint, the sandbox pin, went away when the
+dedicated sandbox worker merged into `wk-main-performance`). The P100
+worker's `dedicated=nvidia` taint had already been deleted live on
+2026-09-15 so general workloads could spill onto it; today no node taint is
+applied by any in-repo mechanism — workload placement is purely
+label/selector based (`workload/ai-inference`, `workload.hermes.io/sandbox`,
+`hardware/igpu`), enforced by the nodeSelector admission policies rather
+than taints.
 
 ## Minimal cluster contents
 
@@ -479,8 +478,8 @@ anything by hand.
   boots the smallest image that serves it.
 - **Flux-owned**: everything else — cert-manager + the Hetzner DNS webhook,
   the `network` namespace (public Gateway on the LAN VIP, LB-IPAM pool,
-  L2 announcements, wildcard Certificate), external-dns, the node-taints
-  Job (see "Known limitations"), the NVIDIA device plugin (AI worker only),
+  L2 announcements, wildcard Certificate), external-dns, the NVIDIA device
+  plugin (AI worker only),
   TrueNAS-CSI storage classes, Zot (the cluster's own OCI registry), an
   in-cluster BuildKit builder + image-builds, CNPG operator + Immich,
   LLMKube (Qwen on the P100), the monitoring stack, Headlamp, and the
@@ -876,8 +875,7 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
 - `kubectl --context home get nodes` shows all five nodes Ready (four LAN +
   the Hetzner worker), and `kubectl -n kube-system get pods -l k8s-app=cilium`
   shows tofu's own Cilium release healthy.
-- `flux get all` shows every Kustomization/HelmRelease Ready, and
-  `kubectl -n kube-system get job node-taints` shows `Complete`.
+- `flux get all` shows every Kustomization/HelmRelease Ready.
 - KubeSpan: `talosctl -n <lan-ip> get meshconfig` lists the ingress peer as
   `Ready` — the three LAN-to-Hetzner peerings are dial-out only.
 - Certificate: `kubectl get certificate -n network` shows the wildcard
@@ -958,20 +956,16 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   brand-new ones (verified: `wk-main-media` hit it on its very first join,
   not just already-registered nodes).
 
-  Rather than a manual `kubectl taint` workaround, `tofu/home/talos.tf`
-  never sets `machine.nodeTaints` at all, and
-  `kubernetes/infrastructure/home/node-taints/` is a Flux-managed one-shot
-  Job that applies the two taints instead — selecting nodes by their
-  `node.kubernetes.io/instance-type` label rather than by name (Talos
-  assigns each node a random generated hostname, so there's no stable name
-  to hard-code). This is the one place in the repo that runs `kubectl`
-  directly rather than through tofu or a native Kubernetes resource, but
-  it's Flux-applied code, not an operator running anything by hand — a
-  fresh bootstrap needs zero manual intervention for this. Check with
+  `tofu/home/talos.tf` therefore never sets `machine.nodeTaints` at all, and
+  since 2026-09-16 no in-repo mechanism applies node taints (the Flux
+  `node-taints` Job was retired with the sandbox worker merge). Workload
+  placement is label/selector based — if a future taint is needed again, it
+  must be re-introduced as a Flux Job or applied manually, because a node
+  still can't taint itself. Symptom to remember: a node that's `Ready` but
+  has only the five stock `kubernetes.io/*` labels means its
+  `NodeApplyController` patch was rejected — check
   `talosctl -n <ip> logs controller-runtime | grep NodeApplyController`
-  (should be quiet) and `kubectl -n kube-system get job node-taints`
-  (should show `Complete`). Symptom of something actually wrong: a node
-  that's `Ready` but has only the five stock `kubernetes.io/*` labels.
+  (should be quiet when no taints are configured).
 - **A new tailnet device needs manual approval before it's reachable at
   all.** Every node running the `siderolabs/tailscale` extension (the
   Hetzner ingress worker, and `cp-main`) sits in `ext-tailscale`'s

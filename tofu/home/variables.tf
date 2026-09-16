@@ -223,10 +223,8 @@ variable "nodes" {
       rombar  = optional(bool, true)
     })), [])
     # No `taints` field: Talos can never self-apply a node taint (see
-    # talos.tf's comment on the worker config_patches). Taints are applied
-    # by a Flux-managed Job instead, selecting nodes by their
-    # node.kubernetes.io/instance-type label — see
-    # kubernetes/infrastructure/home/node-taints/.
+    # talos.tf's comment on the worker config_patches), and no in-repo
+    # taint mechanism exists any more — placement is label-based.
   }))
   default = {
     # Kept as a minimal working shape, not the deployed shape —

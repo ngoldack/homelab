@@ -28,11 +28,8 @@ spec:
   format: gguf
   quantization: Q3_K_S
   prefetch: true
-  prefetchTolerations:
-    - key: dedicated
-      operator: Equal
-      value: nvidia
-      effect: NoSchedule
+  # The prefetch Job targets the GPU node by label (untainted since
+  # 2026-09-15 — placement is by label only).
   hardware:
     accelerator: cuda
     gpu:
@@ -62,11 +59,6 @@ spec:
   runtimeClassName: nvidia
   nodeSelector:
     hardware/gpu.model: Tesla-P100
-  tolerations:
-    - key: dedicated
-      operator: Equal
-      value: nvidia
-      effect: NoSchedule
   # 32k context; KV is only ~20 KiB/token on this hybrid arch so 32k costs ~0.6 GiB.
   # Drop to 16384 only if the loaded model OOMs.
   contextSize: 32768

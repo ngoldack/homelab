@@ -10,6 +10,10 @@ resources:
   - otel-pipeline.yaml
   - models.yaml
   - local.yaml
+  - synthetic.yaml
+  - synthetic-key.sops.yaml
+  - jwt.yaml
+  - envoy-referencegrant.yaml
   - httproute-edge.yaml
   - mcp-route.yaml
   - openrouter-key.sops.yaml

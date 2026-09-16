@@ -118,7 +118,10 @@ spec:
       name: openrouter-key
       namespace: aigateway
 
-# ---- Routes: map the two downstream model names ----
+# ---- Routes: map the downstream model names ----
+# "free" -> OpenRouter's own free-models router (openrouter/free): it cycles
+# through whatever free models are currently available upstream, so the
+# gateway doesn't pin a static list that drifts. ctx=200k, text+image.
 ---
 apiVersion: aigateway.envoyproxy.io/v1beta1
 kind: AIGatewayRoute
@@ -145,3 +148,10 @@ spec:
               value: deepseek/deepseek-v4-pro
       backendRefs:
         - name: openrouter-pro
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: free
+      backendRefs:
+        - name: openrouter-free

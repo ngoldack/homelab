@@ -141,40 +141,48 @@ data:
           meta_icon: application/default
           launch_url: https://grafana.ngoldack.de/
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
-      # ---------- local LLM (P100) behind the edge outpost, Basic-auth ----------
-      # The public-facing route to the shared P100 model. Unlike the other
-      # outpost providers (browser OIDC), this one enables basic_auth so a
-      # programmatic client (curl / OpenAI-compatible SDK) can authenticate
-      # with HTTP Basic instead of a browser redirect: the outpost checks
-      # `Authorization: Basic base64(<username>:<app-password>)` against the
-      # user's `attributes.llm_api_password` (set on the user in the authentik
-      # UI; no secret in git; revocable by editing the attribute). Scope note:
-      # this provider fronts ONLY the local model — DeepSeek/OpenRouter routes
-      # are never exposed publicly.
-      - model: authentik_providers_proxy.proxyprovider
+      # ---------- aigateway machine auth (client_credentials) ----------
+      # M2M Bearer tokens for the AI Gateway's public route (llm.ngoldack.de).
+      # A machine client POSTs to authentik's token endpoint with
+      # grant_type=client_credentials and receives a JWT access token, which
+      # the EAG SecurityPolicy validates against authentik's JWKS. No browser,
+      # no redirect, no session. grant_types MUST be pinned (see grafana-oidc:
+      # an empty default [] denies every grant); client_credentials only —
+      # this app issues NO interactive logins. The secret arrives via !File
+      # from the seed-secrets-aigateway volume and pairs with
+      # ../authentik/oidc-aigateway.sops.yaml (authentik side).
+      # RS256 signing keypair, referenced by signing_key below. MUST exist:
+      # without signing_key authentik falls back to HS256 (client_secret),
+      # /application/o/aigateway/jwks/ returns {} forever and the EAG
+      # SecurityPolicy has nothing to verify against (same root cause as
+      # langfuse's empty JWKS). Created once via CertificateBuilder in
+      # ak shell; the seed only references it — consumer side is
+      # ../aigateway/jwt.yaml.
+      - model: authentik_providers_oauth2.oauth2provider
         state: present
         identifiers:
-          name: local-llm-proxy
+          name: aigateway-oidc
         attrs:
-          mode: proxy
-          internal_host: http://qwen36-35b.llmkube-system.svc.cluster.local:8080/
-          external_host: https://llm.ngoldack.de/
-          cookie_domain: ngoldack.de
-          basic_auth_enabled: true
-          basic_auth_user_attribute: username
-          basic_auth_password_attribute: attributes.llm_api_password
+          client_id: aigateway-oidc
+          client_type: confidential
+          client_secret: !File /secrets-aigateway/client_secret
+          issuer_mode: per_provider
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, aigateway-oidc-signing]]
+          grant_types:
+            - client_credentials
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       - model: authentik_core.application
         state: present
         identifiers:
-          slug: local-llm
+          slug: aigateway
         attrs:
-          name: local-llm
-          meta_name: Local LLM (P100)
+          name: aigateway
+          meta_name: AI Gateway (M2M)
           meta_launch_url: https://llm.ngoldack.de/
-          provider: !Find [authentik_providers_proxy.proxyprovider, [name, local-llm-proxy]]
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, aigateway-oidc]]
       - model: authentik_outposts.outpost
         state: present
         identifiers:
@@ -188,7 +196,6 @@ data:
             - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, phoenix-proxy]]
-            - !Find [authentik_providers_proxy.proxyprovider, [name, local-llm-proxy]]
       # grafana behind the SAME edge outpost (proxy provider; the edge envoy
       # cannot dial grafana's home pod directly — pod->pod only, measured
       # 20/20). Distinct from the OIDC federation below, which serves the

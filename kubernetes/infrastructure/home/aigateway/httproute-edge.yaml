@@ -1,14 +1,20 @@
-# llm.ngoldack.de on the EDGE path, through the authentik outpost — the PUBLIC
-# route to the shared P100 model, identity-gated like phoenix/hindsight. The
-# outpost (authentik-proxy:9000) authenticates Basic + App Password then
-# forwards to the P100 35B (the qwen36-35b InferenceService) directly via this
-# proxy provider's internal_host (see the local-llm-proxy provider in
-# ../authentik/seed.yaml).
+# llm.ngoldack.de on the EDGE path — the PUBLIC route to the AI Gateway.
 #
-# Scope: this hostname exposes ONLY the local model. The DeepSeek/OpenRouter
-# routes live behind the data plane's LAN VIP (10.30.0.201) and are never
-# reachable through this edge path. Cross-namespace backend to authentik-proxy
-# is pre-authorized by the ReferenceGrant in ../authentik/httproutes-edge.yaml.
+# Always points at the Envoy AI Gateway's data plane (the envoy-aigateway-*
+# Service in envoy-gateway-system), never at a model backend directly. The
+# model choice is made by the client through x-ai-eg-model + "model" in the
+# body (see models.yaml / local.yaml / synthetic.yaml for the wired names:
+# deepseek/*, local, default, small, vision).
+#
+# Auth: EAG's SecurityPolicy (jwt.yaml) validates the client's Bearer token
+# against authentik's JWKS — the aigateway-oidc client_credentials provider in
+# ../authentik/seed.yaml mints those tokens. The old authentik-outpost Basic
+# path was retired: the outpost's M2M auth rejected every programmatic
+# credential (Basic attribute, API token) and only ever served browser
+# sessions.
+#
+# Cross-namespace: the backendRef to envoy-gateway-system is pre-authorized by
+# the ReferenceGrant in ../network/envoy-gateway-referencegrant.yaml.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -23,6 +29,6 @@ spec:
     - llm.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: authentik-proxy
-          namespace: authentik
-          port: 9000
+        - name: envoy-aigateway-aigateway-d6fc2393
+          namespace: envoy-gateway-system
+          port: 80

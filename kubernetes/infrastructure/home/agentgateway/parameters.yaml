@@ -1,0 +1,27 @@
+# AgentgatewayParameters — overlays that shape the generated proxy Service
+# (LB IP 10.30.0.203, dns.ngoldack.de/scope=internal) and the proxy
+# Deployment pod nodeSelector. Strategic merge semantics via spec.deployment.spec
+# and spec.service.spec; unknown fields preserved.
+#
+# IP 10.30.0.203 is reserved in the homelab LAN pool per cluster-vars
+# (10.30.0.200-250), scoped as internal for Cilium L2 announcements.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+spec:
+  service:
+    spec:
+      type: LoadBalancer
+      loadBalancerIP: 10.30.0.203
+      externalTrafficPolicy: Cluster
+    metadata:
+      labels:
+        dns.ngoldack.de/scope: internal
+  deployment:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            topology.homelab/site: home

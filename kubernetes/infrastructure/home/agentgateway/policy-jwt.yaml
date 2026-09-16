@@ -1,0 +1,39 @@
+# JWT authentication policy for the agentgateway — token validation via
+# authentik (native OIDC client_credentials).
+#
+# Reuses the aigateway-oidc client_credentials provider from the aigateway
+# lane (issuer https://authentik.ngoldack.de/application/o/aigateway/,
+# audiences aigateway-oidc). The old EG route used token minting via
+# client_credentials; those tokens satisfy the new policy (same iss, aud,
+# signing key).
+#
+# Backend Janeway: the ReferenceGrant in namespace authentik allows the
+# agentgateway openshared (service authentik-server) to be reached.
+
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: jwt-auth
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: https://authentik.ngoldack.de/application/o/aigateway/
+          audiences:
+            - aigateway-oidc
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: authentik-server
+                namespace: authentik
+                port: 80
+              jwksPath: /application/o/aigateway/jwks/
+              cacheDuration: 5m

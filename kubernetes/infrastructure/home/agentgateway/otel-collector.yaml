@@ -1,0 +1,91 @@
+# OpenTelemetry Collector helmrelease for Langfuse traces via the agentgateway.
+#
+# Chart version 0.127.2 from the official open-telemetry helm charts.
+# The collector exposes OTLP traces at grpc:4317 and http:4318, sends traces
+# to Langfuse (langfuse-web.enc), and exposes metrics on 8888 for scraping.
+# LANGFUSE_AUTH is composed as "cGstbGYtUExBQ0VIT0xERVI=" base64(pk-lf-PLACEHOLDER:sk-lf-PLACEHOLDER).
+# The OpenTelemetry Collector binary expands ${env:LANGFUSE_AUTH} in config by default.
+
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: open-telemetry
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-collector
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 10m
+  targetNamespace: agentgateway
+  releaseName: otel-collector
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: "0.127.2"
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: flux-system
+      interval: 1h
+  values:
+    mode: deployment
+    image:
+      repository: otel/opentelemetry-collector-contrib
+    command:
+      name: otelcol-contrib
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    extraEnvs:
+      - name: LANGFUSE_AUTH
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-otel
+            key: AUTH
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+      exporters:
+        otlphttp:
+          endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
+          headers:
+            Authorization: "Basic $${env:LANGFUSE_AUTH}"
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            exporters: [otlphttp]
+        telemetry:
+          metrics:
+            address: 0.0.0.0:8888
+  # x-langfuse-ingestion-version: 4 — realtime ingestion on Langfuse v4
+  # (without it ingestion can lag up to 10 minutes).
+  # retry_on_failure + sending_queue: Langfuse is behind langfuse-web; a
+  # transient 5xx must not drop spans.
+  #
+  # NOTE: $$ escapes the ${env:VAR} so Flux's strict envsubst (postBuild)
+  # passes it through literally; the COLLECTOR then expands it at startup
+  # from the LANGFUSE_AUTH env injected via extraEnvs above.

@@ -1,0 +1,46 @@
+# Routes for agentgateway: /v1/chat/completions and /v1/models spring to
+# local-p100, /v1/chat (prefix) falls back to the tiered chat-chain.
+#
+# The exact-match rules (/v1/chat/completions, /v1/models) are placed BEFORE
+# the /v1/chat prefix rule to respect Gateway API's first-match semantics (the
+# agentgateway OpenTelemetry demo uses the same ordering: exact completions
+# before chain).
+#
+# No host-based routing is added (the old aigateway had host-based ingress via
+# EdgeOutpost). The new gateway uses path-only matching; authentication and
+# backend selection are handled by policies (jwt-auth) and backends.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: local-llm
+  namespace: agentgateway
+spec:
+  parentRefs:
+    - name: agentgateway
+      namespace: agentgateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: local-p100
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/models
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: local-p100
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: chat-chain

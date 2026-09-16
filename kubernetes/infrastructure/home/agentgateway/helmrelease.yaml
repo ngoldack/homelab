@@ -33,7 +33,7 @@ spec:
         namespace: flux-system
       interval: 1h
   targetNamespace: agentgateway
-  releaseName: agentgateway
+  releaseName: agentgateway-controller
   install:
     createNamespace: false
     remediation:
@@ -42,6 +42,12 @@ spec:
     remediation:
       retries: 3
   values:
+    # fullnameOverride keeps the controller's resources namespaced
+    # (agentgateway-controller-*): the controller ALSO generates a per-Gateway
+    # proxy Deployment named exactly after the Gateway (agentgateway), and the
+    # default release-derived name would collide on that immutable
+    # Deployment.spec.selector.
+    fullnameOverride: agentgateway-controller
     resources:
       requests:
         cpu: 50m

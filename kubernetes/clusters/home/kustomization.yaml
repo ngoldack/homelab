@@ -39,6 +39,10 @@ resources:
   - aigateway-envoy-gateway.yaml
   - aigateway-crds.yaml
   - aigateway.yaml
+  # LLM AI gateway (agentgateway.dev control plane, parallel to the aigateway
+  # Envoy AI Gateway LAN gateway). CRD-before-CR split like aigateway-crds.
+  - agentgateway-crds.yaml
+  - agentgateway.yaml
   # Paperless-ngx document management (app-template chart on CNPG + valkey +
   # TrueNAS storage); app-template entry, no monitoring-crds dependency.
   - paperless.yaml

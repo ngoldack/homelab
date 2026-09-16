@@ -1,0 +1,26 @@
+# Agentgateway Gateway. The agentgateway controller auto-creates and owns
+# GatewayClass `agentgateway` (controllerName default
+# `agentgateway.dev/agentgateway` — values.yaml:250-257), so we define only
+# the Gateway that points to it and attach the parameters reference.
+#
+# The data-plane LB Service IP (10.30.0.203) and internal-scope labels are
+# injected via spec.infrastructure.parametersRef below (AgentgatewayParameters).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway
+  namespace: agentgateway
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: agentgateway

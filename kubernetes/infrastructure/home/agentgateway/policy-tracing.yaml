@@ -1,0 +1,29 @@
+# Tracing: agentgateway -> OTel Collector -> Langfuse.
+#
+# Why a collector: frontend.tracing (verified against the v1.5.0 CRD,
+# agentgateway.dev_agentgatewaypolicies.yaml:7217-7398) exposes backendRef/url,
+# protocol, sampling and span attributes ONLY — there is no headers field, and
+# Langfuse's OTLP ingestion (langfuse-web:3000/api/public/otel) requires
+# Basic auth (pk:sk) plus x-langfuse-ingestion-version: 4. The collector
+# (otel-collector.yaml) adds those headers on the way out.
+#
+# randomSampling "true": sample every gateway-originated request — this is a
+# homelab, the volume is tiny, and the traces are the point.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: tracing
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway
+  frontend:
+    tracing:
+      backendRef:
+        name: otel-collector
+        namespace: agentgateway
+        port: 4317
+      protocol: GRPC
+      randomSampling: "true"

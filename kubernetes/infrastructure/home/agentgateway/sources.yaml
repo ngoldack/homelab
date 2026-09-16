@@ -1,0 +1,14 @@
+# The same OCI HelmRepository definition (agentgateway v1.5.0) lives in both
+# the crds lane (agentgateway-crds/sources.yaml) and the main agentgateway lane.
+# Two Flux Kustomizations must not claim the same flux-system resource uniquely,
+# but applying identical objects from multiple lanes is idempotent (works for
+# ai-gateway in aigateway today).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: agentgateway
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://cr.agentgateway.dev/charts

@@ -1,0 +1,35 @@
+# agentgateway control plane (agentgateway controller + generated proxies via
+# Gateway infrastructure references). The lane depends on:
+# - agentgateway-crds: CRDs for Backend/Policy/Parameters and the controller.
+# - monitoring-crds: Phoenix VMServiceScrape (created by integration agent).
+#
+# Kubeconfig substitution for cluster-vars (10.30.0.X IP pool, site labels).
+# SOPS decryption already enabled at cluster level (sops-age.sops.yaml).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: agentgateway
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/agentgateway
+  prune: true
+  wait: false
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    - name: agentgateway-crds
+      namespace: flux-system
+    - name: monitoring-crds
+      namespace: flux-system
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

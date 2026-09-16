@@ -1,0 +1,26 @@
+# agentgateway CRDs (agentgateway.dev/v1alpha1 group) — their own entry so the
+# agentgateway lane can dependOn them (CRD-before-CR, replicating aigateway-crds
+# pattern where CRDs are a standalone lane before main app Kustomization).
+#
+# The agentgateway controller creates and owns GatewayClass `agentgateway`
+# itself, but the CRDs for Backend/Policy/Parameters need to be established
+# before any Gateway/Parameters/Backend CRs are applied.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: agentgateway-crds
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/agentgateway-crds
+  prune: true
+  wait: true
+  timeout: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

@@ -1,0 +1,15 @@
+# agentgateway — the AI gateway control plane from agentgateway.dev (kgateway
+# lineage), running as a PARALLEL lane next to the existing aigateway lane
+# (Envoy AI Gateway). Same job — LLM routing + auth + tracing for the LAN —
+# different controller: this one is the agentgateway controller, which
+# programs its own data-plane proxies from AgentgatewayBackend /
+# AgentgatewayPolicy CRs attached to a Gateway of GatewayClass agentgateway.
+#
+# The label below lets the edge Gateway (network/edge.yaml, allowedRoutes from
+# Selector) accept HTTPRoutes from this namespace later, mirroring aigateway.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentgateway
+  labels:
+    gateway.ngoldack.de/edge-ingress: "true"

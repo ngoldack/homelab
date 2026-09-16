@@ -1,0 +1,36 @@
+# Controls Flux reconciliation of the agentgateway control plane.
+#
+# Core infrastructure (created here):
+# - namespace.yaml (ns agentgateway, edge-ingress label)
+# - sources.yaml (HelmRepository agentgateway, shared with crds lane)
+# - helmrelease.yaml (agentgateway controller pod/service)
+# - gateway.yaml (Gateway class-owned by controller)
+# - parameters.yaml (LB IP + nodeSelector overlay)
+#
+# Sibling-owned resources (created by other agents; ordered for dependency):
+# - backends.yaml (AgentgatewayBackend definitions)
+# - routes.yaml (HTTPRoute / routed via Gateway parentRef)
+# - policy-jwt.yaml (authentication policy)
+# - policy-tracing.yaml (OpenTelemetry tracing policy)
+# - referencegrant-authentik.yaml (allow ik-controller to reach authentik server)
+# - langfuse-otel.sops.yaml (OTel collector telegrams → Langfuse)
+# - openrouter-key.sops.yaml (OpenRouter API key as secret)
+# - synthetic-key.sops.yaml (Synthetic API key as secret)
+# - otel-collector.yaml (OpenTelemetry Collector helmrelease)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - sources.yaml
+  - helmrelease.yaml
+  - gateway.yaml
+  - parameters.yaml
+  - backends.yaml
+  - routes.yaml
+  - policy-jwt.yaml
+  - policy-tracing.yaml
+  - referencegrant-authentik.yaml
+  - langfuse-otel.sops.yaml
+  - openrouter-key.sops.yaml
+  - synthetic-key.sops.yaml
+  - otel-collector.yaml

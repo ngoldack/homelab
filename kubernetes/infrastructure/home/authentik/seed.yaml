@@ -455,6 +455,144 @@ data:
         state: present
         identifiers:
           name: users
+      # ---- registration: open self-service signup, landing in `users` ----
+      # New registrants are auto-joined to the `users` group (above), which
+      # binds to nothing, so they get zero app access until an admin adds
+      # them to a real group. The login page reaches this flow via the
+      # 'Sign up' link (IdentificationStage.enrollment_flow) on the stock
+      # authentication flow's identification stage.
+      - id: reg-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: home-registration
+        attrs:
+          name: home-registration
+          title: Register
+          designation: stage_configuration
+      # PromptStage.fields is an M2M to Prompt rows (ids), not inline dicts:
+      # declare each field with a UNIQUE name — field_key is NOT unique in
+      # authentik (stock rows share username/email/password across flows), so
+      # keying on it would resolve to those shared rows and mutate them.
+      - id: reg-field-username
+        model: authentik_stages_prompt.prompt
+        state: present
+        identifiers:
+          name: home-registration-field-username
+        attrs:
+          field_key: username
+          label: Username
+          type: username
+          required: true
+          order: 10
+      - id: reg-field-name
+        model: authentik_stages_prompt.prompt
+        state: present
+        identifiers:
+          name: home-registration-field-name
+        attrs:
+          field_key: name
+          label: Name
+          type: text
+          required: true
+          order: 20
+      - id: reg-field-email
+        model: authentik_stages_prompt.prompt
+        state: present
+        identifiers:
+          name: home-registration-field-email
+        attrs:
+          field_key: email
+          label: Email
+          type: email
+          required: true
+          order: 30
+      - id: reg-field-password
+        model: authentik_stages_prompt.prompt
+        state: present
+        identifiers:
+          name: home-registration-field-password
+        attrs:
+          field_key: password
+          label: Password
+          type: password
+          required: true
+          order: 40
+      - id: reg-field-password-repeat
+        model: authentik_stages_prompt.prompt
+        state: present
+        identifiers:
+          name: home-registration-field-password-repeat
+        attrs:
+          field_key: password_repeat
+          label: Repeat password
+          type: password
+          required: true
+          order: 50
+      - id: reg-prompt
+        model: authentik_stages_prompt.promptstage
+        state: present
+        identifiers:
+          name: home-registration-prompt
+        attrs:
+          fields:
+            - !KeyOf reg-field-username
+            - !KeyOf reg-field-name
+            - !KeyOf reg-field-email
+            - !KeyOf reg-field-password
+            - !KeyOf reg-field-password-repeat
+      - id: reg-user-write
+        model: authentik_stages_user_write.userwritestage
+        state: present
+        identifiers:
+          name: home-registration-user-write
+        attrs:
+          # The default group: every registrant lands here and inherits
+          # nothing, until an admin adds them to a gating group.
+          create_users_group: !Find [authentik_core.group, [name, users]]
+      - id: reg-login
+        model: authentik_stages_user_login.userloginstage
+        state: present
+        identifiers:
+          name: home-registration-login
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 10
+          stage: !KeyOf reg-prompt
+          target: !KeyOf reg-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 20
+          stage: !KeyOf reg-user-write
+          target: !KeyOf reg-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 30
+          stage: !KeyOf reg-login
+          target: !KeyOf reg-flow
+      # Expose the 'Sign up' link on the login page by pointing the stock
+      # authentication flow's identification stage at the registration flow.
+      # Every other attr is pinned to its live value because the blueprint
+      # serializer validates a FULL update: a standalone enrollment_flow entry
+      # is rejected ("When no user fields are selected..."), and the values
+      # must not be left to defaults. password_stage stays null — the flow
+      # binds PasswordStage as its own stage (order 20); inlining it here
+      # would double-prompt every SSO login.
+      - model: authentik_stages_identification.identificationstage
+        state: present
+        identifiers:
+          name: default-authentication-identification
+        attrs:
+          user_fields: [email, username]
+          password_stage: null
+          case_insensitive_matching: true
+          show_matched_user: true
+          pretend_user_exists: true
+          enable_remember_me: false
+          enrollment_flow: !Find [authentik_flows.flow, [slug, home-registration]]
       # ---- Phase 3a: gate every app to the akadmin group ----
       # Zero-default-access: a fresh registrant lands in the `users` group,
       # which binds to NOTHING here, so they see no app. Only akadmin

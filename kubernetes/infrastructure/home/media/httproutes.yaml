@@ -24,7 +24,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - jellyfin.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -43,7 +43,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - jellyseerr.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -62,7 +62,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - sabnzbd.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -81,7 +81,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - sonarr.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -100,7 +100,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - radarr.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -119,7 +119,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - prowlarr.media.svc.${CLUSTER_DOMAIN}
   rules:
@@ -138,7 +138,7 @@ spec:
   parentRefs:
     - name: public
       namespace: network
-      sectionName: https-apex
+      sectionName: https-media-svc
   hostnames:
     - bazarr.media.svc.${CLUSTER_DOMAIN}
   rules:

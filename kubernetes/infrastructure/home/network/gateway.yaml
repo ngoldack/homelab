@@ -104,3 +104,21 @@ spec:
           selector:
             matchLabels:
               gateway.ngoldack.de/public-ingress: "true"
+    # Third listener for the full {app}.{namespace}.svc.{domain} scheme
+    # (jellyfin.media.svc.ngoldack.de): FOUR labels, so neither wildcard above
+    # covers it — one per-namespace listener, same single-label rule. The
+    # media stack's routes attach here via https-media-svc.
+    - name: https-media-svc
+      protocol: HTTPS
+      port: 443
+      hostname: "*.media.svc.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/public-ingress: "true"

@@ -37,7 +37,7 @@ spec:
   storage:
     size: 10Gi
     storageClass: truenas-fast-nvmeof-phoenix-database
-
+  resources:
     requests:
       cpu: 100m
       memory: 512Mi

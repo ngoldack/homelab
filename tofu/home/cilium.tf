@@ -211,6 +211,26 @@ resource "helm_release" "cilium" {
     operator = {
       rollOutPods = true
     }
+
+    # Hubble flow metrics configuration
+    hubble = {
+      metrics = {
+        enabled = [
+          "dns:query;ignoreAAAA",
+          "drop",
+          "tcp",
+          "flow",
+          "port-distribution",
+          "icmp",
+          "http",
+        ]
+        enableOpenMetrics = true
+      }
+    }
+
+    # Enable Prometheus metrics on the agent
+    prometheus = { enabled = true }
+
     # NOTE: there is deliberately no CA pinned here. A top-level `ca = {cert,
     # key}` block used to sit at this spot, meant to give both clusters an
     # identical ClusterMesh CA. It never did anything: the chart reads the CA

@@ -158,6 +158,15 @@ configMapGenerator:
         grafana_dashboard: "1"
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
+
+  - name: grafana-dashboard-hubble
+    namespace: monitoring
+    files: [dashboards/hubble.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-valkey
     namespace: monitoring
     files: [dashboards/valkey.json]

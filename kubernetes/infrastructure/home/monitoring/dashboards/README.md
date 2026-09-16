@@ -25,6 +25,7 @@ Sources, all pinned:
   external-dns.json     grafana.com dashboard 15038 (External DNS), revision 3
   cert-manager.json     grafana.com dashboard 11001 (cert-manager), revision 1
   cilium-agent.json     grafana.com dashboard 15513 (Cilium Agent Metrics), rev 1
+  hubble.json    Cilium v1.20.1 dashboard (chart-shipped @ install/kubernetes/cilium/files/hubble/dashboards/hubble-dashboard.json), from helm chart cilium v1.20.1
   cilium-operator.json  grafana.com dashboard 15514 (Cilium Operator), rev 1
   valkey.json           grafana.com dashboard 763 (Redis Exporter 1.x), rev 6
   flux.json             fluxcd/flux2-monitoring-example control-plane.json

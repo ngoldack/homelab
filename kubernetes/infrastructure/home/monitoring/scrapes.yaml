@@ -234,6 +234,20 @@ spec:
   podMetricsEndpoints:
     - port: "9963"
 ---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cilium-hubble
+  namespace: kube-system
+spec:
+  namespaceSelector:
+    matchNames: [kube-system]
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  podMetricsEndpoints:
+    - port: hubble-metrics
+---
 # ---- valkey (authentik's cache/broker): the valkey-operator runs an
 # oliver006/redis_exporter sidecar on :9121 whenever ValkeyCluster
 # spec.exporter.enabled is true (it is — ../authentik/valkey.yaml).

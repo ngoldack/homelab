@@ -242,6 +242,36 @@ spec:
             securityContext:
               capabilities:
                 add: ["NET_ADMIN"]
+          external-auth:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # layer" (goauthentik sonarr integration): set
+            # AuthenticationMethod=External in config.xml. Idempotent; if the
+            # file is missing (very first boot) the app creates it with its
+            # default and the next restart external-izes it.
+            command:
+              - sh
+              - -c
+              - |
+                echo "external-auth init"
+                # strip trailing whitespace from the image lines
+                sed -i 's#<AuthenticationMethod>[^<]*#<AuthenticationMethod>External#' /config/config.xml
+                if [ ! -f /config/config.xml ] || ! grep -q '<AuthenticationMethod>' /config/config.xml; then
+                  echo "config.xml not yet seeded; will external-ize on next start"
+                else
+                  grep -o '<AuthenticationMethod>[^<]*' /config/config.xml || true
+                fi
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+            resources:
+              requests:
+                cpu: 10m
+                memory: 20Mi
+              limits:
+                memory: 50Mi
         containers:
           main:
             image:
@@ -306,6 +336,36 @@ spec:
             securityContext:
               capabilities:
                 add: ["NET_ADMIN"]
+          external-auth:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # layer" (goauthentik sonarr integration): set
+            # AuthenticationMethod=External in config.xml. Idempotent; if the
+            # file is missing (very first boot) the app creates it with its
+            # default and the next restart external-izes it.
+            command:
+              - sh
+              - -c
+              - |
+                echo "external-auth init"
+                # strip trailing whitespace from the image lines
+                sed -i 's#<AuthenticationMethod>[^<]*#<AuthenticationMethod>External#' /config/config.xml
+                if [ ! -f /config/config.xml ] || ! grep -q '<AuthenticationMethod>' /config/config.xml; then
+                  echo "config.xml not yet seeded; will external-ize on next start"
+                else
+                  grep -o '<AuthenticationMethod>[^<]*' /config/config.xml || true
+                fi
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+            resources:
+              requests:
+                cpu: 10m
+                memory: 20Mi
+              limits:
+                memory: 50Mi
         containers:
           main:
             image:
@@ -370,6 +430,36 @@ spec:
             securityContext:
               capabilities:
                 add: ["NET_ADMIN"]
+          external-auth:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # layer" (goauthentik sonarr integration): set
+            # AuthenticationMethod=External in config.xml. Idempotent; if the
+            # file is missing (very first boot) the app creates it with its
+            # default and the next restart external-izes it.
+            command:
+              - sh
+              - -c
+              - |
+                echo "external-auth init"
+                # strip trailing whitespace from the image lines
+                sed -i 's#<AuthenticationMethod>[^<]*#<AuthenticationMethod>External#' /config/config.xml
+                if [ ! -f /config/config.xml ] || ! grep -q '<AuthenticationMethod>' /config/config.xml; then
+                  echo "config.xml not yet seeded; will external-ize on next start"
+                else
+                  grep -o '<AuthenticationMethod>[^<]*' /config/config.xml || true
+                fi
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+            resources:
+              requests:
+                cpu: 10m
+                memory: 20Mi
+              limits:
+                memory: 50Mi
         containers:
           main:
             image:
@@ -434,6 +524,36 @@ spec:
             securityContext:
               capabilities:
                 add: ["NET_ADMIN"]
+          external-auth:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # layer" (goauthentik sonarr integration): set
+            # AuthenticationMethod=External in config.xml. Idempotent; if the
+            # file is missing (very first boot) the app creates it with its
+            # default and the next restart external-izes it.
+            command:
+              - sh
+              - -c
+              - |
+                echo "external-auth init"
+                # strip trailing whitespace from the image lines
+                sed -i 's#<AuthenticationMethod>[^<]*#<AuthenticationMethod>External#' /config/config.xml
+                if [ ! -f /config/config.xml ] || ! grep -q '<AuthenticationMethod>' /config/config.xml; then
+                  echo "config.xml not yet seeded; will external-ize on next start"
+                else
+                  grep -o '<AuthenticationMethod>[^<]*' /config/config.xml || true
+                fi
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+            resources:
+              requests:
+                cpu: 10m
+                memory: 20Mi
+              limits:
+                memory: 50Mi
         containers:
           main:
             image:
@@ -611,12 +731,16 @@ spec:
           sonarr:
             main:
               - path: /config
+            external-auth:
+              - path: /config
       radarr-config:
         type: persistentVolumeClaim
         existingClaim: radarr-config
         advancedMounts:
           radarr:
             main:
+              - path: /config
+            external-auth:
               - path: /config
       prowlarr-config:
         type: persistentVolumeClaim
@@ -625,10 +749,14 @@ spec:
           prowlarr:
             main:
               - path: /config
+            external-auth:
+              - path: /config
       bazarr-config:
         type: persistentVolumeClaim
         existingClaim: bazarr-config
         advancedMounts:
           bazarr:
             main:
+              - path: /config
+            external-auth:
               - path: /config

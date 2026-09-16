@@ -29,7 +29,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: ["authentik-outpost-live"]
+    # Per-outpost secrets (authentik-outpost-live, authentik-outpost-live-*)
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
@@ -91,25 +91,28 @@ spec:
                 - |
                   from authentik.outposts.models import Outpost
                   from kubernetes import client, config
-                  import base64
-                  o = Outpost.objects.get(name="edge-outpost")
-                  key = o.token.key
-                  config.load_incluster_config()
-                  api = client.CoreV1Api()
-                  body = client.V1Secret(
-                      metadata=client.V1ObjectMeta(name="authentik-outpost-live"),
-                      string_data={"AUTHENTIK_TOKEN": key},
-                      type="Opaque",
-                  )
-                  try:
-                      api.patch_namespaced_secret("authentik-outpost-live",
-                                                  "authentik", body)
-                  except client.exceptions.ApiException as e:
-                      if e.status == 404:
-                          api.create_namespaced_secret("authentik", body)
-                      else:
-                          raise
-                  print("outpost token published")
+                  for o in Outpost.objects.all():
+                      key = o.token.key
+                      # edge-outpost keeps the historic secret name so the
+                      # existing proxy Deployment keeps working; every other
+                      # outpost publishes to authentik-outpost-live-<name>.
+                      secret_name = "authentik-outpost-live" if o.name == "edge-outpost" \
+                          else f"authentik-outpost-live-{o.name}"
+                      config.load_incluster_config()
+                      api = client.CoreV1Api()
+                      body = client.V1Secret(
+                          metadata=client.V1ObjectMeta(name=secret_name),
+                          string_data={"AUTHENTIK_TOKEN": key},
+                          type="Opaque",
+                      )
+                      try:
+                          api.patch_namespaced_secret(secret_name, "authentik", body)
+                      except client.exceptions.ApiException as e:
+                          if e.status == 404:
+                              api.create_namespaced_secret("authentik", body)
+                          else:
+                              raise
+                      print(f"published {secret_name} for {o.name}")
               resources:
                 requests:
                   cpu: 50m

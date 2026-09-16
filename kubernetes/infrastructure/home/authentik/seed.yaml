@@ -164,6 +164,141 @@ data:
           meta_name: AI Gateway (M2M)
           meta_launch_url: https://llm.ngoldack.de/
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, aigateway-oidc]]
+      # ---------- media stack UIs behind the edge outpost (proxy path) ----------
+      # Same two-way wiring as hindsight-ui/grafana: LAN route -> outpost -> app
+      # UI. The provider MUST precede the app !Finding it. external_host is the
+      # {app}.{namespace}.svc URL the media HTTPRoutes serve; the outpost proxies
+      # to the app's cluster service. Prowlarr/Jellyseerr/Bazarr's in-app API
+      # connections keep using cluster-internal URLs and never cross authentik.
+      # Sonarr/Radarr/Prowlarr/Bazarr run AuthenticationMethod=External (media
+      # helmrelease initContainers); Jellyseerr/SABnzbd keep their own login on
+      # top of SSO.
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: sonarr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-sonarr.media.svc.cluster.local:8989/
+          external_host: https://sonarr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: sonarr
+        attrs:
+          name: sonarr
+          meta_name: Sonarr
+          meta_launch_url: https://sonarr.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, sonarr-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: radarr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-radarr.media.svc.cluster.local:7878/
+          external_host: https://radarr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: radarr
+        attrs:
+          name: radarr
+          meta_name: Radarr
+          meta_launch_url: https://radarr.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, radarr-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: prowlarr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-prowlarr.media.svc.cluster.local:9696/
+          external_host: https://prowlarr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: prowlarr
+        attrs:
+          name: prowlarr
+          meta_name: Prowlarr
+          meta_launch_url: https://prowlarr.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, prowlarr-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: bazarr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-bazarr.media.svc.cluster.local:6767/
+          external_host: https://bazarr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: bazarr
+        attrs:
+          name: bazarr
+          meta_name: Bazarr (subtitles)
+          meta_launch_url: https://bazarr.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, bazarr-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: sabnzbd-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-sabnzbd.media.svc.cluster.local:8080/
+          external_host: https://sabnzbd.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: sabnzbd
+        attrs:
+          name: sabnzbd
+          meta_name: SABnzbd (usenet downloads)
+          meta_launch_url: https://sabnzbd.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, sabnzbd-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: jellyseerr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-jellyseerr.media.svc.cluster.local:5055/
+          external_host: https://jellyseerr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: jellyseerr
+        attrs:
+          name: jellyseerr
+          meta_name: Jellyseerr (requests)
+          meta_launch_url: https://jellyseerr.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, jellyseerr-proxy]]
       - model: authentik_outposts.outpost
         state: present
         identifiers:
@@ -176,6 +311,12 @@ data:
           providers:
             - !Find [authentik_providers_proxy.proxyprovider, [name, grafana-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, hindsight-ui-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, sonarr-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, radarr-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, prowlarr-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, bazarr-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, sabnzbd-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, jellyseerr-proxy]]
       # grafana behind the SAME edge outpost (proxy provider; the edge envoy
       # cannot dial grafana's home pod directly — pod->pod only, measured
       # 20/20). Distinct from the OIDC federation below, which serves the
@@ -777,3 +918,124 @@ data:
         attrs:
           domain: authentik.ngoldack.de
           default: true
+
+      # ---------- Jellyfin via LDAP provider + LDAP outpost ----------
+      # Jellyfin has no native SSO and its native apps cannot run a browser
+      # redirect; the goauthentik integration path is an LDAP provider: the
+      # Jellyfin LDAP-Auth plugin binds to the LDAP outpost with a service
+      # account and maps authentik users/groups to Jellyfin accounts. The media
+      # route stays direct to the app (no proxy in front of the media stream).
+      #
+      # jellyfin-sa is created WITHOUT a password — set one live (Directory ->
+      # Users -> jellyfin-sa -> Set password) or via `ak shell` before plugin
+      # setup; it must not live in git. Granting "Search full LDAP directory"
+      # to the SA for this provider (Provider -> Permissions) is likewise a
+      # live step, keeping the seed minimal.
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: jellyfin_users
+        attrs:
+          name: jellyfin_users
+          is_superuser: false
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: jellyfin_admins
+        attrs:
+          name: jellyfin_admins
+          is_superuser: false
+      - model: authentik_core.user
+        state: present
+        identifiers:
+          username: jellyfin-sa
+        attrs:
+          username: jellyfin-sa
+          name: Jellyfin LDAP service account
+          is_active: true
+          groups:
+            - !Find [authentik_core.group, [name, jellyfin_users]]
+      - model: authentik_providers_ldap.ldapprovider
+        state: present
+        identifiers:
+          name: jellyfin-ldap
+        attrs:
+          name: jellyfin-ldap
+          base_dn: dc=ldap,dc=ngoldack,dc=de
+          bind_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: jellyfin
+        attrs:
+          name: jellyfin
+          meta_name: Jellyfin (media server)
+          meta_launch_url: https://jellyfin.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_ldap.ldapprovider, [name, jellyfin-ldap]]
+      - model: authentik_outposts.outpost
+        state: present
+        identifiers:
+          name: jellyfin-ldap-outpost
+        attrs:
+          name: jellyfin-ldap-outpost
+          type: ldap
+          managed: null
+          config: {}
+          providers:
+            - !Find [authentik_providers_ldap.ldapprovider, [name, jellyfin-ldap]]
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, sonarr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, radarr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, prowlarr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, bazarr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, sabnzbd]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, jellyseerr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, jellyfin]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, jellyfin_users]]
+          negate: false

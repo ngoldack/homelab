@@ -16,6 +16,7 @@ resources:
   - outpost-config.yaml
   - outpost-token.yaml
   - outpost.yaml
+  - ldap-outpost.yaml
   - server-service-local.yaml
   - portal-bridge.yaml
   - authentik-backup-s3-credentials.sops.yaml

@@ -21,6 +21,11 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       namespace: hindsight
+    # media: the six SSO-gated routes backend to authentik-proxy on the LAN
+    # Gateway (jellyfin stays direct — LDAP auth, no proxy).
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: media
   to:
     - group: ""
       kind: Service

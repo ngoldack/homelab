@@ -1,0 +1,73 @@
+# The Jellyfin LDAP outpost: authentik's LDAP component, pinned to a home
+# worker so Jellyfin's bind/search traffic never leaves the LAN (the media
+# server itself runs at home — no reason to route LDAP through the cloud
+# node like the proxy outpost).
+#
+# Manual lifecycle, deliberately: the Outpost record created by the seed
+# blueprint is managed=null, so authentik's embedded k8s controller will
+# never touch this Deployment (same rationale as outpost.yaml).
+#
+# Image ghcr.io/goauthentik/ldap is the LDAP outpost; it serves the
+# provider's directory over LDAP. The Jellyfin LDAP-Auth plugin binds with a
+# service account (cn=jellyfin-sa,ou=users,dc=ldap,dc=ngoldack,dc=de).
+#
+# Env: AUTHENTIK_TOKEN authenticates it to the server API over the cluster;
+# the token is published to authentik-outpost-live-jellyfin-ldap-outpost by
+# the outpost-token CronJob (outpost-token.yaml iterates ALL outposts). Until
+# that Secret exists this pod sits in CreateContainerConfigError; the
+# CronJob converges within 15m, or run it by hand.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-jellyfin-ldap
+  namespace: authentik
+  labels:
+    app.kubernetes.io/name: authentik-jellyfin-ldap
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authentik-jellyfin-ldap
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: authentik-jellyfin-ldap
+    spec:
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: ldap
+          image: ghcr.io/goauthentik/ldap:2026.8.2
+          envFrom:
+            - configMapRef:
+                name: authentik-outpost-config
+            - secretRef:
+                name: authentik-outpost-live-jellyfin-ldap-outpost
+          ports:
+            # Plaintext LDAP inside the cluster only; jellyfin's plugin uses
+            # "Skip SSL/TLS verification"-free plaintext 3389. LDAPS (6636) is
+            # deliberately not enabled: the service is unreachable outside the
+            # cluster and the server cert plumbing would be pure ceremony.
+            - name: ldap
+              containerPort: 3389
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-jellyfin-ldap
+  namespace: authentik
+spec:
+  selector:
+    app.kubernetes.io/name: authentik-jellyfin-ldap
+  ports:
+    - name: ldap
+      port: 3389
+      targetPort: ldap

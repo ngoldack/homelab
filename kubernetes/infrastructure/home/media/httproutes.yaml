@@ -48,8 +48,9 @@ spec:
     - jellyseerr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-jellyseerr
-          port: 5055
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -67,8 +68,9 @@ spec:
     - sabnzbd.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-sabnzbd
-          port: 8080
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -86,8 +88,9 @@ spec:
     - sonarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-sonarr
-          port: 8989
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -105,8 +108,9 @@ spec:
     - radarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-radarr
-          port: 7878
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -124,8 +128,9 @@ spec:
     - prowlarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-prowlarr
-          port: 9696
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -143,5 +148,6 @@ spec:
     - bazarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: media-bazarr
-          port: 6767
+        - name: authentik-proxy
+          namespace: authentik
+          port: 9000

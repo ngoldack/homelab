@@ -50,12 +50,12 @@ spec:
       port: 443
       # OpenRouter is OpenAI-compatible but under /api/v1, not /v1.
       path: /api/v1/chat/completions
-    policies:
-      auth:
-        secretRef:
-          name: openrouter-key
-      tls:
-        sni: openrouter.ai
+      policies:
+        auth:
+          secretRef:
+            name: openrouter-key
+        tls:
+          sni: openrouter.ai
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -69,9 +69,9 @@ spec:
       host: api.synthetic.new
       port: 443
       path: /v1/chat/completions
-    policies:
-      auth:
-        secretRef:
-          name: synthetic-key
-      tls:
-        sni: api.synthetic.new
+      policies:
+        auth:
+          secretRef:
+            name: synthetic-key
+        tls:
+          sni: api.synthetic.new

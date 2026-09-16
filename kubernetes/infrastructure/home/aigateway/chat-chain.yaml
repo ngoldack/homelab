@@ -60,7 +60,13 @@ spec:
     numRetries: 3
     numAttemptsPerPriority: 1
     retryOn:
+      # 401/403 included deliberately: a bad or rotated key at ONE provider
+      # must not take down the chain — that is the whole point of a tiered
+      # fallback. (It does mean a misconfigured key degrades silently to the
+      # next tier rather than erroring loudly.)
       httpStatusCodes:
+        - 401
+        - 403
         - 429
         - 500
         - 502

@@ -14,11 +14,9 @@
 # immich-database-1: pg_available_extensions lists 'vector'); the CREATE
 # EXTENSION itself is reconciled by the Database CR (database.yaml).
 #
-# Its own per-app StorageClass (truenas-fast-nfs-phoenix-database) so the
-# dataset lands at fast/k8s/nfs/phoenix/database with the same 6h/14d
-# snapshot schedule as the other databases and rootSquash off (initdb needs
-# it). Same NFS-for-PG caveat as the immich/hindsight databases (move to
-# block storage once NVMe-oF works).
+# Block storage (NVMe-oF zvol + ext4) — same 6h/14d snapshot schedule via the
+# class parameters. storageClassName is immutable on a bound PVC, so the swap
+# from NFS to this class went through dump → delete PVC → re-init → restore.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -38,8 +36,8 @@ spec:
         name: phoenix-database-credentials
   storage:
     size: 10Gi
-    storageClass: truenas-fast-nfs-phoenix-database
-  resources:
+    storageClass: truenas-fast-nvmeof-phoenix-database
+
     requests:
       cpu: 100m
       memory: 512Mi

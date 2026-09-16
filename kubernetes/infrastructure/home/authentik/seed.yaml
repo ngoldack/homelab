@@ -177,7 +177,7 @@ data:
           # ../hindsight/secret.sops.yaml; rotate on expiry. Browser/edge
           # clients still mint short-lived tokens the normal way — this only
           # raises the ceiling for client_credentials.
-          access_token_validity: "720:00:00"
+          access_token_validity: "hours=720"
           grant_types:
             - client_credentials
           property_mappings:

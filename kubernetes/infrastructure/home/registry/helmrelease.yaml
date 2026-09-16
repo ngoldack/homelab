@@ -123,6 +123,7 @@ spec:
             "gc": true,
             "gcDelay": "1h",
             "gcInterval": "24h",
+            "deleteEnabled": true,
             "dedupe": false
           },
           "http": {
@@ -162,6 +163,34 @@ spec:
               "prometheus": {
                 "path": "/metrics"
               }
+            },
+            "sync": {
+              "registries": [
+                {
+                  "urls": ["https://registry-1.docker.io"],
+                  "onDemand": true, "tlsVerify": true,
+                  "maxRetries": 3, "retryDelay": "5m",
+                  "content": [{"prefix": "**", "destination": "/docker.io"}]
+                },
+                {
+                  "urls": ["https://registry.k8s.io"],
+                  "onDemand": true, "tlsVerify": true,
+                  "maxRetries": 3, "retryDelay": "5m",
+                  "content": [{"prefix": "**", "destination": "/registry.k8s.io"}]
+                },
+                {
+                  "urls": ["https://ghcr.io"],
+                  "onDemand": true, "tlsVerify": true,
+                  "maxRetries": 3, "retryDelay": "5m",
+                  "content": [{"prefix": "**", "destination": "/ghcr.io"}]
+                },
+                {
+                  "urls": ["https://quay.io"],
+                  "onDemand": true, "tlsVerify": true,
+                  "maxRetries": 3, "retryDelay": "5m",
+                  "content": [{"prefix": "**", "destination": "/quay.io"}]
+                }
+              ]
             }
           }
         }

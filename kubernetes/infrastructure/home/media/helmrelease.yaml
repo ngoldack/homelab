@@ -65,8 +65,10 @@ spec:
             env:
               TZ: Europe/Berlin
               # Advertised to clients so apps auto-discover the right URL
-              # instead of the cluster-internal address.
-              JELLYFIN_PublishedServerUrl: https://jellyfin.ngoldack.de
+              # instead of the cluster-internal address. {app}.{namespace}.svc
+              # is the repo's canonical service URL scheme (see
+              # network/certificate.yaml, *.svc.${CLUSTER_DOMAIN}).
+              JELLYFIN_PublishedServerUrl: https://jellyfin.media.svc.${CLUSTER_DOMAIN}
             ports:
               - name: http
                 containerPort: 8096

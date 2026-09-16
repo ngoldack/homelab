@@ -5,6 +5,11 @@
 # services, and the download chain's VPN egress already lives in the
 # datapath, not in the ingress path.
 #
+# Hostnames use the repo's canonical service-URL scheme,
+# {app}.{namespace}.svc.{domain} — e.g. jellyfin.media.svc.ngoldack.de —
+# which the *.svc.${CLUSTER_DOMAIN} wildcard certificate already covers
+# (network/certificate.yaml).
+#
 # Auth is the apps' own login pages (Jellyfin/Jellyseerr/*arr all ship one);
 # authentik is not in front of these, matching the immich/paperless posture
 # for LAN-resident services.
@@ -21,7 +26,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - jellyfin.${CLUSTER_DOMAIN}
+    - jellyfin.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-jellyfin
@@ -40,7 +45,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - jellyseerr.${CLUSTER_DOMAIN}
+    - jellyseerr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-jellyseerr
@@ -59,7 +64,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - sabnzbd.${CLUSTER_DOMAIN}
+    - sabnzbd.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-sabnzbd
@@ -78,7 +83,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - sonarr.${CLUSTER_DOMAIN}
+    - sonarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-sonarr
@@ -97,7 +102,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - radarr.${CLUSTER_DOMAIN}
+    - radarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-radarr
@@ -116,7 +121,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - prowlarr.${CLUSTER_DOMAIN}
+    - prowlarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-prowlarr
@@ -135,7 +140,7 @@ spec:
       namespace: network
       sectionName: https-apex
   hostnames:
-    - bazarr.${CLUSTER_DOMAIN}
+    - bazarr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: media-bazarr

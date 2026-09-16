@@ -259,7 +259,6 @@ locals {
   vlan2080_ips = {
     wk-main-efficiency  = "10.20.80.2"
     wk-main-performance = "10.20.80.3"
-    wk-main-sandbox     = "10.20.80.4"
   }
 
   # Deterministic MACs for every VM NIC. Critical: this CHANGES the primary

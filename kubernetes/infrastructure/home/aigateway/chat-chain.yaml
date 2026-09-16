@@ -1,0 +1,71 @@
+# "chat" — the tiered fallback chain for in-cluster LLM consumers.
+#
+# One virtual model name whose backends are tried in priority order:
+#   0. syn:small:text            (Synthetic, GLM-4.7-Flash — cheapest, fastest)
+#   1. syn:large:text            (Synthetic, GLM-5.3-Flash)
+#   2. hf:deepseek-ai/DeepSeek-V4.1-Flash (Synthetic)
+#   3. deepseek/deepseek-v4-flash-latest  (OpenRouter — last-resort fallback)
+#
+# EAG's prioritized backendRefs do the failover: a request goes to the lowest
+# non-ejected priority, and the BackendTrafficPolicy below retries the next
+# priority on 5xx/429/connect-failure. modelNameOverride rewrites the upstream
+# model per backend, so callers only ever send "model": "chat".
+#
+# Deliberately EXTERNAL-only: hindsight's startup verification crash-looped on
+# the slow local P100 leg (2026-09-13), so `local` is not in this chain. Use
+# the `local` model explicitly when the local model is wanted.
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: chat
+  namespace: aigateway
+spec:
+  parentRefs:
+    - name: aigateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - matches:
+        - headers:
+            - type: Exact
+              name: x-ai-eg-model
+              value: chat
+      backendRefs:
+        - name: synthetic
+          priority: 0
+          modelNameOverride: syn:small:text
+        - name: synthetic
+          priority: 1
+          modelNameOverride: syn:large:text
+        - name: synthetic
+          priority: 2
+          modelNameOverride: hf:deepseek-ai/DeepSeek-V4.1-Flash
+        - name: openrouter-flash
+          priority: 3
+          modelNameOverride: deepseek/deepseek-v4-flash-latest
+---
+# Retry across priorities: without this an upstream 5xx just fails the request.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: chat-failover
+  namespace: aigateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: chat
+  retry:
+    numRetries: 3
+    numAttemptsPerPriority: 1
+    retryOn:
+      httpStatusCodes:
+        - 429
+        - 500
+        - 502
+        - 503
+        - 504
+      triggers:
+        - connect-failure
+        - reset

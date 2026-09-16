@@ -171,6 +171,13 @@ data:
           redirect_uris: []
           issuer_mode: per_provider
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, aigateway-oidc-signing]]
+          # Long-lived access tokens (720h = 30 days) for in-cluster consumers
+          # that cannot mint their own: hindsight takes a static API key and
+          # has no client_credentials loop. The token lives in
+          # ../hindsight/secret.sops.yaml; rotate on expiry. Browser/edge
+          # clients still mint short-lived tokens the normal way — this only
+          # raises the ceiling for client_credentials.
+          access_token_validity: "720:00:00"
           grant_types:
             - client_credentials
           property_mappings:

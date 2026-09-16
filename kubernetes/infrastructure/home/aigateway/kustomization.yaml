@@ -11,6 +11,7 @@ resources:
   - models.yaml
   - local.yaml
   - synthetic.yaml
+  - chat-chain.yaml
   - synthetic-key.sops.yaml
   - jwt.yaml
   - envoy-referencegrant.yaml

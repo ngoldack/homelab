@@ -22,7 +22,7 @@ spec:
   frontend:
     tracing:
       backendRef:
-        name: otel-collector
+        name: otel-collector-opentelemetry-collector
         namespace: agentgateway
         port: 4317
       protocol: GRPC

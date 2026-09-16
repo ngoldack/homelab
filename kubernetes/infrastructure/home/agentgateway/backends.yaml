@@ -40,6 +40,11 @@ spec:
               providerOverride: llama.cpp
             host: qwen36-35b.llmkube-system.svc.cluster.local
             port: 8080
+            policies:
+              ai:
+                routes:
+                  "/v1/models": "Models"
+                  "/v1/chat/completions": "Completions"
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend

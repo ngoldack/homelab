@@ -599,6 +599,10 @@ data:
           activate_user_on_success: true
           token_expiry: "hours=48"
           subject: "Aktiviere deinen ngoldack.de Account"
+          # Model default is password_reset.html, which renders NO activation
+          # link (the sent mail's only hrefs were goauthentik.io footer).
+          # account_confirmation.html renders {{ url }} with the flow token.
+          template: email/account_confirmation.html
       - id: reg-mfa
         model: authentik_stages_authenticator_validate.authenticatorvalidatestage
         state: present

@@ -179,6 +179,10 @@ data:
           name: sonarr-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-sonarr.media.svc.cluster.local:8989/
           external_host: https://sonarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
@@ -200,6 +204,10 @@ data:
           name: radarr-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-radarr.media.svc.cluster.local:7878/
           external_host: https://radarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
@@ -221,6 +229,10 @@ data:
           name: prowlarr-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-prowlarr.media.svc.cluster.local:9696/
           external_host: https://prowlarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
@@ -242,6 +254,10 @@ data:
           name: bazarr-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-bazarr.media.svc.cluster.local:6767/
           external_host: https://bazarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
@@ -263,6 +279,10 @@ data:
           name: sabnzbd-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-sabnzbd.media.svc.cluster.local:8080/
           external_host: https://sabnzbd.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
@@ -284,6 +304,10 @@ data:
           name: jellyseerr-proxy
         attrs:
           mode: proxy
+          # API-key consumers (external tools, scripts) hit /api without a
+          # browser session; skip auth for those paths so key-based API calls
+          # keep working while everything else stays SSO-gated.
+          skip_path_regex: ^/api
           internal_host: http://media-jellyseerr.media.svc.cluster.local:5055/
           external_host: https://jellyseerr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de

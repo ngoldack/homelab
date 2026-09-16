@@ -79,17 +79,25 @@ spec:
           memory: 4Gi
       env: &llm-env
         HINDSIGHT_API_LLM_PROVIDER: openai
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
-        # DeepSeek V4 Flash via OpenRouter (~deepseek/deepseek-v4-flash-latest):
-        # strong reasoning at low latency/cost, ideal for hindsight's heavy
-        # extraction/consolidation chain; strict JSON via STRICT_SCHEMA. Kept on
-        # the same OpenRouter base URL as the prior GLM-5.3 Flash. (Quoted: the
-        # '~' is a YAML-reserved character.)
-        # Single OpenRouter model only — no local qwen3-27b failover leg
-        # (2026-09-13): the local leg made startup verification cross the
-        # chart's 30s liveness budget, crash-looping the pod mid-boot. One
-        # reliable OpenRouter model keeps startup fast and singular.
+        # Routed through the Envoy AI Gateway, NOT OpenRouter directly: the
+        # gateway's "chat" model is the tiered chain
+        # syn:small -> syn:large -> DeepSeek-V4.1-Flash -> OpenRouter
+        # (../aigateway/chat-chain.yaml), so provider failover is the
+        # gateway's job and hindsight only ever names one model.
+        HINDSIGHT_API_LLM_BASE_URL: http://envoy-aigateway-aigateway-d6fc2393.envoy-gateway-system.svc.cluster.local/v1
+        HINDSIGHT_API_LLM_MODEL: "chat"
+        # The gateway authenticates every request with a JWT (SecurityPolicy on
+        # the aigateway Gateway, validated against authentik's JWKS). This
+        # static token is minted from the aigateway-oidc client_credentials
+        # grant with a long validity and lives in secret.sops.yaml — rotate it
+        # when it expires (see that file's comment for the one-liner).
+        #
+        # Chain composition rationale: small does the bulk of extraction cheaply;
+        # large (GLM-5.3) and DeepSeek-V4.1 cover harder chunks; OpenRouter's
+        # deepseek-v4-flash-latest is the last resort if Synthetic is down.
+        # Deliberately no local P100 leg: its latency made startup verification
+        # cross the chart's 30s liveness budget and crash-loop the pod
+        # (2026-09-13).
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; upstream first-token
@@ -143,8 +151,10 @@ spec:
       # batch/poll tunables.
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
+        # Same gateway chain as the api (see the api env block for rationale);
+        # written out in full because a YAML anchor cannot be appended to.
+        HINDSIGHT_API_LLM_BASE_URL: http://envoy-aigateway-aigateway-d6fc2393.envoy-gateway-system.svc.cluster.local/v1
+        HINDSIGHT_API_LLM_MODEL: "chat"
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"

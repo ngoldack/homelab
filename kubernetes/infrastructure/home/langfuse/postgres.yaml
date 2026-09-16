@@ -26,7 +26,7 @@ spec:
         name: langfuse-database-credentials
   storage:
     size: 10Gi
-    storageClass: truenas-fast-nfs-langfuse-database
+    storageClass: truenas-fast-nvmeof-langfuse-database
   resources:
     requests:
       cpu: 100m

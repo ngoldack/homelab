@@ -13,7 +13,6 @@ runbook and the drill log; keep the measured table current with every drill.
 | CNPG `authentik-database` | 2 instances, sync quorum | Barman Cloud plugin → S3 | `truenas-fast-nfs-authentik-database` 6h/14d | 30d (ObjectStore) |
 | CNPG `immich-database` | 2 instances, sync quorum | Barman Cloud plugin → S3 | `truenas-fast-nfs-immich-database` 6h/14d | 30d |
 | CNPG `langfuse-database` | 1 instance | Barman Cloud plugin → S3 | `truenas-fast-nfs-langfuse-database` 6h/14d | 30d |
-| CNPG `phoenix-database` | 1 instance | Barman Cloud plugin → S3 | `truenas-fast-nfs-phoenix-database` 6h/14d | 30d |
 | CNPG `hindsight-database` | 1 instance | Barman Cloud plugin → S3 | `truenas-fast-nfs-hindsight-database` 6h/14d | 30d |
 | Langfuse ClickHouse + keeper | single-node stores | TrueNAS snapshots (classes exist) | classes `truenas-fast-nfs-langfuse-{clickhouse,keeper}` 6h/14d | 14d |
 | Langfuse SeaweedFS (S3 binaries) | allInOne store | TrueNAS snapshots (class exists) | class `truenas-fast-nfs-langfuse-seaweedfs` daily/1mo | 1mo |
@@ -68,8 +67,8 @@ bug in backups.tf); retention is enforced by barman itself (see below).
   volume (discovered by the first drill, see below).
 - Daily full backups: `ScheduledBackup` per cluster (`scheduled-backup.yaml`),
   CNPG 6-field cron, staggered 02:05 (immich) / 02:10 (authentik) / 02:17
-  (langfuse) / 02:27 (phoenix) / 02:39 (hindsight) **UTC** (no timeZone field
-  exists; the operator pod runs UTC).
+  (langfuse) / 02:39 (hindsight) **UTC** (no timeZone field exists; the
+  operator pod runs UTC).
 - On-demand: `kubectl cnpg backup -n <ns> <cluster> --method=plugin
   --plugin-name=barman-cloud.cloudnative-pg.io`, or a `Backup` object with
   `method: plugin` + `pluginConfiguration: {name: barman-cloud.cloudnative-pg.io}`.

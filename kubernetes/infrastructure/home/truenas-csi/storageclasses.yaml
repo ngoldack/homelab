@@ -263,30 +263,6 @@ reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
-# Phoenix's PostgreSQL data directory (../phoenix/). Traces/projects/evals
-# are the deep observability store; frequent snapshots like the other DBs.
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: truenas-fast-nfs-phoenix-database
-provisioner: csi.truenas.io
-parameters:
-  protocol: "nfs"
-  pool: "fast"
-  datasetPath: "k8s/nfs/phoenix/database"
-  compression: "LZ4"
-  snapshot.schedule: "0 */6 * * *"
-  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
-  snapshot.retention: "14"
-  snapshot.retentionUnit: "DAY"
-  snapshot.recursive: "false"
-  nfs.mountOptions: "hard,nfsvers=4.1"
-  nfs.rootSquash: "false"
-  forceDelete: "false"
-reclaimPolicy: Retain
-allowVolumeExpansion: true
-volumeBindingMode: Immediate
----
 # Langfuse's PostgreSQL data directory (../langfuse/). The CNPG store for
 # the LLM platform's transactional data; snapshots like the other DBs.
 apiVersion: storage.k8s.io/v1
@@ -455,3 +431,84 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# NVMe-oF block storage for PostgreSQL data directories.
+#
+# These mirror the per-app NFS database classes above one-to-one
+# ({pool}/k8s/nvmeof/{namespace}/app/pvc-<uid>, same 6h/14d snapshot
+# schedule) but serve the PG data directory as a block device (zvol,
+# ext4) instead of an NFS mount — block semantics are what a WAL-heavy
+# Postgres wants (fsync latency, no attribute caching / locking layer).
+# NVMe-oF is RWO single-writer, which is exactly the CNPG access model.
+#
+# The snapshot.* parameters create NAS-side ZFS snapshot tasks on the
+# zvol's parent dataset path, so the 6h/14d DB protection carries over.
+#
+# Classes are named truenas-fast-nvmeof-{namespace}-app to match the NFS
+# naming convention above.
+
+# Immich's PostgreSQL data directory (../immich/postgres.yaml).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-immich-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof/immich/database"
+  compression: "LZ4"
+  volblocksize: "16K"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# Langfuse's PostgreSQL data directory (../langfuse/postgres.yaml).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-langfuse-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof/langfuse/database"
+  compression: "LZ4"
+  volblocksize: "16K"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# Paperless's PostgreSQL data directory (../paperless/postgres.yaml).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-paperless-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof/paperless/database"
+  compression: "LZ4"
+  volblocksize: "16K"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer

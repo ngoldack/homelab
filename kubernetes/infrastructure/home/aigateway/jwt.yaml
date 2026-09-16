@@ -20,6 +20,14 @@
 # the issuer below. The provider signs with the aigateway-oidc-signing RSA
 # keypair (see seed.yaml): without it authentik falls back to HS256 and this
 # policy would have nothing to verify.
+# remoteJWKS points at the IN-CLUSTER authentik service, not the public edge
+# host. The JWKS document is provider-scoped and host-independent (same signing
+# key either way), and fetching it in-cluster removes an external dependency
+# from every single authenticated request: with the edge URL, a slow or
+# rebooting edge made jwt_authn fail closed ("Jwks remote fetch is failed") and
+# every client got 401. The `issuer` stays the public URL because that is the
+# value authentik stamps into the token's `iss` claim and Envoy compares it
+# exactly.
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
@@ -36,4 +44,4 @@ spec:
       - name: authentik
         issuer: https://authentik.ngoldack.de/application/o/aigateway/
         remoteJWKS:
-          uri: https://authentik.ngoldack.de/application/o/aigateway/jwks/
+          uri: http://authentik-server.authentik.svc.cluster.local/application/o/aigateway/jwks/

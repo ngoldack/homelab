@@ -118,23 +118,6 @@ spec:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMPodScrape
-metadata:
-  name: phoenix-database
-  namespace: phoenix
-spec:
-  namespaceSelector:
-    matchNames: [phoenix]
-  selector:
-    matchLabels:
-      cnpg.io/cluster: phoenix-database
-  podMetricsEndpoints:
-    - port: metrics
-      relabelConfigs:
-        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
-          targetLabel: cluster
----
 # ---- external-dns (both the LAN and edge instances share the
 # app.kubernetes.io/name=external-dns service label, so one scrape covers
 # both) on the metrics port 7979.

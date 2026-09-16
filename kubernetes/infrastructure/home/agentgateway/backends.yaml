@@ -43,7 +43,10 @@ spec:
             policies:
               ai:
                 routes:
-                  "/v1/models": "Models"
+                  # "Models" route type is not implemented for custom providers
+                  # (proxy 501s); the passthrough route sends /v1/models to
+                  # llama.cpp untouched.
+                  "/v1/models": "Passthrough"
                   "/v1/chat/completions": "Completions"
 ---
 apiVersion: agentgateway.dev/v1alpha1

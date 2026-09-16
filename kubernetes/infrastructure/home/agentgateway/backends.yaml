@@ -25,17 +25,21 @@ metadata:
   namespace: agentgateway
 spec:
   ai:
-    provider:
-      custom:
-        # llama.cpp (llmkube qwen36-35b InferenceService) is OpenAI-
-        # compatible; format path mirrors the old lane's /v1 prefix.
-        formats:
-          - type: Completions
-            path: /v1/chat/completions
-        # Cost-catalog/telemetry identity: this is a llama.cpp backend.
-        providerOverride: llama.cpp
-      host: qwen36-35b.llmkube-system.svc.cluster.local
-      port: 8080
+    # spec.ai carries only `groups` (priority-ordered provider lists) — a
+    # single backend is a one-provider group.
+    groups:
+      - providers:
+          - name: local-p100
+            custom:
+              # llama.cpp (llmkube qwen36-35b InferenceService) is OpenAI-
+              # compatible; format path mirrors the old lane's /v1 prefix.
+              formats:
+                - type: Completions
+                  path: /v1/chat/completions
+              # Cost-catalog/telemetry identity: this is a llama.cpp backend.
+              providerOverride: llama.cpp
+            host: qwen36-35b.llmkube-system.svc.cluster.local
+            port: 8080
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -44,18 +48,20 @@ metadata:
   namespace: agentgateway
 spec:
   ai:
-    provider:
-      openai: {}
-      host: openrouter.ai
-      port: 443
-      # OpenRouter is OpenAI-compatible but under /api/v1, not /v1.
-      path: /api/v1/chat/completions
-      policies:
-        auth:
-          secretRef:
-            name: openrouter-key
-        tls:
-          sni: openrouter.ai
+    groups:
+      - providers:
+          - name: openrouter
+            openai: {}
+            host: openrouter.ai
+            port: 443
+            # OpenRouter is OpenAI-compatible but under /api/v1, not /v1.
+            path: /api/v1/chat/completions
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -64,14 +70,16 @@ metadata:
   namespace: agentgateway
 spec:
   ai:
-    provider:
-      openai: {}
-      host: api.synthetic.new
-      port: 443
-      path: /v1/chat/completions
-      policies:
-        auth:
-          secretRef:
-            name: synthetic-key
-        tls:
-          sni: api.synthetic.new
+    groups:
+      - providers:
+          - name: synthetic
+            openai: {}
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new

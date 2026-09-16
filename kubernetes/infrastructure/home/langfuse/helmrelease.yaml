@@ -106,7 +106,10 @@ spec:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
         - name: AUTH_AUTHENTIK_ISSUER
-          value: https://authentik.ngoldack.de/application/o/langfuse
+          # Trailing slash REQUIRED: authentik's per_provider issuer is
+          # /application/o/<slug>/ and NextAuth strictly matches the iss
+          # claim (same go-oidc strict-match lesson as headlamp, 13f5198).
+          value: https://authentik.ngoldack.de/application/o/langfuse/
         # ClickHouse `default` user runs no_password (the CR omits
         # settings.defaultUserPassword), so auth is off server-side — but the
         # app's migration stage hard-fails on an EMPTY CLICKHOUSE_PASSWORD

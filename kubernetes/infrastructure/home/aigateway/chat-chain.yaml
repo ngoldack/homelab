@@ -43,7 +43,10 @@ spec:
           modelNameOverride: hf:deepseek-ai/DeepSeek-V4.1-Flash
         - name: openrouter-flash
           priority: 3
-          modelNameOverride: deepseek/deepseek-v4-flash-latest
+          # The "~" prefix is OpenRouter's always-latest alias (without it the
+          # upstream rejects the ID: "deepseek/deepseek-v4-flash-latest is not
+          # a valid model ID").
+          modelNameOverride: "~deepseek/deepseek-v4-flash-latest"
 ---
 # Retry across priorities: without this an upstream 5xx just fails the request.
 apiVersion: gateway.envoyproxy.io/v1alpha1

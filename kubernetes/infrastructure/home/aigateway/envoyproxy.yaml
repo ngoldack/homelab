@@ -34,13 +34,6 @@ spec:
           dns.ngoldack.de/scope: internal
         loadBalancerIP: 10.30.0.201
         type: LoadBalancer
-        # EG defaults LoadBalancer services to externalTrafficPolicy: Local,
-        # which restricts each node's data plane to node-local backends. The
-        # envoy pods are pinned to home, so the EDGE path (traffic entering on
-        # the cloud ingress node) found no local endpoint and 503'd with "no
-        # healthy upstream" — the LAN VIP was the only working path. Cluster
-        # policy lets the ingress node forward to the home pod over KubeSpan.
-        externalTrafficPolicy: Cluster
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: ClientTrafficPolicy

@@ -66,6 +66,16 @@ spec:
         - ports:
             - {port: "9000", protocol: TCP}
             - {port: "9443", protocol: TCP}
+    # Trace export: the OTel collector (otel-collector.yaml, this namespace)
+    # posts spans to langfuse-web:3000/api/public/otel. Langfuse's own
+    # allowlist already accepts this namespace as an OTLP sender; the client
+    # half is required too, or the collector's exports are dropped silently.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+      toPorts:
+        - ports:
+            - {port: "3000", protocol: TCP}
     - toEntities:
         - kube-apiserver
       toPorts:

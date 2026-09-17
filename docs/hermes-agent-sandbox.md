@@ -187,26 +187,46 @@ two required vars are the key pair.
 Ingestion lag (observed 2026-09-17): the SDK's OTLP exporter sends only
 `x-langfuse-sdk-name`/`-version`/`-public-key`, not
 `x-langfuse-ingestion-version: 4`, so the server (langfuse 4.24.0 here) takes
-its slow ingestion path — a finished turn can take ~10 min to show up under
-`/api/public/traces`. That is an SDK/client-header question, not a hermes
-wiring one. Two further v4-vs-plugin notes: the plugin's trace-input update
+its slow ingestion path — a finished turn showed up **≈4–5 min** after the
+response (measured: turn span 16:37:40Z, visible via the API by 16:42). Two
+further v4-vs-plugin notes: the plugin's trace-input update
 (`span.update_trace(...)`, a v3 API) is wrapped in `_failsafe` and therefore
 skipped, so a trace's `input` stays empty while the root span, metadata,
-generations and usage are intact; and the SDK's
-`Failed to detach context` ERRORs in the gateway log come from entering the
-observation context in one task and leaving it in another (the plugin is
-fail-open, spans still export).
+generations and timing are intact; and the SDK's `Failed to detach context`
+ERRORs in the gateway log come from entering the observation context in one
+task and leaving it in another (the plugin is fail-open, spans still export).
 
-Verify from inside the pod (the container env carries the keys, so no secret is
-typed):
+**Reading traces back — the legacy endpoint is disabled here.** This
+deployment runs Langfuse v4 in *events_only* mode, so the v3 list endpoints
+(`/api/public/traces`, `/api/public/observations`, `/api/public/metrics/daily`)
+answer **404** with `{"message":"This endpoint is not available on deployments
+running in Langfuse v4 events_only mode"}`. That 404 body parses as an empty
+JSON object, so a naive poller reports "0 traces" instead of an error — use the
+v4 endpoint:
+
+```bash
+kubectl -n hermes exec hermes-0 -c hermes -- curl -s -u \
+  "$HERMES_LANGFUSE_PUBLIC_KEY:$HERMES_LANGFUSE_SECRET_KEY" \
+  'http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/v2/observations?limit=100' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(o["traceId"], o["type"], o["name"], o["startTime"]) for o in d["data"]]'
+```
+
+A hermes turn appears there as a `CHAIN`/`Hermes turn` root observation with a
+`GENERATION`/`LLM call N` child per model call (verified live: trace
+`0797ec353ce89cfe6bd01983495f84b6`, root `662af44369b3149c`, generation
+`ef8c5c1dce20e820`, latency 37.8 s).
+
+Verify the wiring from inside the pod (the container env carries the keys, so
+no secret is typed):
 
 ```bash
 kubectl -n hermes exec hermes-0 -c hermes -- /opt/hermes/.venv/bin/python -c \
   "import langfuse; print(langfuse.__version__)"
 kubectl -n hermes exec hermes-0 -c hermes -- hermes plugins list | grep langfuse
-kubectl -n hermes exec hermes-0 -c hermes -- curl -s -u \
-  "$HERMES_LANGFUSE_PUBLIC_KEY:$HERMES_LANGFUSE_SECRET_KEY" \
-  'http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/traces?limit=5'
+kubectl -n hermes exec hermes-0 -c hermes -- curl -s --max-time 20 \
+  -u "$HERMES_LANGFUSE_PUBLIC_KEY:$HERMES_LANGFUSE_SECRET_KEY" \
+  -o /dev/null -w '%{http_code}\n' \
+  'http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/health'
 ```
 
 ## Secrets inventory & rotation
@@ -298,7 +318,7 @@ manual per the steps above.
 | Model calls fail ("offline" / "can't reach the model provider") | Check the *provider* first: `grep -E '^provider:' /opt/data/config.yaml` must say `custom:agentgateway` — with `auto` Hermes calls OpenRouter, which the egress allowlist blocks. Then the network path: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
 | agentgateway rejects the call 401 "token header is malformed" | The `providers.agentgateway` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
 | Model turn interrupted ("waiting for model response") | The 600 s budget is gone: keep `providers.agentgateway.request_timeout_seconds: 600` **and** the `HERMES_API_TIMEOUT=600` env in the StatefulSet (a single call is ~125 s and tool turns take minutes; on v2026.9.7 the env is what the client actually reads for a named custom provider — see the Operation bullets) |
-| Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/traces` works from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). Events are batched and the SDK does not send `x-langfuse-ingestion-version: 4`, so Langfuse's slow path can take ~10 min before a trace lists |
+| Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/health` answers from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). **Do not poll `/api/public/traces`** — this deployment is Langfuse v4 *events_only*, where that endpoint 404s with an "events_only mode" message that parses as an empty result; read `/api/public/v2/observations` instead. Events are batched and the SDK sends no `x-langfuse-ingestion-version: 4`, so allow ~5 min before concluding anything |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |
 | `router-token` wrong size | Must be exactly 32 bytes under `data:` (base64 of the raw seed) — never `stringData` (44-char base64 text). The plugin fails the doctor row instead of the first file operation |

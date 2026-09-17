@@ -105,6 +105,13 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
+        - name: AUTH_AUTHENTIK_AUTHORIZATION_URL
+          # Explicit gateway endpoint: with langfuse's openid-client factory,
+          # supplying the explicit authorize URL switches the provider OFF
+          # discovery (Issuer.discover double-slashes the well-known path for
+          # a trailing-slash issuer and authentik 404s it). The issuer value
+          # must still equal the ID-token iss byte-for-byte.
+          value: https://authentik.ngoldack.de/application/o/authorize/
         - name: AUTH_AUTHENTIK_ISSUER
           # EXACT value of authentik's per-provider issuer — the discovery
           # metadata's `issuer` AND the ID-token `iss` claim are

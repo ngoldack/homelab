@@ -1,0 +1,174 @@
+# hermes — pod-local relay in front of the three Synthetic-tier base_urls.
+#
+# Why this exists (upstream defect, agentgateway v1.5.0): a *streamed* response
+# whose upstream is remote (the Synthetic tiers behind api.synthetic.new, and the
+# same path shape for OpenRouter) reaches the client without the terminating
+# chunk of its chunked body — the last two body bytes and the `0 CRLF CRLF`
+# terminator never arrive, and the gateway logs
+# `warn proxy::gateway proxy error: error from user's Body stream`. httpx (and so
+# the OpenAI SDK, and so every Hermes turn against those providers) raises
+# `RemoteProtocolError: peer closed connection without sending complete message
+# body` at the end of an otherwise complete SSE stream, which Hermes reports as
+# `hermes={completed:false, partial:true, error_code:'output_truncated'}`.
+# The local P100 route terminates its body correctly, and an HTTP/1.0 client —
+# whose body is delimited by connection close, not by chunked framing — completes
+# fine; that is the shape the relay re-creates: it forwards the request to the
+# gateway and returns the response close-delimited (no Transfer-Encoding, no
+# Content-Length, Connection: close), so the client reads to EOF and the SSE
+# stream ends cleanly at `data: [DONE]`.
+#
+# Scope: only `providers.syn-*` base_urls point at it (127.0.0.1:8643, same pod
+# network namespace). The P100 provider still talks to the agentgateway Service
+# directly and still streams.
+#
+# Remove this ConfigMap, the container and the volume below once agentgateway
+# terminates chunked bodies for its remote upstreams — the check is
+# `curl -sN ... /v1/synthetic-small/chat/completions ... | tail -c 5 | od -c`,
+# which must show `0 \r \n \r \n` and a curl exit status of 0 (today: exit 18).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-stream-relay
+  namespace: hermes
+data:
+  stream_relay.py: |
+    #!/usr/bin/env python3
+    """Pod-local HTTP relay that repairs agentgateway's truncated chunked-body tail.
+
+    agentgateway v1.5.0 never terminates the chunked body of a *streamed* response
+    whose upstream is remote (the Synthetic tiers on api.synthetic.new, and the same
+    path shape for OpenRouter): the terminating zero-length chunk (``0 CRLF CRLF``,
+    plus the final two body bytes) is missing, the gateway logs
+
+        warn proxy::gateway proxy error: error from user's Body stream
+
+    and httpx raises ``RemoteProtocolError('peer closed connection without sending
+    complete message body')`` at the end of an otherwise complete SSE stream. The
+    local P100 route terminates its body correctly, and an HTTP/1.0 client (whose
+    body is delimited by connection close rather than by chunked framing) completes
+    fine -- which is exactly the shape this relay re-creates for the three Synthetic
+    tiers: the request is forwarded to the gateway, and the response is returned to
+    the client close-delimited (no Transfer-Encoding, no Content-Length, one
+    ``Connection: close``), so the client reads to EOF and the SSE stream ends
+    cleanly at ``data: [DONE]``.
+
+    Only the ``providers.syn-*`` base_urls point here; the P100 provider keeps
+    talking to the gateway directly and keeps streaming.
+    """
+
+    from __future__ import annotations
+
+    import logging
+    import os
+    import signal
+    import sys
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import httpx
+
+    UPSTREAM = os.environ.get(
+        "RELAY_UPSTREAM", "http://agentgateway.agentgateway.svc.cluster.local:80").rstrip("/")
+    LISTEN_HOST = os.environ.get("RELAY_LISTEN_HOST", "127.0.0.1")
+    LISTEN_PORT = int(os.environ.get("RELAY_LISTEN_PORT", "8643"))
+    READ_TIMEOUT = float(os.environ.get("RELAY_READ_TIMEOUT", "600"))
+
+    # RFC 7230 hop-by-hop headers, plus the framing/encoding headers the relay owns:
+    # the body is re-sent close-delimited and uncompressed, so neither the request's
+    # nor the response's framing headers may be copied through.
+    _DROP_HEADERS = frozenset({
+        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+        "te", "trailer", "transfer-encoding", "upgrade",
+        "content-length", "content-encoding", "accept-encoding",
+    })
+
+    logger = logging.getLogger("stream-relay")
+
+
+    class _RelayHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        server_version = "hermes-stream-relay"
+        sys_version = ""
+
+        def log_message(self, fmt: str, *args) -> None:
+            logger.info("%s - %s", self.address_string(), fmt % args)
+
+        def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler API)
+            if self.path == "/healthz":
+                self._health()
+                return
+            self._forward()
+
+        def _health(self) -> None:
+            """Readiness endpoint: proves the listener is up without touching the gateway."""
+            payload = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_POST(self) -> None:  # noqa: N802
+            self._forward()
+
+        def _forward(self) -> None:
+            if not self.path.startswith("/v1/"):
+                self.send_error(404, "relay forwards /v1/ paths only")
+                return
+
+            try:
+                length = int(self.headers.get("content-length") or 0)
+            except ValueError:
+                length = 0
+            body = self.rfile.read(length) if length > 0 else None
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in _DROP_HEADERS}
+            headers["accept-encoding"] = "identity"
+
+            timeout = httpx.Timeout(connect=10.0, read=READ_TIMEOUT, write=60.0, pool=10.0)
+            status = None
+            try:
+                with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                    with client.stream(
+                        self.command, UPSTREAM + self.path, content=body, headers=headers,
+                    ) as upstream:
+                        status = upstream.status_code
+                        self.send_response(status)
+                        for key, value in upstream.headers.items():
+                            if key.lower() not in _DROP_HEADERS:
+                                self.send_header(key, value)
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.close_connection = True
+                        try:
+                            for chunk in upstream.iter_bytes():
+                                self.wfile.write(chunk)
+                                self.wfile.flush()
+                        except (httpx.RemoteProtocolError, httpx.DecodingError) as exc:
+                            # The agentgateway defect: the upstream body ends without its
+                            # terminating chunk. Every SSE event up to `data: [DONE]` has
+                            # already been relayed; EOF ends the close-delimited body.
+                            logger.info("upstream body ended early (%s) - closing body", type(exc).__name__)
+            except Exception:
+                logger.exception("relay request failed (status=%s)", status)
+                self.close_connection = True
+
+
+    def main() -> int:
+        logging.basicConfig(
+            level=logging.INFO, stream=sys.stdout,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s")
+        server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), _RelayHandler)
+        server.daemon_threads = True
+
+        def _stop(_signum, _frame):
+            threading.Thread(target=server.shutdown, daemon=True).start()
+
+        signal.signal(signal.SIGTERM, _stop)
+        signal.signal(signal.SIGINT, _stop)
+        logger.info("listening on %s:%d -> %s", LISTEN_HOST, LISTEN_PORT, UPSTREAM)
+        server.serve_forever()
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())

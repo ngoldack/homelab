@@ -151,7 +151,8 @@ selected purely by path/model id:
 | `syn-deepseek` | `/v1/synthetic-deepseek` | `deepseek-ai/DeepSeek-V4.1-Flash` | ~9.6 s |
 
 All three tiers are declared in `hermes/configmap.yaml` (`providers.syn-*`,
-each with its own tier-suffixed `base_url`, `key_env: OPENAI_API_KEY` and an
+each with its own tier-suffixed `base_url` — the pod-local relay, see Streaming
+below — plus `key_env: OPENAI_API_KEY` and an
 **explicit** `models:` list — Synthetic answers `GET <tier>/models` with 400, so
 discovery can never populate the catalog; the ids are Synthetic's own aliases,
 not the upstream names). Two ways to select one, plus the global default:
@@ -166,6 +167,82 @@ not the upstream names). Two ways to select one, plus the global default:
 - **Global default**: the dashboard's **Models** page — the only path that
   moves the default off `local`, which is deliberately left as the P100
   (`provider: custom:agentgateway`, `model: local`).
+
+#### Streaming: the agentgateway chunked-body defect (Synthetic tiers only)
+A **streamed** turn against any of the three Synthetic tiers fails on
+agentgateway **v1.5.0** (chart + image, `agentgateway/helmrelease.yaml`) even
+though the same call without `"stream": true` is byte-perfect. The gateway never
+terminates the chunked body of a streamed response whose upstream is *remote*
+(`api.synthetic.new`; the same path shape applies to OpenRouter), so the last two
+body bytes — including the `0 CRLF CRLF` terminator — never arrive, while every
+SSE event up to `data: [DONE]` does. Signatures, all observed live 2026-09-17
+from inside `hermes-0`:
+
+```bash
+# the missing terminator: curl exits 18 (partial transfer), not 0
+kubectl -n hermes exec hermes-0 -c hermes -- sh -c \
+  'curl -sN -X POST http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-small/chat/completions \
+     -H "Authorization: Bearer $OPENAI_API_KEY" -H "content-type: application/json" \
+     -d "{\"model\":\"syn:small:text\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: OK\"}],\"stream\":true}" \
+   > /tmp/t.bin; echo "curl_exit=$?"; tail -c 5 /tmp/t.bin | od -c'
+# → curl_exit=18, body ends `data: [DONE]` with no trailing newlines and no
+#   `0 \r \n \r \n`. The identical request to /v1/chat/completions (the local
+#   P100 route) exits 0 and ends `data: [DONE] \n \n` — the defect is upstream-
+#   side, not path-side.
+```
+
+- gateway log: `warn proxy::gateway proxy error: error from user's Body stream`
+  (`kubectl -n agentgateway logs deploy/agentgateway`)
+- httpx / OpenAI SDK: `RemoteProtocolError('peer closed connection without
+  sending complete message body (incomplete chunked read)')` at the end of the
+  stream
+- Hermes turn: `hermes={completed:false, partial:true, error_code:'output_truncated'}`
+  with `"error": "Response remained truncated after 4 continuation attempts"` and
+  the user-visible "No visible answer was produced…" — *also* for a
+  non-streaming API request, because the turn streams to the model regardless of
+  the client's `stream` flag
+- an HTTP/1.0 client completes: its body is delimited by connection close rather
+  than by chunked framing
+
+**No Hermes provider key fixes this** — the alternatives were measured, not
+assumed. `providers.<name>.extra_body: {stream: false}` rewrites only the
+request body while the SDK still parses the response as SSE (a silent **0-chunk**
+stream → `EmptyStreamError` → "empty response stream after 4 attempts").
+`api_mode`/`transport` select a wire protocol
+(`chat_completions`/`codex_responses`/`anthropic_messages`/`bedrock_converse`),
+not a streaming mode, and there is no `stream` key in
+`hermes_cli/config_providers._KNOWN_PROVIDER_KEYS` (an unknown provider key is
+warned about and ignored). Per-model `capabilities` are lifted onto
+`agent.capabilities` but consumed only by native compaction/delegation, and
+`model_routes` accepts only model/provider/api_key/base_url. The one switch
+Hermes does honour, `model.streaming: false` (`agent_init._apply_display_config`
+→ `agent._disable_streaming` → `_should_stream`), is **global**: it would stop
+the P100 streaming too.
+
+**Mitigation (in force):** the three `providers.syn-*` `base_url`s point at a
+pod-local relay — `hermes/stream-relay.yaml` (script) plus the `syn-stream-relay`
+container in `hermes/statefulset.yaml`, listening on `127.0.0.1:8643`. The relay
+forwards the request to the very same agentgateway Service and returns the
+response **close-delimited** (no `Transfer-Encoding`, no `Content-Length`, one
+`Connection: close`) — the HTTP/1.0-equivalent shape that completes; everything
+else is untouched (same path, same `Authorization` JWT, same `stream: true`, SSE
+still arrives incrementally — a live syn-small turn streams in ~3 s). The P100
+provider keeps calling the gateway Service directly and still streams; the relay
+binds loopback only, so **no CNP, Service or gateway object changes with it**
+(the pod's existing `agentgateway` :80 egress rule carries the relay's
+forwarding, and a localhost listener needs no ingress rule). It logs
+`upstream body ended early (RemoteProtocolError) - closing body` once per
+repaired response.
+
+**Removal condition — agentgateway ≥ the version that fixes remote-upstream body
+framing.** The relay is scaffolding for a gateway defect, nothing more: when an
+agentgateway upgrade terminates the chunked body for remote upstreams, delete it
+and point the three `base_url`s back at
+`http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-<tier>`
+(drop `stream-relay.yaml` from `kustomization.yaml`, the container + volume in
+`statefulset.yaml`, then bump `config-rev` + the pod annotation again). The gate
+is exactly the probe above, aimed at the gateway Service: it must print
+`curl_exit=0` and end with `0 \r \n \r \n`.
 
 ### Dashboard exposure (edge + authentik SSO)
 The dashboard runs its own OIDC login
@@ -348,6 +425,7 @@ manual per the steps above.
 | agentgateway rejects the call 401 "token header is malformed" | The `providers.agentgateway` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
 | Model turn interrupted ("waiting for model response") | The 600 s budget is gone: keep `providers.agentgateway.request_timeout_seconds: 600` **and** the `HERMES_API_TIMEOUT=600` env in the StatefulSet (a single call is ~125 s and tool turns take minutes; on v2026.9.7 the env is what the client actually reads for a named custom provider — see the Operation bullets) |
 | A Synthetic call behaves like the P100 (≈40 s, `qwen36-35b`-class answer) | The tier did not route and the request fell back to the global default. Check (a) the provider name matches the one the request/route sent (`custom:syn-small`/`-large`/`-deepseek`), (b) `providers.syn-*` still carries its own `base_url` **with the `/v1/synthetic-<tier>` suffix** — without it the call hits `/v1`, i.e. the P100 — plus `key_env: OPENAI_API_KEY` and an explicit `models:` list (Synthetic rejects `GET <tier>/models` with 400, so a missing list leaves the provider with no catalog), and (c) the pod actually restarted onto the new config: the same `config-rev`/annotation bump rule as above (`grep -A3 'syn-small:' /opt/data/config.yaml`). The tiers answer in single-digit seconds; the P100 id or ~40 s means fallback, not the tier |
+| A Synthetic turn returns "No visible answer was produced…" / `error_code: output_truncated` | Streaming defect: agentgateway never terminates the chunked body for a remote upstream (see Model choice → Streaming). Check the relay first: `kubectl -n hermes get pod hermes-0 -o jsonpath='{.spec.containers[*].name}'` must list `syn-stream-relay`; `kubectl -n hermes exec hermes-0 -c hermes -- curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8643/healthz` must print `200`; `kubectl -n hermes logs hermes-0 -c syn-stream-relay` must show the request (and `upstream body ended early (RemoteProtocolError) - closing body`); and `grep -A1 'syn-small:' /opt/data/config.yaml` must show `base_url: http://127.0.0.1:8643/v1/synthetic-small`. A pod with no `syn-stream-relay` container is still on the pre-relay config — `config-rev` and the pod annotation must both be at `7` |
 | Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/health` answers from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). **Do not poll `/api/public/traces`** — this deployment is Langfuse v4 *events_only*, where that endpoint 404s with an "events_only mode" message that parses as an empty result; read `/api/public/v2/observations` instead. Events are batched and the SDK sends no `x-langfuse-ingestion-version: 4`, so allow ~5 min before concluding anything |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |

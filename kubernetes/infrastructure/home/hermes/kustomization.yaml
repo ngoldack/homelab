@@ -4,6 +4,9 @@ resources:
   - namespace.yaml
   - rbac.yaml
   - configmap.yaml
+  # Pod-local HTTP relay for the three Synthetic-tier base_urls (upstream
+  # agentgateway framing defect — see the file header and the runbook).
+  - stream-relay.yaml
   - secret.sops.yaml
   - statefulset.yaml
   - service.yaml

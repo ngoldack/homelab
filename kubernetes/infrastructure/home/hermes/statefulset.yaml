@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "6"
+        hermes.ngoldack.de/config-rev: "7"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -194,6 +194,59 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+        # Pod-local relay in front of the three Synthetic-tier base_urls. It
+        # exists only because agentgateway v1.5.0 never terminates the chunked
+        # body of a streamed response from a *remote* upstream, which makes every
+        # Hermes turn against those providers die with httpx
+        # RemoteProtocolError (error_code=output_truncated); the relay re-frames
+        # that response close-delimited, the shape that completes. It listens on
+        # 127.0.0.1 only (same pod network namespace, no Service, no Cilium
+        # change) and forwards to the same agentgateway Service the P100
+        # provider keeps calling directly. Script + rationale: stream-relay.yaml;
+        # removal condition: docs/hermes-agent-sandbox.md, "Model choice".
+        - name: syn-stream-relay
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          command: ["/opt/hermes/.venv/bin/python3", "-u", "/opt/relay/stream_relay.py"]
+          env:
+            - name: RELAY_UPSTREAM
+              value: http://agentgateway.agentgateway.svc.cluster.local:80
+            - name: RELAY_LISTEN_HOST
+              value: "127.0.0.1"
+            - name: RELAY_LISTEN_PORT
+              value: "8643"
+            # The mounted script directory is read-only anyway; this keeps the
+            # interpreter from trying to cache bytecode next to it.
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          # Loopback probe: reaches the relay inside the pod's network namespace
+          # and never touches the gateway.
+          readinessProbe:
+            exec:
+              command:
+                - /usr/bin/curl
+                - -s
+                - -o
+                - /dev/null
+                - --max-time
+                - "3"
+                - http://127.0.0.1:8643/healthz
+            periodSeconds: 10
+          volumeMounts:
+            - name: relay-script
+              mountPath: /opt/relay
+              readOnly: true
       initContainers:
         - name: seed-config
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
@@ -246,6 +299,9 @@ spec:
             items:
               - key: AGENT_SANDBOX_ROUTER_TOKEN
                 path: token
+        - name: relay-script
+          configMap:
+            name: hermes-stream-relay
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi

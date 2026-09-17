@@ -19,7 +19,7 @@ data:
   # onto the data PVC only when this value differs from the revision recorded
   # at /opt/data/.config-rev; bump it together with the pod-template
   # annotation hermes.ngoldack.de/config-rev to roll the pod.
-  config-rev: "6"
+  config-rev: "7"
   config.yaml: |
     # LLM via the agentgateway (agentgateway.dev data plane, ns agentgateway):
     # custom OpenAI-compatible provider, base_url at the in-cluster Service.
@@ -78,20 +78,36 @@ data:
       # 120 s instead of the P100's 600 s: these are remote, non-GPU-local
       # calls that complete in seconds (single digits); a longer budget would
       # only hide a silent fallback to the P100.
+      # Their base_url is the pod-local relay (127.0.0.1:8643, ../stream-relay.yaml
+      # + the syn-stream-relay container), NOT the gateway Service: agentgateway
+      # v1.5.0 drops the terminating chunk of the chunked body it streams back
+      # for a remote upstream, so a direct call ends with httpx
+      # RemoteProtocolError and the turn reports
+      # hermes={completed:false, partial:true, error_code:'output_truncated'}
+      # (reproduced live 2026-09-17 against /v1/synthetic-small; the local P100
+      # route terminates its body correctly, which is why only these three
+      # providers go through the relay). The relay forwards to the very same
+      # Service and close-delimits the response — the framing shape that
+      # completes. No provider key can express this: `extra_body: {stream: false}`
+      # only rewrites the SDK's request body while the SDK still parses the
+      # response as SSE (measured: a silent 0-chunk stream), `api_mode`/`transport`
+      # select a wire protocol, not a streaming mode, and `model.streaming: false`
+      # is global (it would stop the P100 streaming too). Details and the removal
+      # condition: docs/hermes-agent-sandbox.md, "Model choice".
       syn-small:
-        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-small
+        base_url: http://127.0.0.1:8643/v1/synthetic-small
         key_env: OPENAI_API_KEY
         request_timeout_seconds: 120
         models:
           - "syn:small:text"
       syn-large:
-        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-large
+        base_url: http://127.0.0.1:8643/v1/synthetic-large
         key_env: OPENAI_API_KEY
         request_timeout_seconds: 120
         models:
           - "syn:large:text"
       syn-deepseek:
-        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-deepseek
+        base_url: http://127.0.0.1:8643/v1/synthetic-deepseek
         key_env: OPENAI_API_KEY
         request_timeout_seconds: 120
         models:

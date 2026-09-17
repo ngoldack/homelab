@@ -35,3 +35,4 @@ resources:
   - synthetic-key.sops.yaml
   - httproute-edge.yaml
   - otel-collector.yaml
+  - api-keys.sops.yaml

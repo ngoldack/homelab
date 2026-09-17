@@ -184,6 +184,19 @@ default (`sanitized`: secret-pattern redaction, then truncation to
 `HERMES_LANGFUSE_ENV`/`_RELEASE` for tagging. All of these are optional — the
 two required vars are the key pair.
 
+Ingestion lag (observed 2026-09-17): the SDK's OTLP exporter sends only
+`x-langfuse-sdk-name`/`-version`/`-public-key`, not
+`x-langfuse-ingestion-version: 4`, so the server (langfuse 4.24.0 here) takes
+its slow ingestion path — a finished turn can take ~10 min to show up under
+`/api/public/traces`. That is an SDK/client-header question, not a hermes
+wiring one. Two further v4-vs-plugin notes: the plugin's trace-input update
+(`span.update_trace(...)`, a v3 API) is wrapped in `_failsafe` and therefore
+skipped, so a trace's `input` stays empty while the root span, metadata,
+generations and usage are intact; and the SDK's
+`Failed to detach context` ERRORs in the gateway log come from entering the
+observation context in one task and leaving it in another (the plugin is
+fail-open, spans still export).
+
 Verify from inside the pod (the container env carries the keys, so no secret is
 typed):
 

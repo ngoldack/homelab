@@ -1,4 +1,4 @@
-# LLM backends for the agentgateway — three AgentgatewayBackend resources.
+# LLM backends for the agentgateway — the AgentgatewayBackend resources.
 #
 # Replaces the aigateway (Envoy AI Gateway) lane's per-model backends:
 # - aigateway/synthetic.yaml -> `synthetic` (host api.synthetic.new:443,
@@ -6,6 +6,12 @@
 # - aigateway/models.yaml    -> `openrouter` (host openrouter.ai:443, the
 #   OpenAI-compatible /api/v1 path the old lane expressed as
 #   schema {name: OpenAI, prefix: /api/v1}).
+# - chat-chain's per-tier Synthetic providers -> `synthetic-small`,
+#   `synthetic-large`, `synthetic-hf-deepseek`: the three provider stanzas
+#   chat-chain lists as priority groups, each promoted to a single-provider
+#   backend so a client can PIN a tier instead of walking the chain. Exposed
+#   as /v1/synthetic-{small,large,deepseek} in routes.yaml; the stanzas are
+#   verbatim copies, so edit chat-chain.yaml and here together.
 # - local P100 inference     -> `local-p100` (llmkube InferenceService,
 #   reached over the in-cluster DNS name; custom-provider backendRef is
 #   namespace-LOCAL per the CRD, so the cross-namespace Service is declared
@@ -85,6 +91,80 @@ spec:
             host: api.synthetic.new
             port: 443
             path: /v1/chat/completions
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+
+---
+# Per-tier Synthetic paths. Each of these is one of chat-chain's priority
+# groups promoted to a single-provider backend, so a client that wants a
+# specific tier can select it by path (routes.yaml) instead of walking the
+# chain. Provider stanzas are verbatim copies of chat-chain's — the model
+# strings are synthetic.new's tier aliases (`syn:*` = Synthetic's own models,
+# `hf:*` = HuggingFace-hosted).
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: synthetic-small
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-small
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: syn:small:text
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: synthetic-large
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-large
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: syn:large:text
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: synthetic-hf-deepseek
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-hf-deepseek
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:deepseek-ai/DeepSeek-V4.1-Flash
             policies:
               auth:
                 secretRef:

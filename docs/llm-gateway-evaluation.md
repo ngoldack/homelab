@@ -51,7 +51,7 @@ shared coupling is the `gateway.networking.k8s.io` CRDs and a second LB IP.
 | Model routing by header/body | ✅ `x-ai-eg-model`, ext-proc extracts model from body | ✅ equivalent |
 | Per-model fallback chain | ✅ prioritized backendRefs + `modelNameOverride` + EG retry (`numAttemptsPerPriority`) — **this is what our `chat` chain uses** | ✅ priority groups + CEL `unhealthyCondition` eviction |
 | Local OpenAI-compatible upstream (llama.cpp) | ✅ generic OpenAI schema (how we run the P100) | ✅ vLLM/custom provider docs, `backendRef` is namespace-local only |
-| External OpenAI-compatible (OpenRouter/Synthetic) | ✅ via BackendSecurityPolicy APIKey | ✅ documented provider rows incl. OpenRouter |
+| External OpenAI-compatible (OpenRouter/Synthetic) | ⚠️ API surface was there (`BackendSecurityPolicy` APIKey) but the Synthetic credential was a placeholder the upstream rejected — never proven live before the migration | ✅ `AgentgatewayBackend.policies.auth.secretRef`, both vhosts live; Synthetic additionally exposed as **per-tier paths** — see §5 |
 | JWT auth via authentik JWKS | ✅ EG `SecurityPolicy` + `remoteJWKS.uri` (our live config) | ✅ `AgentgatewayPolicy.jwtAuthentication` (+ `jwks.remote` with `backendRef`) |
 | Prompt guards | ❌ not in OSS core (verified by release-note sweep) | ✅ regex/moderation/webhook guardrails (response masking not on streams) |
 | Token rate limiting | ✅ via Redis + `llmRequestCosts` (soft quota, charges at stream end) | ✅ local/global, token units, `x-ratelimit-*` headers |
@@ -86,7 +86,65 @@ priority groups. Prefer **standalone agentgateway** (3 CRDs, Rust proxy) over th
 full kgateway stack — we already have a Cilium edge and do not need a second
 general-purpose Envoy edge.
 
-## 5. Unresolved / not verified
+## 5. Route inventory of the deployed agentgateway lane
+
+What the migrated lane actually exposes (read off the live cluster 2026-09-17:
+namespace `agentgateway`, HTTPRoute `local-llm` on the in-cluster Gateway
+`agentgateway`; the public host `llm.aigateway.svc.ngoldack.de` fronts the same
+paths via the `llm-edge` route, and gateway-scoped `AgentgatewayPolicy`
+`jwt-auth` gates every one of them with authentik JWTs). Rules are evaluated
+**first match wins**, so this order is also the precedence order:
+
+| Path (`PathPrefix`) | Backend | Upstream |
+|---|---|---|
+| `/v1/chat/completions` | `local-p100` | llmkube llama.cpp on the P100, `/v1/chat/completions` |
+| `/v1/models` | `local-p100` | same, passthrough (the "Models" route type 501s for custom providers) |
+| `/v1/synthetic-small` | `synthetic-small` | `api.synthetic.new`, model `syn:small:text` |
+| `/v1/synthetic-large` | `synthetic-large` | `api.synthetic.new`, model `syn:large:text` |
+| `/v1/synthetic-deepseek` | `synthetic-hf-deepseek` | `api.synthetic.new`, model `hf:deepseek-ai/DeepSeek-V4.1-Flash` |
+| `/v1/chat` | `chat-chain` | priority groups: `synthetic-small` → `synthetic-large` → `synthetic-hf-deepseek` → `openrouter-flash` |
+
+`/v1/chat` keeps the original tiered chain because existing clients depend on
+it; the three `/v1/synthetic-*` paths are the *same* providers with the
+priority chain removed, so a client that needs a deterministic model (cost, or
+a model that has to answer at all) can pin one tier instead of hoping the chain
+walks as expected. The single-tier backends in `backends.yaml` are verbatim
+copies of the corresponding `chat-chain.yaml` stanzas, so each tier's model
+string, `secretRef` and SNI appear in two files — edit both together.
+
+Ordering constraint: `/v1/chat` must never be widened to a bare `/v1` prefix
+and must stay below the more specific rules. With first match wins, a broad
+`/v1` rule placed above them would swallow `/v1/models` and every
+`/v1/synthetic-*` path. (`PathPrefix` matches on path segments, so `/v1/chat`
+does not capture `/v1/synthetic-*` today — the ordering is what keeps it that
+way after later edits.)
+
+Two behaviours worth knowing before debugging a tier:
+
+- **Credential handling.** `AgentgatewayBackend.policies.auth.secretRef` reads
+  the Secret's `Authorization` key, strips a leading `Bearer ` if present, and
+  writes `Authorization: Bearer <value>` upstream. The Secret may therefore
+  hold either the bare key or a full `Bearer …` header value.
+- **History of `synthetic-key`:** on the retired Agent Router lane the Synthetic
+  credential was a placeholder that never worked live. On this lane the Secret
+  held a placeholder too until it was replaced with a live key (commit
+  `17726f8`, verified 2026-09-17: a JWT-authenticated `/v1/chat` call returned
+  a real completion in ~1.8 s). Treat a Synthetic tier that answers with 401 as
+  a bad key in that Secret, not as a chain problem.
+- **A 401 from Synthetic is non-retriable, so `chat-chain` does NOT fall
+  through to OpenRouter on it.** Priority groups advance on *unhealthy*
+  responses, and agentgateway's default `unhealthyCondition` is any 5xx or a
+  connection failure — a 4xx auth rejection is neither, so the client gets the
+  401 and the OpenRouter tier is never tried. A broken Synthetic key therefore
+  takes down `/v1/chat` even though a healthy fallback is configured behind it;
+  `/v1/synthetic-*` gives a way to see that failure directly. Probed live
+  2026-09-17 with a throwaway two-group backend (group 1 = Synthetic with a
+  deliberately bogus Secret, group 2 = OpenRouter with the real key): the
+  response was `401 {"error":"Invalid API Key."}` — the OpenRouter group was
+  never tried. The same backend pointing group 1 at the live `synthetic-key`
+  returned `200` with `model: zai-org/GLM-4.7-Flash` for `syn:small:text`.
+
+## 6. Unresolved / not verified
 
 - No official Cilium + (agentgateway | Agent Router) coexistence doc exists for
   either project; the coexistence claims are Gateway API mechanism reasoning.

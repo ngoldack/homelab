@@ -47,3 +47,24 @@ spec:
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}
+    # The install hook (and the LAPI on restart) reads/writes its CAPI
+    # credentials Secret through the API server; without this the post-install
+    # job loops and the release never leaves 'install'.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}

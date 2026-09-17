@@ -10,8 +10,11 @@
 # OUTPUT: this Job records the digest of the image it BUILT (the base image's
 # digest lives in the Dockerfile). Last built digest — the one
 # hermes/statefulset.yaml pins today:
+#   sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+# Previous build (context ...#970fd38265526b9b150471093bf867fb540b32b6),
+# pinned until 2026-09-17:
 #   sha256:246a3c50471e5b3c62a87eaab62bbedec9a8874979af4ca4d118ab6f7f7aed37
-# Previous build (context ...#035bc51a1a73), pinned until 2026-09-17:
+# Before that (context ...#035bc51a1a73):
 #   sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
 # Re-record the digest here and re-pin the StatefulSet after every rebuild.
 #
@@ -20,7 +23,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-970fd38
+  name: build-hermes-agent-sandbox-plugin-2fbcf07
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -42,9 +45,9 @@ spec:
             - --tlskey=/certs/tls.key
             - build
             - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#970fd38265526b9b150471093bf867fb540b32b6
+            - --opt=context=https://github.com/ngoldack/homelab.git#2fbcf0733e1390a46322a67561631101e2604b2c
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-970fd38,push=true
+            - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07,push=true
             - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max
             - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache
             - --progress=plain

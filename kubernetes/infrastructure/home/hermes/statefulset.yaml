@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: hermes
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:246a3c50471e5b3c62a87eaab62bbedec9a8874979af4ca4d118ab6f7f7aed37
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
           # No args: the image entrypoint owns the command line (it starts the
           # gateway and supervises the dashboard); declaring args here would be
           # silently ignored.
@@ -196,7 +196,7 @@ spec:
               mountPath: /tmp
       initContainers:
         - name: seed-config
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:246a3c50471e5b3c62a87eaab62bbedec9a8874979af4ca4d118ab6f7f7aed37
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
           command: ["/bin/sh", "-c"]
           env:
             - name: HERMES_CONFIG_REV

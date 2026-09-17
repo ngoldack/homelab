@@ -77,7 +77,6 @@ spec:
               # and "path". The quotes inside the message arrive escaped, hence
               # the doubled backslashes in the pattern.
               - grok:
-                  name: local/authentik
                   pattern: '\\"remote\\": \\"::ffff:%{IPV4:source_ip}'
                   apply_on: Line.Raw
                 statics:

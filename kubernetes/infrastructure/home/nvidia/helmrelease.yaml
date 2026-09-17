@@ -70,3 +70,30 @@ spec:
     affinity: null
     # Pascal P100: fail loudly if no GPU rather than silently scheduling none.
     failOnInitError: true
+    # Time-slicing: the P100 is the fleet's only GPU and it now backs TWO
+    # InferenceServices (qwen36-35b chat + nomic-embed-v15 embeddings). Without
+    # this block the plugin advertises a single exclusive `nvidia.com/gpu` seat,
+    # so whichever pod schedules first takes the GPU and the second stays
+    # Pending on `Insufficient nvidia.com/gpu` forever. With replicas: 2 the node
+    # advertises `nvidia.com/gpu: 2` and the scheduler will co-locate both pods.
+    # This is pure driver-side time-slicing, though: each pod still sees the
+    # WHOLE device with no memory partitioning, so nothing enforces that the two
+    # models' VRAM actually fits together — that budget is the manifest author's
+    # responsibility (see llmkube-models/nomic-embed-v15.yaml).
+    # `config.map` REPLACES the plugin's built-in default config file rather than
+    # merging into it, so the built-in content (`version: v1` plus
+    # `flags.migStrategy: none`) is written out in full alongside the sharing
+    # block; dropping either key would change plugin behaviour beyond slicing.
+    # `config.default` names which map key is the active profile.
+    config:
+      map:
+        default: |-
+          version: v1
+          flags:
+            migStrategy: none
+          sharing:
+            timeSlicing:
+              resources:
+                - name: nvidia.com/gpu
+                  replicas: 2
+      default: default

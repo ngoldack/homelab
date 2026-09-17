@@ -190,10 +190,6 @@ data "talos_machine_configuration" "controlplane" {
         }
       }),
       local.csi_kubelet_extra_mounts,
-      # Pull-through-cache mirrors for the public registries — see the
-      # registry_mirrors local above for why these exist and why they are
-      # home-only.
-      local.registry_mirrors,
       # Lets a pod obtain a scoped Talos API credential by creating a
       # ServiceAccount CR (serviceaccounts.talos.dev). Enabling this is what
       # makes Talos install and serve that CRD at all, and it runs a
@@ -246,6 +242,10 @@ data "talos_machine_configuration" "controlplane" {
     contains(var.nodes[keys(local.controlplane_instances)[0]].extensions, "siderolabs/tailscale") ? [
       local.tailscale_config_patch
     ] : [],
+    # Pull-through-cache mirrors for the public registries — see the
+    # registry_mirrors local above for why these exist and why they are
+    # home-only.
+    local.registry_mirrors,
     # No machine.install.extensions patch: that field has had no effect
     # since Talos 1.10 (kept only so pre-1.10 configs still validate).
     # var.talos_default_extensions is instead baked into the boot image
@@ -303,8 +303,6 @@ data "talos_machine_configuration" "worker" {
         }
       }),
       local.csi_kubelet_extra_mounts,
-      # Pull-through-cache mirrors — same as the control plane above.
-      local.registry_mirrors,
     ],
     each.value.gpu ? [
       yamlencode({
@@ -353,6 +351,8 @@ data "talos_machine_configuration" "worker" {
         }
       }),
     ] : [],
+    # Pull-through-cache mirrors — same as the control plane above.
+    local.registry_mirrors,
   )
 }
 

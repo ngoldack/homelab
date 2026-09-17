@@ -1,0 +1,29 @@
+# Kyverno's ClusterPolicies. Applied by their own Flux Kustomization
+# (kubernetes/clusters/home/kyverno-policies.yaml) which dependsOn kyverno, so
+# the kyverno.io CRDs are established before these objects are applied — the
+# engine Kustomization itself cannot carry them (CRD-before-CR ordering).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/kyverno-policies
+  prune: true
+  wait: false
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    - name: kyverno
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

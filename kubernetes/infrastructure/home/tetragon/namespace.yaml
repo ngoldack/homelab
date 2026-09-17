@@ -1,0 +1,8 @@
+# Tetragon's namespace. No gateway labels (nothing routes to it) and no PSA
+# labels: Tetragon is a privileged eBPF daemon that must join the host PID and
+# network namespaces to see host activity — the same reason it is excluded
+# from the Kyverno pod-hardening policies.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tetragon

@@ -1,0 +1,57 @@
+# Tetragon — eBPF runtime-security observability (chart 1.7.1, pinned).
+#
+# Role in this cluster: see kernel-level events the network and admission
+# layers cannot (process exec, file access on sensitive paths) and, only where
+# it is provably safe, block them. The tracing policies live in the separate
+# tetragon-policies Kustomization because the cilium.io TracingPolicy CRDs come
+# from this release.
+#
+# Security posture is deliberately observability-first: a runtime blocker that
+# fires on legitimate API traffic is an outage generator, so the one blocking
+# policy (service-account token reads) is scoped to the namespace that cannot
+# reach the API server at all — see tracingpolicies.yaml.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tetragon
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: tetragon
+      version: "1.7.1"
+      sourceRef:
+        kind: HelmRepository
+        name: cilium
+      interval: 1h
+  targetNamespace: tetragon
+  releaseName: tetragon
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    tetragon:
+      # Metrics on :2112 for the monitoring scrape (chart default address).
+      prometheus:
+        enabled: true
+      # gRPC stays on the default unix socket: a CLI would exec into the pod
+      # rather than need a TCP listener policed by network policy.
+      grpc:
+        enabled: true
+      # Talos is immutable; /proc is the host's procfs (the daemonset runs with
+      # hostPID/privileged so this is the host view).
+      hostProcPath: "/proc"
+    # Events go to the export-stdout container's log, which is what makes them
+    # visible to `kubectl logs`.
+    export:
+      mode: "stdout"
+    # No runtime-hook daemonset: it installs hooks on a writable host root,
+    # which an immutable Talos node does not have.
+    rthooks:
+      enabled: false

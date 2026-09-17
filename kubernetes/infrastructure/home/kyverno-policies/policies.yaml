@@ -1,0 +1,277 @@
+# Kyverno cluster policies — Audit-only on purpose.
+#
+# Why audit: this cluster is reconciled from Git by Flux, so a blocking policy
+# fails the *reconcile* of whatever manifest it catches, not a human's
+# `kubectl apply`. Turning these to Enforce is a per-namespace decision made
+# once PolicyReports for that namespace are clean — the enforcement switch is
+# a one-line change (`validationFailureAction: Enforce`) applied deliberately,
+# never as a side effect of this rollout. Pod Security Admission labels on the
+# namespaces carry the actual pod-hardening enforcement in the meantime.
+#
+# Scope: the app namespaces (authentik, paperless, immich, langfuse, hindsight,
+# headlamp, hermes, agentgateway, aigateway, registry, llmkube-system,
+# talos-backup, unpoller, homelab-infra-metrics, …). The platform namespaces
+# below are excluded because they legitimately need what these policies
+# prohibit — the CNI/CSI/device-plugin plane uses host namespaces and hostPath
+# by design, monitoring and the image builder mount host paths, the media
+# stack's VLAN egress needs NET_ADMIN, and Flux/Kyverno must be able to write
+# the policy objects themselves:
+#   kube-system, kube-node-lease, kube-public, cilium-secrets, flux-system,
+#   kyverno, monitoring, network, cert-manager, cnpg-system,
+#   clickhouse-operator, seaweedfs-operator, valkey-operator-system,
+#   truenas-csi, nvidia-device-plugin, buildkit, agent-sandbox-system,
+#   hermes-sandbox, media, tetragon, crowdsec
+---
+# Explicit image tags (or digests) only. Two rules so the report distinguishes
+# "no tag at all" (implicit :latest) from "literally :latest" — the same shape
+# as the upstream disallow-latest-tag policy. Autogen extends the Pod rule to
+# the pod controllers Flux actually applies (Deployment/StatefulSet/Job/…).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow latest / untagged images
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: "Image must carry an explicit tag or digest (not an implicit :latest)."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: validate-latest-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: "Using the mutable `latest` tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+---
+# Host namespaces (hostNetwork/hostPID/hostIPC) escape pod isolation entirely:
+# a hostNetwork pod shares the node's network namespace, and hostPID can read
+# every process on the node. The `=(...)` anchors let the fields be absent
+# (their Kubernetes default is false) instead of failing the pattern.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-host-namespaces
+  annotations:
+    policies.kyverno.io/title: Restrict host namespaces
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: host-namespaces-false
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: "hostNetwork, hostPID and hostIPC must be false."
+        pattern:
+          spec:
+            =(hostNetwork): false
+            =(hostPID): false
+            =(hostIPC): false
+---
+# hostPath volumes mount a node directory into the pod — the standard way a
+# compromised workload reaches the host. X() is Kyverno's deny anchor: the
+# pattern only matches when the field is ABSENT.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-host-path
+  annotations:
+    policies.kyverno.io/title: Disallow hostPath volumes
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: no-host-path-volumes
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: "hostPath volumes are not allowed."
+        pattern:
+          spec:
+            =(volumes):
+              - X(hostPath): "null"
+---
+# Privileged containers get every capability and device on the node, and
+# allowPrivilegeEscalation lets a setuid binary re-gain them. Both default to
+# false in the securityContext, hence the `=(...)` anchors.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow privileged containers
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: privileged-and-escalation-false
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: "privileged and allowPrivilegeEscalation must be false."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): false
+                  =(allowPrivilegeEscalation): false

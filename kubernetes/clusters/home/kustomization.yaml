@@ -66,3 +66,9 @@ resources:
   # Admission policy engine (Kyverno, audit-only policies + PSA labels). No
   # app depends on it: it observes rather than gates.
   - kyverno.yaml
+  # The policies are a separate Kustomization so the kyverno.io CRDs exist
+  # before the ClusterPolicy objects are applied (CRD-before-CR ordering).
+  - kyverno-policies.yaml
+  # eBPF runtime security (observability-first). Like Kyverno it observes
+  # rather than gates, so nothing depends on it.
+  - tetragon.yaml

@@ -1,0 +1,11 @@
+# Tetragon's chart is published in the Cilium Helm repository at
+# https://helm.cilium.io (tetragon.io's install guide points there), NOT on
+# cilium.github.io — that host serves the Cilium project's docs, not charts.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cilium
+  namespace: flux-system
+spec:
+  interval: 2h
+  url: https://helm.cilium.io

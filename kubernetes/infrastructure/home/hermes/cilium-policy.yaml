@@ -146,16 +146,17 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # Dashboard OIDC (discovery, authorization-code token exchange, ID-token
-    # JWKS) all go to the issuer host, which MUST stay the browser-visible
-    # URL (https://authentik.ngoldack.de/application/o/hermes-dashboard/) so
-    # the ID token's `iss` matches what the browser used. From inside the pod
-    # that hostname resolves to the Hetzner edge address (verified: getent
-    # hosts in the gateway pod → 2.28.31.116), and toFQDNs rules are inert in
-    # this cluster, so the /32 is the only workable form.
-    - toCIDRSet:
-        - cidr: 2.28.31.116/32
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
+    # Dashboard OIDC: discovery, authorization-code token exchange and
+    # ID-token JWKS go to the issuer hostname
+    # (https://authentik.ngoldack.de/application/o/hermes-dashboard/), an
+    # edge URL rather than an in-cluster endpoint, so the calls traverse the
+    # Gateway. Cilium therefore checks them as THIS pod's egress against the
+    # route's backend pod — the portal-bridge in the authentik namespace, not
+    # `world` — and the matching ingress rule in
+    # ../../authentik/cilium-allowlist.yaml. Both halves are required; with
+    # only a CIDR rule the edge answers 403 "Access denied" (verified: the
+    # discovery fetch failed that way until this pair existed). Same shape as
+    # ../../headlamp/cilium-allowlist.yaml.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik

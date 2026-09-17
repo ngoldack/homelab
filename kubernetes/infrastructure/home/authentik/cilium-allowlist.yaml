@@ -51,6 +51,15 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: paperless
+    # The Hermes dashboard federates natively against this namespace's OIDC
+    # provider and points its issuer at the edge hostname, so its server-side
+    # discovery/token/JWKS calls traverse the Gateway and are checked against
+    # the portal-bridge pod with the hermes pod's identity — the same pair
+    # rule described above (../hermes/cilium-policy.yaml holds the egress
+    # half).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
     # Hindsight's control-plane UI is published through this namespace's proxy outpost.
     - fromEndpoints:
         - matchLabels:

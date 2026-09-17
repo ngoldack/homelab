@@ -75,12 +75,13 @@ spec:
             description: "Parse authentik's JSON request log lines"
             filter: "evt.Line.Labels.type == 'authentik'"
             nodes:
-              # authentik logs structured JSON with - at least for the request
-              # lines - a spans array carrying "remote" (the client address)
-              # and "path". The quotes inside the message arrive escaped, hence
-              # the doubled backslashes in the pattern.
+              # Each line is CRI-wrapped ("<timestamp> stdout F {...}"), and in
+              # the log file the request span's fields are NOT escaped (only the
+              # nested http_headers JSON is), so this is a plain match on
+              # "path" + "remote" — verified against a real line from the
+              # authentik server pod.
               - grok:
-                  pattern: '\\"remote\\": \\"::ffff:%{IPV4:source_ip}'
+                  pattern: '"path":"%{DATA:request_path}","remote":"::ffff:%{IPV4:source_ip}"'
                   apply_on: Line.Raw
                 statics:
                   - meta: log_type
@@ -89,6 +90,8 @@ spec:
                     value: authentik
                   - meta: source_ip
                     expression: "evt.Parsed.source_ip"
+                  - meta: request_path
+                    expression: "evt.Parsed.request_path"
         s00-raw:
           authentik-raw.yaml: |
             name: local/authentik-raw

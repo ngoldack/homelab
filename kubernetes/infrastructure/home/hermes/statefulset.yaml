@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "1"
+        hermes.ngoldack.de/config-rev: "2"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -42,6 +42,11 @@ spec:
         runAsNonRoot: true
         runAsUser: 10000
         fsGroup: 10000
+        # The data PVC holds thousands of files on a slow NFS-class backend:
+        # a recursive fsGroup chown on every pod start costs minutes of
+        # downtime per rollout (observed twice live), and the volume's
+        # ownership is already correct after the first pass.
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       containers:

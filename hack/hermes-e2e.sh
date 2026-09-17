@@ -35,8 +35,11 @@ NODE_SELECTOR=workload.hermes.io/sandbox=true
 MODEL="${HERMES_E2E_MODEL:-local}"
 SENTINEL=E2E_GUEST_MARKER
 HOST_KERNEL="${HERMES_E2E_HOST_KERNEL:-6.18.34-talos}"
-POLL_TRIES="${HERMES_E2E_POLL_TRIES:-60}"
+POLL_TRIES="${HERMES_E2E_POLL_TRIES:-450}"
 POLL_SLEEP="${HERMES_E2E_POLL_SLEEP:-2}"
+# The chat call must outlast the provider timeout (configmap.yaml) so a slow
+# local model can still finish a turn; keep MAX_TIME >= POLL_TRIES*POLL_SLEEP.
+MAX_TIME="${HERMES_E2E_MAX_TIME:-900}"
 KUBECTL=(kubectl --kubeconfig "$ROOT/kubeconfig-home.yaml")
 TMP_DIR="$(mktemp -d)"
 REQUEST_FILE="$TMP_DIR/request.json"
@@ -54,7 +57,7 @@ cleanup_claims() {
   trap - EXIT INT TERM
   set +e
   if [ -n "$CURL_PID" ]; then kill "$CURL_PID" 2>/dev/null; fi
-  "${KUBECTL[@]}" -n "$SANDBOX_NS" delete "$CLAIM" -l "$OWNER_LABEL" --ignore-not-found >/dev/null 2>&1
+  "${KUBECTL[@]}" -n "$SANDBOX_NS" delete "$CLAIM" -l "$OWNER_SELECTOR" --ignore-not-found >/dev/null 2>&1
   rm -rf "$TMP_DIR"
   exit "$rc"
 }
@@ -86,6 +89,14 @@ if [ -z "${HERMES_E2E_OWNER:-}" ]; then
   if [ -n "$owner_env" ]; then OWNER_LABEL="agent-sandbox.hermes/owner=$owner_env"; fi
 fi
 
+# The owner label is the plugin's configured gateway id (AGENT_SANDBOX_GATEWAY_ID,
+# = "hermes") on the plugin build that reads it, and the pod hostname
+# ("hermes-0") on the earlier build that stamps resolve_gateway_id() — a
+# deployed image may be either, so poll and clean up as a SET of both.
+POD_HOSTNAME="$( "${KUBECTL[@]}" -n "$NS" get pod hermes-0 -o jsonpath='{.metadata.name}' 2>/dev/null || true)"
+POD_HOSTNAME="${POD_HOSTNAME:-hermes-0}"
+OWNER_SELECTOR="agent-sandbox.hermes/owner in (${OWNER_LABEL##*=},${POD_HOSTNAME})"
+
 echo "== pre-flight: no stray sandbox claims =="
 STRAYS=""
 if ! STRAYS="$("${KUBECTL[@]}" -n "$SANDBOX_NS" get "$CLAIM" -o name)"; then
@@ -114,8 +125,8 @@ printf '{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":false
 
 (
   set +e
-  "${KUBECTL[@]}" -n "$NS" exec -i hermes-0 -- env "API_KEY=$API_KEY" sh -c \
-    'curl -s --max-time 420 -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d @- -w "\n%{http_code}" http://127.0.0.1:8642/v1/chat/completions' \
+  "${KUBECTL[@]}" -n "$NS" exec -i hermes-0 -- env "API_KEY=$API_KEY" "MAX_TIME=$MAX_TIME" sh -c \
+    'curl -s --max-time "$MAX_TIME" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d @- -w "\n%{http_code}" http://127.0.0.1:8642/v1/chat/completions' \
     < "$REQUEST_FILE" > "$RESPONSE_FILE"
   echo $? > "$CURL_RC_FILE"
 ) &
@@ -128,7 +139,7 @@ SANDBOX_RUNTIME=""
 SANDBOX_NODE=""
 for ((i = 0; i < POLL_TRIES; i++)); do
   claim_names=""
-  if ! claim_names="$("${KUBECTL[@]}" -n "$SANDBOX_NS" get "$CLAIM" -l "$OWNER_LABEL" -o name 2>/dev/null)"; then
+  if ! claim_names="$("${KUBECTL[@]}" -n "$SANDBOX_NS" get "$CLAIM" -l "$OWNER_SELECTOR" -o name 2>/dev/null)"; then
     claim_names=""
   fi
   if [ -n "$claim_names" ]; then
@@ -164,9 +175,14 @@ for ((i = 0; i < POLL_TRIES; i++)); do
 done
 
 if [ -z "$CLAIM_HIT" ]; then
-  echo "FAIL: no sandbox claim labeled $OWNER_LABEL appeared during the turn." >&2
+  echo "FAIL: no sandbox claim matching '$OWNER_SELECTOR' appeared during the turn." >&2
   echo "      The gateway most likely ran the task locally (terminal.backend is not" >&2
   echo "      agent_sandbox) or the plugin never created the claim." >&2
+  if [ -s "$RESPONSE_FILE" ]; then
+    echo "--- model response (first 1000 bytes) ---" >&2
+    head -c 1000 "$RESPONSE_FILE" >&2
+    echo >&2
+  fi
   dump_sandbox_state
   exit 1
 fi
@@ -295,7 +311,7 @@ fi
 
 leftover_claims=""
 for ((i = 0; i < POLL_TRIES; i++)); do
-  if ! leftover_claims="$("${KUBECTL[@]}" -n "$SANDBOX_NS" get "$CLAIM" -l "$OWNER_LABEL" -o name 2>/dev/null)"; then
+  if ! leftover_claims="$("${KUBECTL[@]}" -n "$SANDBOX_NS" get "$CLAIM" -l "$OWNER_SELECTOR" -o name 2>/dev/null)"; then
     leftover_claims=""
   fi
   if [ -z "$leftover_claims" ]; then break; fi

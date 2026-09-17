@@ -138,6 +138,35 @@ unready pool.
     | base64 -d | xxd -p
   ```
 
+### Model choice
+`model` names either the default route of the `agentgateway` provider or one of
+the three Synthetic tiers — one gateway Service and one JWT for all of them,
+selected purely by path/model id:
+
+| Alias (`model`) | Gateway path | Upstream model | Live latency |
+|---|---|---|---|
+| `local` (default) | `/v1` → `local-p100` | `qwen36-35b` on the P100 | ~125 s/call |
+| `syn-small` | `/v1/synthetic-small` | `zai-org/GLM-4.7-Flash` | ~2.6 s |
+| `syn-large` | `/v1/synthetic-large` | `zai-org/GLM-5.3-Flash` | ~4.0 s |
+| `syn-deepseek` | `/v1/synthetic-deepseek` | `deepseek-ai/DeepSeek-V4.1-Flash` | ~9.6 s |
+
+All three tiers are declared in `hermes/configmap.yaml` (`providers.syn-*`,
+each with its own tier-suffixed `base_url`, `key_env: OPENAI_API_KEY` and an
+**explicit** `models:` list — Synthetic answers `GET <tier>/models` with 400, so
+discovery can never populate the catalog; the ids are Synthetic's own aliases,
+not the upstream names). Two ways to select one, plus the global default:
+
+- **Per request** (API server): pass Synthetic's model id *and* the provider —
+  `{"model":"syn:small:text","provider":"custom:syn-small", …}`. The body's
+  `provider` always wins, so no other caller is affected.
+- **By alias**: `{"model":"syn-small", …}` with no `provider` resolves through
+  `platforms.api_server.extra.model_routes` (`syn-small` → `{model:
+  syn:small:text, provider: custom:syn-small}`); the same mapping is what
+  `GET /v1/models` advertises.
+- **Global default**: the dashboard's **Models** page — the only path that
+  moves the default off `local`, which is deliberately left as the P100
+  (`provider: custom:agentgateway`, `model: local`).
+
 ### Dashboard exposure (edge + authentik SSO)
 The dashboard runs its own OIDC login
 (`plugins/dashboard_auth/self_hosted`, authorization-code + PKCE as a
@@ -318,6 +347,7 @@ manual per the steps above.
 | Model calls fail ("offline" / "can't reach the model provider") | Check the *provider* first: `grep -E '^provider:' /opt/data/config.yaml` must say `custom:agentgateway` — with `auto` Hermes calls OpenRouter, which the egress allowlist blocks. Then the network path: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
 | agentgateway rejects the call 401 "token header is malformed" | The `providers.agentgateway` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
 | Model turn interrupted ("waiting for model response") | The 600 s budget is gone: keep `providers.agentgateway.request_timeout_seconds: 600` **and** the `HERMES_API_TIMEOUT=600` env in the StatefulSet (a single call is ~125 s and tool turns take minutes; on v2026.9.7 the env is what the client actually reads for a named custom provider — see the Operation bullets) |
+| A Synthetic call behaves like the P100 (≈40 s, `qwen36-35b`-class answer) | The tier did not route and the request fell back to the global default. Check (a) the provider name matches the one the request/route sent (`custom:syn-small`/`-large`/`-deepseek`), (b) `providers.syn-*` still carries its own `base_url` **with the `/v1/synthetic-<tier>` suffix** — without it the call hits `/v1`, i.e. the P100 — plus `key_env: OPENAI_API_KEY` and an explicit `models:` list (Synthetic rejects `GET <tier>/models` with 400, so a missing list leaves the provider with no catalog), and (c) the pod actually restarted onto the new config: the same `config-rev`/annotation bump rule as above (`grep -A3 'syn-small:' /opt/data/config.yaml`). The tiers answer in single-digit seconds; the P100 id or ~40 s means fallback, not the tier |
 | Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/health` answers from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). **Do not poll `/api/public/traces`** — this deployment is Langfuse v4 *events_only*, where that endpoint 404s with an "events_only mode" message that parses as an empty result; read `/api/public/v2/observations` instead. Events are batched and the SDK sends no `x-langfuse-ingestion-version: 4`, so allow ~5 min before concluding anything |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |

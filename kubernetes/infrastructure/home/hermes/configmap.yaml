@@ -19,7 +19,7 @@ data:
   # onto the data PVC only when this value differs from the revision recorded
   # at /opt/data/.config-rev; bump it together with the pod-template
   # annotation hermes.ngoldack.de/config-rev to roll the pod.
-  config-rev: "5"
+  config-rev: "6"
   config.yaml: |
     # LLM via the agentgateway (agentgateway.dev data plane, ns agentgateway):
     # custom OpenAI-compatible provider, base_url at the in-cluster Service.
@@ -65,6 +65,58 @@ data:
         # HERMES_API_TIMEOUT=600 env in the StatefulSet. Keep both: this is the
         # canonical declaration and the env is the live knob.
         request_timeout_seconds: 600
+      # Synthetic's hosted tiers, served by the SAME agentgateway Service but on
+      # tier-prefixed paths (/v1/synthetic-<tier>/chat/completions) that the
+      # gateway routes to Synthetic's upstream (verified live 2026-09-17:
+      # 200 with upstream model zai-org/GLM-4.7-Flash / zai-org/GLM-5.3-Flash /
+      # deepseek-ai/DeepSeek-V4.1-Flash). Same Gateway-scoped Strict JWT, so
+      # key_env points at the OpenRouter-style OPENAI_API_KEY JWT as well.
+      # `models:` is declared explicitly because these tiers are fixed-model
+      # passthroughs: GET <tier>/models is rejected 400 by Synthetic, so
+      # discovery can never populate the provider's catalog (and the model ids
+      # are Synthetic's own aliases, not the upstream names).
+      # 120 s instead of the P100's 600 s: these are remote, non-GPU-local
+      # calls that complete in seconds (single digits); a longer budget would
+      # only hide a silent fallback to the P100.
+      syn-small:
+        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-small
+        key_env: OPENAI_API_KEY
+        request_timeout_seconds: 120
+        models:
+          - "syn:small:text"
+      syn-large:
+        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-large
+        key_env: OPENAI_API_KEY
+        request_timeout_seconds: 120
+        models:
+          - "syn:large:text"
+      syn-deepseek:
+        base_url: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-deepseek
+        key_env: OPENAI_API_KEY
+        request_timeout_seconds: 120
+        models:
+          - "hf:deepseek-ai/DeepSeek-V4.1-Flash"
+    # API-server routes for the Synthetic tiers. Gateway API clients (and any
+    # OpenAI-compatible caller that only sends a plain `model`) resolve the
+    # alias here to a {model, provider} pair, so `model: syn-small` reaches
+    # Synthetic without a `provider` field; the same mapping is what
+    # GET /v1/models advertises (alias + resolved model). Keyed by alias, NOT
+    # by upstream model id. The default provider/model above are deliberately
+    # untouched: the P100 stays the fallback for every request that names
+    # neither an alias nor a provider.
+    platforms:
+      api_server:
+        extra:
+          model_routes:
+            syn-small:
+              model: "syn:small:text"
+              provider: "custom:syn-small"
+            syn-large:
+              model: "syn:large:text"
+              provider: "custom:syn-large"
+            syn-deepseek:
+              model: "hf:deepseek-ai/DeepSeek-V4.1-Flash"
+              provider: "custom:syn-deepseek"
     plugins:
       # observability/langfuse ships bundled in the base image and is inert
       # without the langfuse SDK (baked in by ../image-builds/

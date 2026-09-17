@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "5"
+        hermes.ngoldack.de/config-rev: "6"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300

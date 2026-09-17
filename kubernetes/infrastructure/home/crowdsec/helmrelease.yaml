@@ -53,17 +53,20 @@ spec:
           enabled: false
     agent:
       enabled: true
-      # Node-local: the agent must read container logs from the host.
+      # Log acquisitions. Talos keeps container logs only at
+      # /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log — the kubelet's
+      # /var/log/containers symlink farm does not exist there, so the chart's
+      # pod-name shorthand (which builds /var/log/containers/<pod>_<ns>_*.log
+      # patterns) matches nothing and the agent parses zero lines. These are
+      # raw file datasources instead, with the labels the parser filters on.
       hostVarLog: true
-      # Pod log acquisitions — one entry per app worth parsing. The agent
-      # resolves these to the node's pod log files.
-      acquisition:
-        - namespace: authentik
-          podName: authentik-server
-          program: authentik
-        - namespace: authentik
-          podName: authentik-worker
-          program: authentik
+      additionalAcquisition:
+        - source: file
+          filenames:
+            - /var/log/pods/authentik_authentik-server-*/*/*.log
+            - /var/log/pods/authentik_authentik-worker-*/*/*.log
+          labels:
+            type: authentik
     config:
       parsers:
         s01-parse:

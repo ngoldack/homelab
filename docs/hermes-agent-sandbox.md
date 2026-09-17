@@ -127,10 +127,23 @@ before adopting new fields.
 | `task check` fails | `yamllint`/`tofu fmt`/`kustomize`/sops — run at repo root with `SOPS_AGE_KEY_FILE` set |
 
 ## Capacity
-One warm + one active sandbox maximum (node 6 vCPU / 12 GiB; sandbox
-limits 4 CPU/5 GiB). Warm pool `replicas: 1`. To support concurrency,
-raise the VM RAM first (plan: 12 GiB, then 24 GiB), then re-derive the
-limits — never raise replicas without the RAM.
+One warm + one active sandbox maximum, sized from the **shared** node's
+headroom rather than a dedicated VM: `wk-main-performance` gives 16 CPU /
+48 GiB while qwen36-35b (4 CPU / 8 GiB requests), buildkitd (12 CPU /
+20 GiB limits, mostly idle) and ~25 other pods live there too. Warm pool
+`replicas: 1`; sandbox limits 4 CPU / 5 GiB.
+
+The node is deliberately mixed-use (operator decision 2026-09-17, replacing
+the 2026-09-13 dedicated-worker carve): the `workload.hermes.io/sandbox`
+label only **attracts** sandbox pods — it excludes nothing, and no taint is
+applied. Accepted consequences: a sandbox session competes with GPU
+inference and the image builder for CPU/RAM, so a runaway session can
+starve inference and an inference burst can starve or OOM-kill a session;
+a host-side Kata/QEMU escape would land on a node that also runs
+`sandbox-router`, nvidia device plugin, tetragon, crowdsec and the
+`truenas-csi` node plugin. To support more concurrency, raise real headroom
+first (more RAM on the VM, or move a tenant off it), then re-derive the
+limits — never raise replicas without the capacity.
 
 ## Backup
 `data-hermes-0` PVC (10 GiB, `truenas-fast-nfs`) is covered by the repo's

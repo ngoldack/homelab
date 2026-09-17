@@ -1,7 +1,7 @@
 # hermes-go — the ONLY SandboxTemplate sandboxes in hermes-sandbox may use.
 #
 # WHY: every sandbox must be a Kata-isolated, credential-less, non-root pod
-# pinned to the dedicated sandbox worker; the ValidatingAdmissionPolicy
+# label-pinned to the shared Kata-capable worker; the ValidatingAdmissionPolicy
 # (agent-sandbox/policies/secure-hermes-sandbox) enforces exactly this shape,
 # so the template defines the one shape that passes. Every field is grounded
 # in `kubectl explain sandboxtemplate.spec --recursive` of the installed

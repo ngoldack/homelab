@@ -2,8 +2,11 @@
 #
 # WHY: task latency is dominated by image pull + Kata guest boot; a warm pod
 # makes the first command start in seconds. Exactly ONE warm sandbox: the
-# worker has 12 GiB RAM and each sandbox can draw up to its 5 GiB limit, so
-# one warm + one active is the ceiling that fits.
+# node is mixed-use (GPU inference requests ~12 GiB, the image builder is
+# capped at 20 GiB) and each sandbox can draw up to its 5 GiB limit, so one
+# warm + one active is the ceiling its headroom supports — a capacity
+# ceiling, not an exclusivity guarantee (there is no taint; other workloads
+# schedule there too).
 #
 # Fields grounded in `kubectl explain sandboxwarmpool.spec --recursive` of
 # the installed v1beta1 CRD.

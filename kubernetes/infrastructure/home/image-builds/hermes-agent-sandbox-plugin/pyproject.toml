@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+# Exact pins: the image build runs `pip install` with no lock file, so every
+# version that lands in the gateway image is fixed here.
+# setuptools 84.0.0 = latest release on PyPI at 2026-09-17.
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,15 +12,26 @@ description = "Hermes terminal backend that runs commands in a Kubernetes Agent 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
+# Exact pins (provenance, checked 2026-09-17):
+#   k8s-agent-sandbox==1.0.2 — the SDK release the plugin is written against;
+#     its own metadata (PyPI JSON) declares the `grpc` extra as
+#     grpcio>=1.83.0, protobuf>=7.36.1.
+#   grpcio==1.84.0 / protobuf==7.36.1 — latest PyPI releases, and the ones the
+#     SDK's `[grpc]` extra resolves to; both satisfy that extra's floors.
+#   cryptography==50.0.1 — latest PyPI release; used for Ed25519 seed loading
+#     (config.load_token / token_file_readable).
 dependencies = [
     "k8s-agent-sandbox==1.0.2",
-    "cryptography>=42",
-    "grpcio>=1.60",
-    "protobuf>=4",
+    "cryptography==50.0.1",
+    "grpcio==1.84.0",
+    "protobuf==7.36.1",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+# Test-only extra (never installed into the gateway image: the Dockerfile
+# installs the package without extras). pytest 9.1.1 = latest PyPI at
+# 2026-09-17.
+test = ["pytest==9.1.1"]
 
 # Hermes discovers installed plugins via this entry-point group (plugins.py
 # discover_entrypoint_manifests): no file placement under /opt/data needed.
@@ -31,3 +45,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: live-cluster tests (kubectl + Router + Kata sandbox)"]
+addopts = "-rs"

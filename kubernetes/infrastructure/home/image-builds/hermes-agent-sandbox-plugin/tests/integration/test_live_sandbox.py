@@ -154,13 +154,31 @@ def test_file_roundtrip_through_authenticated_router(sandbox_env, config):
 
 
 def test_claim_deleted_after_cleanup(sandbox_env, claims):
-    from hermes_agent_sandbox.transport import OWNER_LABEL, _parse_iso_z
+    from hermes_agent_sandbox.transport import OWNER_LABEL
 
+    # Identity must be captured BEFORE cleanup(): cleanup() clears
+    # _claim_name/_sandbox_name, so asserting against them afterwards passes
+    # no matter what the teardown actually did.
+    gateway_id = claims.config.resolve_gateway_id()
+    claim_name = sandbox_env._claim_name
     pod = sandbox_env._sandbox_name
+    assert claim_name, "no claim recorded before cleanup"
+    assert pod, "no adopted sandbox name recorded before cleanup"
     sandbox_env.cleanup()
     # Claim must be gone (SDK delete), and the pool still has its warm pod.
-    names = claims.list_owned_claims(claims.config.resolve_gateway_id())
-    assert all(n.name != sandbox_env._claim_name for n in names)
+    names = claims.list_owned_claims(gateway_id)
+    assert claim_name not in {n.name for n in names}, (
+        f"claim {claim_name} still owned by {gateway_id} after cleanup: "
+        f"{[n.name for n in names]}"
+    )
+    strays = kubectl(
+        "-n", HERMES_SANDBOX_NS, "get", "sandboxclaims",
+        "-l", f"{OWNER_LABEL}={gateway_id}", "-o", "name",
+    )
+    assert claim_name not in strays, f"claim {claim_name} still present: {strays!r}"
+    assert f"pod/{pod}" not in kubectl(
+        "-n", HERMES_SANDBOX_NS, "get", "pods", "-o", "name"
+    ).split(), f"sandbox pod {pod} survived cleanup"
     out = kubectl("-n", HERMES_SANDBOX_NS, "get", "sandboxwarmpool", "hermes-go",
                   "-o", "jsonpath={.status.replicas}")
     # Warm pool self-heals back toward 1 after claim teardown.

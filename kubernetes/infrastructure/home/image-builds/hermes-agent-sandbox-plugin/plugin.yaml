@@ -10,11 +10,9 @@ kind: backend
 manifest_version: 2
 license: Apache-2.0
 homepage: https://github.com/NousResearch/hermes-agent
-python_dependencies:
-  - k8s-agent-sandbox==1.0.2
-  - cryptography>=42
-  - grpcio>=1.60
-  - protobuf>=4
+# No python_dependencies here: pyproject.toml is the single authority for the
+# dependency set (this manifest is not even copied into the image — the
+# Dockerfile installs the package from pyproject.toml).
 requires_env:
   - AGENT_SANDBOX_ROUTER_URL
   - AGENT_SANDBOX_ROUTER_TOKEN_FILE

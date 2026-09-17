@@ -55,6 +55,15 @@ def _raw_seed(path: str) -> bytes:
 def config() -> AgentSandboxConfig:
     from hermes_agent_sandbox.config import from_env
 
+    # Missing env skips the module rather than failing deep inside a fixture;
+    # hack/hermes-plugin-integration.sh exports all of these.
+    _required_env("AGENT_SANDBOX_ROUTER_URL")
+    token_file = _required_env("AGENT_SANDBOX_ROUTER_TOKEN_FILE")
+    if not Path(token_file).is_file():
+        pytest.skip(
+            f"AGENT_SANDBOX_ROUTER_TOKEN_FILE={token_file} does not exist — "
+            "live integration requires the cluster"
+        )
     return from_env()
 
 

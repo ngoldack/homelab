@@ -1,0 +1,2 @@
+[hermes_agent.plugins]
+agent_sandbox = hermes_agent_sandbox.provider

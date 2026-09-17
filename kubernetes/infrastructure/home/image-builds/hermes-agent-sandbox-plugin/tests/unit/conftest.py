@@ -50,3 +50,18 @@ def env_with_router(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENT_SANDBOX_ROUTER_URL", "http://router:8080")
     monkeypatch.setenv("AGENT_SANDBOX_ROUTER_TOKEN_FILE", str(tok))
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def fresh_sandbox_capacity():
+    """Give every unit test a pristine process-wide sandbox capacity gate.
+
+    Unit tests never run Hermes' session teardown, so the one-slot semaphore
+    would otherwise be drained by the first test that executes a command and
+    starve every later test in the same process.
+    """
+    import threading
+
+    from hermes_agent_sandbox import environment
+
+    environment._CAPACITY = threading.Semaphore(environment._MAX_CONCURRENT_SANDBOXES)

@@ -29,10 +29,14 @@ from . import redaction
 from .config import from_env
 from .environment import AgentSandboxEnvironment
 from .errors import AgentSandboxError, ConfigError
+from .transport import KubeClaimsClient
 
 log = logging.getLogger(__name__)
 
 BACKEND_NAME = "agent_sandbox"
+
+# One startup orphan sweep per process (see _sweep_orphans_once).
+_reconciled = False
 
 # One truthful, bounded description of the execution environment. It is
 # rendered into every new session prompt (env_description + system-prompt
@@ -54,6 +58,26 @@ SANDBOX_ENV_FACTS = (
 )
 
 
+def _sweep_orphans_once() -> None:
+    """Delete claims a previous gateway instance left behind, exactly once.
+
+    An orphan claim holds the warm pool's single sandbox slot until its
+    shutdownTime (~4 h), so the sweep must run at startup — and must never
+    prevent the backend from registering, hence the blanket catch.
+    """
+    global _reconciled
+    if _reconciled:
+        return
+    _reconciled = True
+    try:
+        cfg = from_env()
+        deleted = KubeClaimsClient(cfg).reconcile_orphans(cfg.resolve_gateway_id())
+        if deleted:
+            log.info("agent_sandbox startup sweep reclaimed %d orphan claim(s)", len(deleted))
+    except Exception as exc:  # noqa: BLE001 - startup must never fail on cleanup
+        log.warning("agent_sandbox orphan reconcile at startup failed: %s", exc)
+
+
 def register(ctx) -> None:
     """Hermes plugin entry-point contract (plugins_loader.py): the loader
     imports the entry-point MODULE and calls ``register(ctx)`` on it —
@@ -64,6 +88,7 @@ def register(ctx) -> None:
         SANDBOX_ENV_FACTS,
         position="after_memory",
     )
+    _sweep_orphans_once()
 
 
 class AgentSandboxProvider(TerminalEnvironmentProvider):
@@ -152,23 +177,35 @@ class AgentSandboxProvider(TerminalEnvironmentProvider):
 
     # ---- doctor ----
     def doctor_checks(self) -> List[Tuple[bool, str, str]]:
-        """hermes doctor rows: config, token file, then router reachability+auth."""
+        """hermes doctor rows: config, token seed size, then router reachability+auth."""
         cfg = self._config_or_none()
         if cfg is None:
             return [
                 (False, "agent_sandbox config", "AGENT_SANDBOX_ROUTER_URL/TOKEN_FILE missing")
             ]
-        if not cfg.token_file_readable():
-            return [
-                (True, "agent_sandbox config", "router URL set"),
-                (False, "agent_sandbox token file", f"{cfg.token_file} unreadable"),
+        token_ok = cfg.token_file_readable()
+        rows: List[Tuple[bool, str, str]] = [
+            (True, "agent_sandbox config", "router URL set"),
+            (
+                token_ok,
+                "agent_sandbox token file (32 B Ed25519 seed)",
+                f"{cfg.token_file}: 32-byte seed readable"
+                if token_ok
+                else (
+                    f"{cfg.token_file}: expected exactly 32 bytes (is the Secret "
+                    "using stringData/base64?)"
+                ),
+            ),
+        ]
+        if not token_ok:
+            return rows + [
+                (False, "agent_sandbox router reachability", "not probed: token file invalid"),
+                (False, "agent_sandbox router auth", "not probed: token file invalid"),
             ]
         reach, detail = self._probe_router(cfg)
-        return [
-            (True, "agent_sandbox config", "router URL + token file present"),
-            (True, "agent_sandbox router reachability", detail if reach else "unreachable"),
-            (reach, "agent_sandbox router auth", detail),
-        ]
+        rows.append((reach, "agent_sandbox router reachability", detail))
+        rows.append((reach, "agent_sandbox router auth", detail))
+        return rows
 
     def _probe_router(self, cfg) -> Tuple[bool, str]:
         """Bounded, unauthenticated reachability probe; 401/403 prove auth wiring."""

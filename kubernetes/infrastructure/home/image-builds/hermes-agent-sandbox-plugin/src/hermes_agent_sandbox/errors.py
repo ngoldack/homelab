@@ -20,10 +20,6 @@ class ConfigError(AgentSandboxError):
     """
 
 
-class SandboxUnavailableError(AgentSandboxError):
-    """Router URL or token cannot be used; the backend cannot service commands."""
-
-
 class SandboxCreateError(AgentSandboxError):
     """The SandboxClaim could not be created, adopted, or bound to a sandbox."""
 
@@ -38,6 +34,14 @@ class SandboxTransportError(AgentSandboxError):
 
 class SandboxCommandError(AgentSandboxError):
     """A command could not be started or completed in the sandbox."""
+
+
+class SandboxTimeoutError(SandboxCommandError):
+    """The command outran its remote deadline (gRPC DEADLINE_EXCEEDED).
+
+    The environment answers this with returncode 124 and recycles the
+    sandbox, because the cancelled remote process cannot be recovered.
+    """
 
 
 class CwdNotAllowedError(AgentSandboxError, ValueError):

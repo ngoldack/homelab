@@ -59,9 +59,38 @@ def test_available_with_env(env_with_router):
     assert p.is_available()
     assert p.check_requirements({})
     rows = p.doctor_checks()
-    assert len(rows) == 3
-    assert rows[0][0] is True  # config + token present
+    assert len(rows) == 4
+    assert rows[0][0] is True  # config present
     assert rows[0][1] == "agent_sandbox config"
+    token_row = [r for r in rows if r[1] == "agent_sandbox token file (32 B Ed25519 seed)"]
+    assert token_row and token_row[0][0] is True
+
+
+def test_doctor_token_size_row_fails_for_44_byte_file(tmp_path, monkeypatch):
+    tok = tmp_path / "tok"
+    tok.write_bytes(b"A" * 44)  # base64 of a 32-byte seed, e.g. via stringData
+    monkeypatch.setenv("AGENT_SANDBOX_ROUTER_URL", "http://router:8080")
+    monkeypatch.setenv("AGENT_SANDBOX_ROUTER_TOKEN_FILE", str(tok))
+    p = AgentSandboxProvider()
+    assert not p.is_available()
+    rows = p.doctor_checks()
+    token_row = [r for r in rows if r[1] == "agent_sandbox token file (32 B Ed25519 seed)"]
+    assert token_row and token_row[0][0] is False
+    assert "32" in token_row[0][2]
+
+
+def test_doctor_reachability_row_uses_probe_result(env_with_router, monkeypatch):
+    monkeypatch.setattr(
+        AgentSandboxProvider,
+        "_probe_router",
+        lambda self, cfg: (False, "connection refused"),
+    )
+    rows = AgentSandboxProvider().doctor_checks()
+    reach = [r for r in rows if r[1] == "agent_sandbox router reachability"]
+    assert reach and reach[0][0] is False
+    assert reach[0][2] == "connection refused"
+    auth = [r for r in rows if r[1] == "agent_sandbox router auth"]
+    assert auth and auth[0][0] is False
 
 
 def test_strip_env_keys_covers_live_credentials(monkeypatch, env_with_router):
@@ -115,3 +144,56 @@ def test_doctor_reports_missing_config_first(monkeypatch):
         "agent_sandbox config",
         "AGENT_SANDBOX_ROUTER_URL/TOKEN_FILE missing",
     )
+
+
+def _register_ctx():
+    ctx = SimpleNamespace(registered=[], sections={})
+    ctx.register_terminal_environment_provider = ctx.registered.append
+    ctx.register_system_prompt_section = (
+        lambda section_id, content, **kwargs: ctx.sections.__setitem__(
+            section_id, (content, kwargs)
+        )
+    )
+    return ctx
+
+
+def test_register_runs_orphan_sweep_once(env_with_router, monkeypatch):
+    import hermes_agent_sandbox.provider as provider
+
+    calls = []
+
+    class FakeClaimsClient:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def reconcile_orphans(self, gateway_id):
+            calls.append(gateway_id)
+            return []
+
+    monkeypatch.setattr(provider, "KubeClaimsClient", FakeClaimsClient)
+    monkeypatch.setattr(provider, "_reconciled", False)
+    monkeypatch.setenv("AGENT_SANDBOX_GATEWAY_ID", "hermes")
+    ctx = _register_ctx()
+    register(ctx)
+    assert len(ctx.registered) == 1
+    second = _register_ctx()
+    register(second)  # registers again, but the sweep is once per process
+    assert calls == ["hermes"]
+    assert len(second.registered) == 1
+
+
+def test_register_survives_sweep_failure(env_with_router, monkeypatch):
+    import hermes_agent_sandbox.provider as provider
+
+    class ExplodingClaimsClient:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def reconcile_orphans(self, gateway_id):
+            raise RuntimeError("apiserver unreachable")
+
+    monkeypatch.setattr(provider, "KubeClaimsClient", ExplodingClaimsClient)
+    monkeypatch.setattr(provider, "_reconciled", False)
+    ctx = _register_ctx()
+    register(ctx)  # must not raise
+    assert len(ctx.registered) == 1

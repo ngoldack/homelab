@@ -1,13 +1,17 @@
-"""Credential redaction and environment allowlisting for sandbox commands.
+"""Credential redaction helpers for the sandbox plugin.
 
-WHY two layers: Hermes stamps provider, messaging, and gateway credentials
-into the gateway process environment, and the model can author arbitrary
-commands. The environment handed to each sandbox command must therefore be
-rebuilt from an explicit allowlist (least privilege) AND scrubbed of any
-secret-shaped name (defense in depth, in case allowlist drift ever admits
-one). The same secret-name matcher backs the provider's ``strip_env_keys``
-classification attribute, so Hermes never forwards a credential-style
-variable into a subprocess this plugin spawns.
+WHY this module exists: Hermes stamps provider, messaging, and gateway
+credentials into the gateway process environment, and the model can author
+arbitrary commands. Two mechanisms guard that boundary — ``is_secret_name`` /
+``strip_env_names`` back the provider's ``strip_env_keys`` classification
+attribute so Hermes never forwards a credential-style variable into a
+subprocess this plugin spawns, and ``ENV_ALLOWLIST`` / ``sanitize_env``
+rebuild a least-privilege environment.
+
+NOTE: the gRPC transport forwards no host environment at all (the execute
+request carries only the command and a timeout), so ``sanitize_env`` is not on
+any current code path — it is kept as the allowlist authority for future
+callers and is covered by tests/unit/test_redaction.py.
 """
 
 from __future__ import annotations

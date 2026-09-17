@@ -9,6 +9,7 @@ admission-policed ``hermes-sandbox`` + ``hermes-go`` pair.
 
 from __future__ import annotations
 
+import logging
 import socket
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,10 +19,18 @@ from urllib.parse import urlparse
 
 from .errors import ConfigError
 
+log = logging.getLogger(__name__)
+
 # Hardcoded, non-overridable addressable backend identity. Only warm-pool
 # adoption against hermes-go inside hermes-sandbox is ever allowed.
 NAMESPACE = "hermes-sandbox"
 TEMPLATE = "hermes-go"
+
+# Exact size of the Ed25519 seed the Router signs scoped tokens with. The
+# documented failure mode is a Secret mounted with `stringData` whose value is
+# a base64 string (44 chars for a 32-byte seed): the mount is fine, so only a
+# length check catches it before Ed25519.from_private_bytes does.
+TOKEN_SEED_BYTES = 32
 
 # Standard claim-name length ceiling and drop-in suffix randomness for the
 # DNS-1123-safe claim identifier (see environment.claim).
@@ -78,12 +87,26 @@ class AgentSandboxConfig:
 
     # ---- token filesystem state (no network; used by is_available + doctor) ----
     def token_file_readable(self) -> bool:
-        """True when the configured token file exists and is readable."""
+        """True when the configured token file holds exactly one 32-byte seed.
+
+        A non-empty check is not enough: a base64 `stringData` mount reads as a
+        healthy file and only explodes at the first sandbox file operation.
+        """
         try:
-            with self.token_file_path.open("rb") as fh:
-                return len(fh.read().strip()) > 0
+            size = len(self.token_file_path.read_bytes().strip())
         except OSError:
             return False
+        if size != TOKEN_SEED_BYTES:
+            log.error(
+                "AGENT_SANDBOX_ROUTER_TOKEN_FILE %s holds %d bytes, expected exactly "
+                "%d (an Ed25519 seed): if the Secret uses `stringData`, base64-encode "
+                "a 32-byte seed or move the value to `data`",
+                self.token_file,
+                size,
+                TOKEN_SEED_BYTES,
+            )
+            return False
+        return True
 
     def load_token(self) -> bytes:
         """Read the raw 32-byte Ed25519 seed; strips surrounding whitespace."""
@@ -91,8 +114,12 @@ class AgentSandboxConfig:
             data = self.token_file_path.read_bytes().strip()
         except OSError as exc:
             raise ConfigError(f"AGENT_SANDBOX_ROUTER_TOKEN_FILE unreadable: {exc}") from exc
-        if len(data) == 0:
-            raise ConfigError("AGENT_SANDBOX_ROUTER_TOKEN_FILE is empty")
+        if len(data) != TOKEN_SEED_BYTES:
+            raise ConfigError(
+                f"AGENT_SANDBOX_ROUTER_TOKEN_FILE must hold exactly "
+                f"{TOKEN_SEED_BYTES} bytes (an Ed25519 seed), got {len(data)}: "
+                "if the Secret uses `stringData`, base64-encode a 32-byte seed"
+            )
         object.__setattr__(self, "token_loaded", data)
         return data
 

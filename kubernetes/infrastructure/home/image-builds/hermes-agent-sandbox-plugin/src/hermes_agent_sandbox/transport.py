@@ -27,15 +27,20 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, NoReturn, Optional, Tuple
 
 from .client import mint_scoped_token_v2
 from .config import AgentSandboxConfig, CLAIM_SUFFIX_BYTES, MAX_CLAIM_NAME_LEN
 from .errors import (
+    SandboxCommandError,
     SandboxCreateError,
     SandboxCreateTimeoutError,
+    SandboxTimeoutError,
     SandboxTransportError,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, grpc is imported lazily
+    import grpc
 
 log = logging.getLogger(__name__)
 
@@ -47,14 +52,27 @@ _SANDBOX_API_GROUP = "agents.x-k8s.io"
 _SANDBOX_API_VERSION = "v1beta1"
 _SANDBOX_PLURAL = "sandboxes"
 
-# The Router proxies to the sandbox's Filesystem & Runtime REST API. The
-# vendored v1.0.2 sandboxd's default is 8080 (sources/router sandboxd-server.go
-# rest-port flag), verified live via /proc/net/tcp in a deployed sandbox.
-_ROUTER_PORT = 8080
+# Authorization-target port for Router-minted scoped tokens: 8080 is the
+# adopted sandbox's REST port (sandboxd's Filesystem/Runtime API), NOT the
+# Router's own service port — the Router verifies each scoped token against the
+# upstream sandbox's port, so "fixing" this to the Router's address would break
+# every file request with 403. Verified live via /proc/net/tcp in a deployed
+# sandbox (vendored v1.0.2 sandboxd default, sources/router sandboxd-server.go).
+_SANDBOX_REST_PORT = 8080
 
 # label key we stamp on owned claims so orphan reconciliation can identify the
 # owning gateway without reading arbitrary annotations.
 OWNER_LABEL = "agent-sandbox.hermes/owner"
+
+# A failed claim delete is retried once after this delay; a name that still
+# fails is recorded in _UNRECONCILED_CLAIMS for reconcile_orphans to retry.
+_DELETE_RETRY_DELAY_SECONDS = 0.2
+
+# Claims whose deletion failed in this process. The warm pool has ONE sandbox
+# slot, so a claim that survives teardown starves every later session until its
+# shutdownTime (~4 h) unless something removes it: reconcile_orphans retries
+# these names unconditionally, independent of their lifecycle timestamps.
+_UNRECONCILED_CLAIMS: List[str] = []
 
 
 def sanitize_claim_name(task_id: str, namespace: str = "", template: str = "") -> str:
@@ -86,6 +104,30 @@ def _parse_iso_z(value: str) -> Optional[float]:
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
     except (ValueError, TypeError):
         return None
+
+
+def _is_not_found(exc: BaseException) -> bool:
+    """True for a 404-equivalent delete failure: the claim is already gone."""
+    status = getattr(exc, "status", None)
+    if status is None:
+        status = getattr(exc, "status_code", None)
+    if status is None:
+        code = getattr(exc, "code", None)
+        status = code() if callable(code) else code
+    try:
+        if int(status) == 404:
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(exc).lower()
+    return "404" in text or "not found" in text or "not_found" in text
+
+
+def _forget_unreconciled(claim_name: str) -> None:
+    try:
+        _UNRECONCILED_CLAIMS.remove(claim_name)
+    except ValueError:
+        pass
 
 
 @dataclass
@@ -151,9 +193,22 @@ class KubeClaimsClient:
         except TimeoutError as exc:
             raise SandboxCreateTimeoutError(str(exc)) from exc
         except Exception as exc:
-            if "sandbox claim" in str(exc).lower():
-                raise SandboxCreateError(str(exc)) from exc
-            raise
+            # Classified by type, not by message text: every non-timeout
+            # failure to bind is still a claim-creation failure.
+            raise SandboxCreateError(
+                f"waiting for sandbox claim {claim_name!r} failed: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
+    # ---- diagnostics (callsite: K8sHelper.get_sandbox_claim) ----
+    def get_claim(self, claim_name: str) -> Optional[Dict]:
+        """Read one SandboxClaim (used to explain a create timeout)."""
+        try:
+            return self._helper.get_sandbox_claim(claim_name, self.namespace)
+        except Exception as exc:
+            raise SandboxTransportError(
+                f"could not read claim {claim_name!r}: {exc}"
+            ) from exc
 
     # ---- UID resolution (callsite: K8sHelper.get_sandbox) ----
     def get_sandbox_uid(self, sandbox_name: str) -> str:
@@ -195,12 +250,41 @@ class KubeClaimsClient:
         raise SandboxTransportError(f"sandbox {sandbox_name!r} has no status.podIP")
 
     # ---- teardown (callsite: K8sHelper.delete_sandbox_claim) ----
-    def delete_claim(self, claim_name: str) -> None:
-        try:
-            self._helper.delete_sandbox_claim(claim_name, self.namespace)
+    def delete_claim(self, claim_name: str) -> bool:
+        """Delete a claim; True when it is gone (deleted or already 404).
+
+        A delete failure is retried once and, if it still fails, recorded in
+        :data:`_UNRECONCILED_CLAIMS` (and logged at ERROR) so the caller can
+        keep the claim name and :meth:`reconcile_orphans` can retry it later —
+        a surviving claim holds the warm pool's only sandbox slot.
+        """
+        for attempt in (1, 2):
+            try:
+                self._helper.delete_sandbox_claim(claim_name, self.namespace)
+            except Exception as exc:  # noqa: BLE001 - cleanup must not raise
+                if _is_not_found(exc):
+                    _forget_unreconciled(claim_name)
+                    log.info("SandboxClaim %s already gone", claim_name)
+                    return True
+                if attempt == 1:
+                    log.warning(
+                        "delete of claim %s failed (%s); retrying", claim_name, exc
+                    )
+                    time.sleep(_DELETE_RETRY_DELAY_SECONDS)
+                    continue
+                log.error(
+                    "delete of claim %s failed after retry: %s — recording it for "
+                    "orphan reconcile",
+                    claim_name,
+                    exc,
+                )
+                if claim_name not in _UNRECONCILED_CLAIMS:
+                    _UNRECONCILED_CLAIMS.append(claim_name)
+                return False
+            _forget_unreconciled(claim_name)
             log.info("Deleted SandboxClaim %s", claim_name)
-        except Exception as exc:  # noqa: BLE001 - best-effort cleanup
-            log.warning("delete of claim %s failed: %s", claim_name, exc)
+            return True
+        return False
 
     # ---- orphan reconcile (callsite: K8sHelper.list_sandbox_claims + get_sandbox_claim) ----
     def list_owned_claims(self, gateway_id: str) -> List[OwnedClaim]:
@@ -234,15 +318,21 @@ class KubeClaimsClient:
 
         Runs at provider/startup to clean up claims a prior gateway instance
         left behind (a gateway restart mid-task must eventually reclaim its
-        sandboxes instead of letting them accumulate).
+        sandboxes instead of letting them accumulate). Names whose deletion
+        already failed in this process are retried unconditionally — their
+        shutdownTime is not authoritative because the claim may be stuck.
         """
         now = time.time() if now is None else now
         deleted: List[str] = []
         for claim in self.list_owned_claims(gateway_id):
             if claim.shutdown_time and claim.shutdown_time <= now:
                 log.info("orphan reconcile deletes claim %s (past shutdownTime)", claim.name)
-                self.delete_claim(claim.name)
-                deleted.append(claim.name)
+                if self.delete_claim(claim.name):
+                    deleted.append(claim.name)
+        for name in list(_UNRECONCILED_CLAIMS):
+            log.info("orphan reconcile retries unreconciled claim %s", name)
+            if self.delete_claim(name):
+                deleted.append(name)
         return deleted
 
 
@@ -302,7 +392,7 @@ class SandboxTransport:
         self._connector = SdkCommandConnector(config)
 
     def attach(self, sandbox_name: str, sandbox_uid: str, pod_ip: str) -> None:
-        target = SandboxTarget(self.config.namespace, sandbox_name, sandbox_uid, _ROUTER_PORT)
+        target = SandboxTarget(self.config.namespace, sandbox_name, sandbox_uid, _SANDBOX_REST_PORT)
         target._token = self._secret
         target._kid = self._kid
         target._ttl = 60
@@ -321,6 +411,11 @@ class SandboxTransport:
             raise SandboxTransportError("transport not attached to a sandbox")
         try:
             return self._connector.run_command(command, timeout)
+        except SandboxCommandError:
+            # Already classified (including SandboxTimeoutError): re-raise so
+            # the environment can tell a real remote deadline from any other
+            # transport failure instead of seeing one opaque wrapper.
+            raise
         except Exception as exc:  # noqa: BLE001
             raise SandboxTransportError(f"command failed at transport: {exc}") from exc
 
@@ -344,6 +439,19 @@ class SandboxTransport:
         """Best-effort cancellation: drop the connection. The remote process is
         fully killed when the claim is torn down (shutdownPolicy Delete)."""
         self.close()
+
+
+def _translate_rpc_error(exc: "grpc.RpcError", timeout: int) -> NoReturn:
+    """Map a gRPC RpcError onto the command-error taxonomy.
+
+    DEADLINE_EXCEEDED is the only status that proves the command outran its
+    deadline; every other status (UNAVAILABLE, INTERNAL, ...) is reported as a
+    command failure carrying the status and details instead of a raw traceback.
+    """
+    code = exc.code()
+    if getattr(code, "name", "") == "DEADLINE_EXCEEDED":
+        raise SandboxTimeoutError(f"command exceeded {timeout}s") from exc
+    raise SandboxCommandError(f"command failed: {code} ({exc.details()})") from exc
 
 
 class SdkCommandConnector:
@@ -382,15 +490,19 @@ class SdkCommandConnector:
         return self._stub
 
     def run_command(self, command: str, timeout: int) -> Tuple[str, str, int]:
+        import grpc
         from k8s_agent_sandbox.commands._process_stubs import process_pb2
 
         stub = self._ensure_grpc()
-        response = stub.Execute(
-            process_pb2.ExecuteRequest(
-                config=process_pb2.ProcessConfig(command=["/bin/sh", "-c", command])
-            ),
-            timeout=timeout,
-        )
+        try:
+            response = stub.Execute(
+                process_pb2.ExecuteRequest(
+                    config=process_pb2.ProcessConfig(command=["/bin/sh", "-c", command])
+                ),
+                timeout=timeout,
+            )
+        except grpc.RpcError as exc:
+            _translate_rpc_error(exc, timeout)
         return (
             response.stdout.decode("utf-8", errors="replace"),
             response.stderr.decode("utf-8", errors="replace"),
@@ -434,7 +546,3 @@ class SdkCommandConnector:
         self._drop_grpc()
         self._sandbox_name = None
         self._pod_ip = None
-
-
-def _monotonic_now() -> float:
-    return time.monotonic()

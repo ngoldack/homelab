@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -15,15 +16,20 @@ from hermes_agent_sandbox.environment import (
 from hermes_agent_sandbox.errors import (
     CwdNotAllowedError,
     SandboxCommandError,
+    SandboxCreateError,
+    SandboxCreateTimeoutError,
+    SandboxTimeoutError,
 )
 
 
 class FakeClaims:
-    def __init__(self):
+    def __init__(self, conditions=None, fail_delete=False):
         self.created = []
         self.deleted = []
         self.waited = []
         self.uid_looked = []
+        self.conditions = conditions or []
+        self.fail_delete = fail_delete
 
     def create_claim(self, name):
         self.created.append(name)
@@ -39,8 +45,12 @@ class FakeClaims:
     def get_sandbox_ip(self, name):
         return "10.0.0.5"
 
+    def get_claim(self, name):
+        return {"metadata": {"name": name}, "status": {"conditions": self.conditions}}
+
     def delete_claim(self, name):
         self.deleted.append(name)
+        return not self.fail_delete
 
 
 class FakeTransport:
@@ -145,19 +155,23 @@ def test_under_limit_untouched(tmp_path):
     assert env.execute("small")["output"] == "tiny"
 
 
-def test_timeout_cancels_remote_before_124(tmp_path):
-    class SlowTransport(FakeTransport):
+def test_deadline_timeout_cancels_remote_before_124(tmp_path):
+    class TimeoutTransport(FakeTransport):
         def run(self, command, timeout):
-            time.sleep(1.2)
-            raise RuntimeError("timed out")
+            raise SandboxTimeoutError(f"command exceeded {timeout}s")
 
-    claims, transport = FakeClaims(), SlowTransport()
+    claims, transport = FakeClaims(), TimeoutTransport()
     env = AgentSandboxEnvironment(
         make_env(tmp_path), claims=claims, transport=transport
     )
     start = time.monotonic()
     result = env.execute("sleep 100", timeout=1)
     assert result["returncode"] == 124
+    assert result["output"] == (
+        "command exceeded 1s and was cancelled; the sandbox was recycled, so "
+        "/workspace state is gone — re-run setup if needed"
+    )
+    assert "Traceback" not in result["output"]
     # Real cancellation: the claim is DELETED (shutdownPolicy Delete kills
     # the guest and every process in it — dropping the connection alone
     # would leave the remote process running), state reset, transport closed.
@@ -174,7 +188,124 @@ def test_timeout_cancels_remote_before_124(tmp_path):
     assert time.monotonic() - start < 60
 
 
-def test_transport_failure_before_timeout_is_command_error(tmp_path):
+def test_non_deadline_transport_failure_keeps_sandbox(tmp_path):
+    class UnavailableTransport(FakeTransport):
+        def run(self, command, timeout):
+            raise SandboxCommandError(
+                "command failed: StatusCode.UNAVAILABLE (connection refused)"
+            )
+
+    claims = FakeClaims()
+    env = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=claims, transport=UnavailableTransport()
+    )
+    with pytest.raises(SandboxCommandError) as excinfo:
+        env.execute("echo hi", timeout=5)
+    assert not isinstance(excinfo.value, SandboxTimeoutError)
+    assert "UNAVAILABLE" in str(excinfo.value)
+    # A failed command must not tear a live sandbox down.
+    assert env._claim_name == claims.created[0]
+    assert claims.deleted == []
+
+
+def test_two_threads_on_one_environment_create_one_claim(tmp_path):
+    claims = FakeClaims()
+    real_create = claims.create_claim
+
+    def slow_create(name):
+        time.sleep(0.05)  # widen the window both threads race into
+        real_create(name)
+
+    claims.create_claim = slow_create
+    transport = FakeTransport()
+    env = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=claims, transport=transport
+    )
+    threads = [
+        threading.Thread(target=env.execute, args=("echo hi",)) for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(claims.created) == 1
+    assert transport.attached == [("sbx-1", "uid-1", "10.0.0.5")]
+
+
+def test_capacity_exhaustion_reports_retryable_error(tmp_path):
+    env1 = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=FakeClaims(), transport=FakeTransport()
+    )
+    env1.execute("echo a")  # takes the process-wide slot
+    env2 = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=FakeClaims(), transport=FakeTransport()
+    )
+    start = time.monotonic()
+    with pytest.raises(SandboxCreateError) as excinfo:
+        env2.execute("echo b")
+    assert str(excinfo.value) == (
+        "agent_sandbox capacity: 1 active sandbox is supported on this node; "
+        "retry after the running session finishes"
+    )
+    assert time.monotonic() - start < 5  # fails fast, no 120s create timeout
+    env1.cleanup()  # slot released with the claim
+    env2.execute("echo b")
+    assert env2._claim_name is not None
+
+
+def test_create_timeout_reports_claim_conditions(tmp_path):
+    class UnschedulableClaims(FakeClaims):
+        def wait_ready(self, name, timeout):
+            raise SandboxCreateTimeoutError("claim never became ready")
+
+        def get_claim(self, name):
+            return {
+                "status": {
+                    "conditions": [
+                        {
+                            "type": "Ready",
+                            "status": "False",
+                            "reason": "Unschedulable",
+                            "message": "0/4 nodes are available: Insufficient cpu.",
+                        }
+                    ]
+                }
+            }
+
+    claims = UnschedulableClaims()
+    env = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=claims, transport=FakeTransport()
+    )
+    with pytest.raises(SandboxCreateTimeoutError) as excinfo:
+        env.execute("echo hi")
+    text = str(excinfo.value)
+    assert "claim never became ready" in text
+    assert "Unschedulable" in text
+    assert "Insufficient cpu" in text
+    # The stuck claim is still torn down and the slot released.
+    assert claims.deleted == [claims.created[0]]
+    assert env._claim_name is None
+
+
+def test_failed_claim_delete_keeps_claim_for_retry(tmp_path):
+    claims = FakeClaims(fail_delete=True)
+    env = AgentSandboxEnvironment(
+        make_env(tmp_path), claims=claims, transport=FakeTransport()
+    )
+    env.execute("echo hi")
+    created = claims.created[0]
+    env._teardown_sandbox()
+    assert env._claim_name == created  # kept so a later teardown can retry
+    assert env._sandbox_name is None
+    claims.fail_delete = False
+    env._ensure_ready()  # retries the delete, then creates a fresh claim
+    assert len(claims.deleted) == 2
+    assert env._claim_name is not None
+    assert env._claim_name != created
+
+
+def test_unexpected_transport_failure_is_command_error(tmp_path):
     class FailingTransport(FakeTransport):
         def run(self, command, timeout):
             raise RuntimeError("connection reset")

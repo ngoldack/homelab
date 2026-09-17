@@ -61,10 +61,34 @@ def test_int_fields_validated(tmp_path):
 
 
 def test_load_token_strips_whitespace(tmp_path):
+    seed = b"a" * 32
     tok = tmp_path / "t"
-    tok.write_bytes(b"\n  abcdef  \n")
+    tok.write_bytes(b"\n  " + seed + b"  \n")
     cfg = AgentSandboxConfig(router_url="http://r:1", token_file=str(tok))
-    assert cfg.load_token() == b"abcdef"
+    assert cfg.load_token() == seed
+    assert cfg.token_file_readable()
+
+
+def test_token_file_requires_exactly_32_bytes(tmp_path):
+    # 44 chars is what a base64-encoded 32-byte seed looks like when the Secret
+    # is (wrongly) mounted through `stringData`.
+    tok = tmp_path / "t"
+    tok.write_bytes(b"A" * 44)
+    cfg = AgentSandboxConfig(router_url="http://r:1", token_file=str(tok))
+    assert not cfg.token_file_readable()
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.load_token()
+    assert "44" in str(excinfo.value)
+    assert "32" in str(excinfo.value)
+
+
+def test_token_file_short_seed_rejected(tmp_path):
+    tok = tmp_path / "t"
+    tok.write_bytes(b"x" * 31)
+    cfg = AgentSandboxConfig(router_url="http://r:1", token_file=str(tok))
+    assert not cfg.token_file_readable()
+    with pytest.raises(ConfigError):
+        cfg.load_token()
 
 
 def test_missing_token_file_unreadable(tmp_path):

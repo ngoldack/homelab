@@ -1,7 +1,7 @@
 """Hermes ABC stub injection shared by unit and integration conftests.
 
 Hermes cannot be pip-installed (wheel/PyPI channels retired at v0.20.0), so
-the plugin's import of ``hermes_agent.agent.terminal_env_provider`` is stubbed
+the plugin's import of ``agent.terminal_env_provider`` is stubbed
 with a minimal same-shaped ABC here. The stub only fixes the import boundary;
 every other module under test is the real implementation. The authoritative
 import conformance check runs against the REAL Hermes inside the built image

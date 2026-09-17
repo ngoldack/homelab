@@ -5,10 +5,13 @@
 # names: Cilium matches endpoint identities, so a Service-based rule would
 # miss the backing pods.
 ---
-# The main API/webserver: the edge Gateway route backends immich-server:2283
-# directly (OIDC handled in-app), so its inbound path is the Gateway (reserved
-# `ingress` identity), kubelet probes (`health`) and the monitoring scrape of
-# its OpenTelemetry exporter ports.
+# The main API/webserver: the LAN Gateway route backends immich-server:2283
+# directly. There is NO OIDC here — immich has no provider in the authentik
+# seed and no OIDC env in its manifests; its route is LAN-only
+# (`dns.ngoldack.de/publish: lan`, parentRefs: public in httproute.yaml) and it
+# authenticates against its own local accounts. Inbound is therefore only the
+# Gateway (reserved `ingress` identity), kubelet probes (`health`) and the
+# monitoring scrape of its OpenTelemetry exporter ports.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

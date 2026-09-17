@@ -82,16 +82,6 @@ spec:
             - {port: "8428", protocol: TCP}
             - {port: "9428", protocol: TCP}
             - {port: "9093", protocol: TCP}
-    # OIDC login: auth_url/token_url/api_url are the edge hostnames
-    # (https://authentik.ngoldack.de/…), so the token/userinfo calls traverse
-    # the Gateway and Cilium checks THIS pod's egress against the route's
-    # backend — the portal-bridge pod in the authentik namespace. The
-    # `world:443` rule below does not cover it (the gateway backend is an
-    # in-cluster pod), and without this the edge answers 403 "Access denied"
-    # and grafana's OIDC login fails after the callback.
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: authentik
     # Grafana 13 stores dashboards/provisioning as Kubernetes CRs
     # (grafana.app/*) and reads them through the API — without this egress the
     # dashboards and alert rules stop reconciling.

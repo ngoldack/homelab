@@ -366,6 +366,17 @@ spec:
       app.kubernetes.io/name: tetragon
   endpoints:
     - port: metrics
+      # node talos-bno-yij holds the control-plane VIP and its hostNetwork
+      # tetragon pod advertises 10.30.0.10 as its host address, so that
+      # endpoint is only reachable from the node holding the VIP: scraping it
+      # from vmagent on any other node fails at the connection level (verified:
+      # no Cilium policy drop, just "can't connect"), leaving one permanently
+      # down target. The other three nodes publish the same agent metrics, so
+      # the endpoint is dropped rather than kept as perpetual noise.
+      relabelConfigs:
+        - sourceLabels: [__address__]
+          regex: "10\\.30\\.0\\.10:2112"
+          action: drop
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape

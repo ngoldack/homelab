@@ -73,16 +73,3 @@ spec:
                   name: openrouter-key
               tls:
                 sni: openrouter.ai
-      - providers:
-          - name: openrouter-union-alpha
-            host: openrouter.ai
-            port: 443
-            path: /api/v1/chat/completions
-            openai:
-              model: stealth/union-alpha
-            policies:
-              auth:
-                secretRef:
-                  name: openrouter-key
-              tls:
-                sni: openrouter.ai

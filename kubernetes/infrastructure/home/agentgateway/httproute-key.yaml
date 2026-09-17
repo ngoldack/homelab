@@ -12,11 +12,21 @@ spec:
     - name: agentgateway
       namespace: agentgateway
   rules:
+    # Coding model: DeepSeek V4.1 Flash (OpenRouter).
     - matches:
         - path:
             type: PathPrefix
-            value: /v1/key
+            value: /v1/key/chat
       backendRefs:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
-          name: chat-chain
+          name: openrouter-deepseek-v41-flash
+    # Free model: Union Alpha (OpenRouter stealth).
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/key/free
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: openrouter-union-alpha

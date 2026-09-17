@@ -91,3 +91,56 @@ spec:
                   name: synthetic-key
               tls:
                 sni: api.synthetic.new
+
+---
+# Key-authenticated model endpoints for CLI consumers (opencode). One backend
+# per model on purpose: `ai.groups` are PRIORITY TIERS — the client's `model`
+# field does not select a provider (verified live: a request for
+# `openrouter-union-alpha` still hit the chain's first synthetic tier), so
+# distinct models are exposed as distinct route paths instead.
+#
+# Both ride the OpenRouter key (the synthetic key is still a placeholder, so
+# the hf: tiers of chat-chain cannot serve yet).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: openrouter-deepseek-v41-flash
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: openrouter-deepseek-v41-flash
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: deepseek/deepseek-v4.1-flash
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: openrouter-union-alpha
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: openrouter-union-alpha
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: stealth/union-alpha
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai

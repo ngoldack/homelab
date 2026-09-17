@@ -105,6 +105,12 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
+        - name: AUTH_AUTHENTIK_ALLOW_ACCOUNT_LINKING
+          # Langfuse already holds an account for this email (created before
+          # SSO). Without linking, next-auth refuses the OIDC sign-in with
+          # error=OAuthCreateAccount instead of attaching the authentik
+          # identity to the existing account.
+          value: "true"
         - name: AUTH_AUTHENTIK_ISSUER
           # NO trailing slash — langfuse's own schema requirement for authentik
           # ("must be ... without trailing slash"): langfuse fetches

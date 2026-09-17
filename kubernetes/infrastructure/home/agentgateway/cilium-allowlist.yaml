@@ -46,6 +46,16 @@ spec:
       toPorts:
         - ports:
             - {port: "8080", protocol: TCP}
+    # JWT validation: the gateway fetches the OIDC provider's JWKS from
+    # authentik's server/portal ports in the authentik namespace (observed as
+    # a sustained denied flow when this rule was missing).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - {port: "9000", protocol: TCP}
+            - {port: "9443", protocol: TCP}
     - toEntities:
         - kube-apiserver
       toPorts:

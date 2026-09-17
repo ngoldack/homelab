@@ -2,6 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
   - paperless-backup-s3-credentials.sops.yaml
   - paperless-database-credentials.sops.yaml
   - paperless-env.sops.yaml

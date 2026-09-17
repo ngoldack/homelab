@@ -1,0 +1,235 @@
+# paperless allowlists — the only traffic that may cross the namespace's
+# default-deny baseline (cilium-default-deny.yaml). Selectors use the labels
+# app-template actually renders (`app.kubernetes.io/controller` distinguishes
+# web/tika/gotenberg, all under app.kubernetes.io/name=paperless) and the
+# CNPG instance label (cnpg.io/cluster), not Service names — Cilium policies
+# match endpoint identities, so a Service-based rule would silently miss the
+# backing pods.
+---
+# The app pod: s6 runs webserver+consumer+worker+scheduler in one container.
+# Ingress is only the edge Gateway (cilium-envoy traffic carries the reserved
+# `ingress` identity) and kubelet probes (reserved `health`); egress is DNS
+# plus its four in-namespace backends. Notably NOT the Kubernetes API: the
+# app has no need for a service-account token and gets no route to the API
+# even if one leaked into the pod.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-web-allowlist
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: paperless
+      app.kubernetes.io/controller: web
+  ingress:
+    # Edge Gateway (cilium-envoy) — the HTTPRoute backends this Service
+    # directly, so this is the app's only legitimate inbound path.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # kubelet liveness/readiness/startup probes on the same port.
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # OCR/parse sidecars and the two data stores, by endpoint identity.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: tika
+      toPorts:
+        - ports:
+            - port: "9998"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: gotenberg
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app: valkey-paperless
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # PAPERLESS_DBHOST=paperless-database-rw (CNPG primary Service) resolves
+    # to this instance; the policy matches the pod identity behind it.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: paperless-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+---
+# Tika: stateless text extraction, reachable only from the app pod.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-tika-allowlist
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: paperless
+      app.kubernetes.io/controller: tika
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: web
+      toPorts:
+        - ports:
+            - port: "9998"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "9998"
+              protocol: TCP
+---
+# Gotenberg: stateless PDF/HTML rendering, reachable only from the app pod.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-gotenberg-allowlist
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: paperless
+      app.kubernetes.io/controller: gotenberg
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: web
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+---
+# Valkey (celery broker + cache): reached only by the app pod.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-valkey-allowlist
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      app: valkey-paperless
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: web
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+---
+# The CNPG instance. Ingress: the app on 5432, plus the operator and the
+# barman-cloud plugin from cnpg-system (the operator drives the instance
+# manager on 8000, the plugin talks to the in-pod sidecar through it).
+# Egress: DNS and HTTPS to the Hetzner Object Storage endpoint for base
+# backups + WAL archiving — the sidecar runs INSIDE this pod, so the S3 path
+# is an egress flow of the database pod, not of cnpg-system.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-database-allowlist
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: paperless-database
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: paperless
+            app.kubernetes.io/controller: web
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The instance manager reports instance status (and backup/archive
+    # results) back through the Kubernetes API — without this the operator
+    # watches a cluster whose instances never update, and archive/backup
+    # bookkeeping stalls. The Service-CIDR rule mirrors the router/hermes
+    # policies: entity resolution can race right after the policy lands.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # Barman sidecar -> s3://home-cnpg-backups-*/ (fsn1.your-objectstorage.com).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

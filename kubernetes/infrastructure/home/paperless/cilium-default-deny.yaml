@@ -1,0 +1,26 @@
+# paperless default-deny baseline — the same zero-trust posture the sandbox
+# namespaces already run (see agent-sandbox/cilium-default-deny.yaml for the
+# full semantics note). Short version: Cilium puts an endpoint into
+# default-deny for a direction as soon as ANY policy selects it and carries
+# that direction's section, and an empty rule (`- {}`) whitelists no peers —
+# so this rule locks every pod in the namespace down, and
+# cilium-allowlist.yaml is the only thing that reopens traffic.
+#
+# Nothing in this namespace is WAN-routable on its own: the app is served
+# exclusively through the edge Gateway's HTTPRoute (authentik OIDC in-app),
+# and every backing store is in-namespace.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-default-deny
+  namespace: paperless
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in paperless. The
+    per-workload allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

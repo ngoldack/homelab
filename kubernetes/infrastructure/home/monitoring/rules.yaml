@@ -96,170 +96,167 @@ spec:
               normally. While absent, BackupTooOld is blind for
               {{ $labels.cluster }}, so treat backup coverage as unverifiable
               until this resolves.
-    # ---- Hermes agent + Kata sandbox stack (namespaces hermes,
-    # hermes-sandbox, agent-sandbox-system). Metric sources, all probed live
-    # on 2026-09-17:
-    #   * agent_sandboxes — the agent-sandbox controller's point-in-time
-    #     sandbox gauge (scraped via the agent-sandbox-controller
-    #     VMServiceScrape in scrapes.yaml), labelled namespace / owned_by /
-    #     sandbox_template / ready_condition. This is the ONLY warm-pool state
-    #     signal available: there is no kube_customresource_* metric anywhere
-    #     (kube-state-metrics runs without custom-resource-state config) and
-    #     the controller exports no SandboxClaim metrics at all.
-    #   * kube_statefulset_status_replicas_ready / kube_statefulset_replicas
-    #     for the gateway rollout.
-    #   * kube_pod_status_phase, kube_pod_status_ready,
-    #     kube_pod_container_status_restarts_total,
-    #     kube_pod_container_status_last_terminated_reason and
-    #     kube_pod_status_reason for sandbox pod health and eviction.
-    #   * kube_node_status_condition{node=...} and node_memory_*{instance=...}
-    #     for the shared performance/P100 node the warm pool is pinned to.
-    #     The node name and node-exporter instance are written out because
-    #     this stack's kube-state-metrics has no label allowlist: node labels
-    #     (workload.hermes.io/sandbox) are not queryable from any metric, so
-    #     the pin cannot be joined dynamically. Keep both in sync with the
-    #     live node (`kubectl get nodes -L workload.hermes.io/sandbox`).
-    - name: hermes-sandbox
+---
+# Alerting for the three security components added by the cluster-hardening
+# work (kyverno admission policy, tetragon runtime security, crowdsec
+# IP-reputation engine). Every metric/label name below was read off the LIVE
+# endpoints at implementation time — the five security-component scrapes in
+# scrapes.yaml are what deliver them:
+#   kyverno_policy_results_total      kyverno-svc-metrics :8000 (metrics-port)
+#   tetragon_*                        tetragon :2112       (metrics)
+#   cs_lapi_*, cs_machines_*, cs_info crowdsec-service :6060 (metrics)
+#   cs_node_hits_total, cs_parser_*   crowdsec-agent-service :6060 (metrics)
+# Anything not verifiable live is omitted rather than guessed; see the notes
+# inside each group.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: kyverno
+  namespace: monitoring
+spec:
+  groups:
+    - name: kyverno
       rules:
-        - alert: HermesSandboxWarmPoolNotReady
-          # The pool is declared replicas: 1 (hermes-sandbox/sandbox-warm-pool.yaml)
-          # and SandboxWarmPool.spec.replicas is not exported by the
-          # controller, so for this pool "not fully ready" == "no ready
-          # sandbox reported". A raised replicas would need a new signal.
+        - alert: KyvernoPolicyViolations
+          # rule_result is a real label on this series (live values observed:
+          # pass and fail, e.g. policy_name="disallow-privileged-containers",
+          # rule_name="privileged-and-escalation-false", resource_namespace=
+          # "authentik"). Both dry_run="false" (admission requests) and
+          # dry_run="true" (background/report runs) results are counted — each
+          # records the same audit violation, and only admission-time results
+          # would miss drift found by the background scanner. Policies are all
+          # validationFailureAction: Audit, so the workload is still admitted;
+          # this alert is the only signal that the cluster is drifting from
+          # its own policies.
           expr: >-
-            absent(agent_sandboxes{namespace="hermes-sandbox",
-            owned_by="SandboxWarmPool", ready_condition="true"})
-          for: 10m
+            sum by (policy_name, rule_name) (
+              increase(kyverno_policy_results_total{rule_result="fail"}[1h])
+            ) > 0
+          for: 15m
           labels:
-            severity: critical
+            severity: info
           annotations:
-            summary: "Hermes warm pool reports no ready sandbox"
+            summary: "Kyverno policy violation: {{ $labels.policy_name }}"
             description: >-
-              For over 10 minutes the controller has reported zero ready
-              sandboxes for SandboxWarmPool hermes-go, so every new session
-              blocks until SandboxCreateTimeout. This also fires when the
-              controller scrape itself is down, so check both:
-              `kubectl -n hermes-sandbox get sandboxwarmpool hermes-go -o yaml`
-              (status.readyReplicas) and that the agent-sandbox-system scrape
-              targets are up in VictoriaMetrics.
-        - alert: HermesSandboxClaimStuck
-          # SandboxClaims have no CR-level metric (see group comment), so a
-          # claim that cannot be served is detected through its pod: Pending
-          # (unschedulable on the shared node, or no pool sandbox) or not
-          # Ready. A claim stuck Terminating whose pod is still Ready is not
-          # observable from metrics and is not covered.
-          expr: >-
-            kube_pod_status_ready{namespace="hermes-sandbox",
-            condition=~"false|unknown"} == 1
-            or
-            kube_pod_status_phase{namespace="hermes-sandbox",
-            phase="Pending"} == 1
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Sandbox pod not serving: {{ $labels.pod }}"
-            description: >-
-              Pod {{ $labels.pod }} in hermes-sandbox has been Pending or
-              not-Ready for over 10 minutes. A SandboxClaim either stays
-              Pending with no pod at all (empty pool — see
-              HermesSandboxWarmPoolNotReady) or leaves its adopted sandbox pod
-              unready. Inspect with
-              `kubectl -n hermes-sandbox get sandboxclaims,sandboxes,pods`.
-        - alert: HermesGatewayNotReady
-          expr: >-
-            kube_statefulset_status_replicas_ready{namespace="hermes",
-            statefulset="hermes"}
-            <
-            kube_statefulset_replicas{namespace="hermes", statefulset="hermes"}
-          for: 10m
-          labels:
-            severity: critical
-          annotations:
-            summary: "Hermes gateway StatefulSet not fully ready"
-            description: >-
-              hermes-0 has reported fewer ready replicas than the StatefulSet
-              requests for over 10 minutes, so the API on :8642 and the
-              dashboard on :9119 are unavailable to clients. Check
-              `kubectl -n hermes get sts hermes -o wide` and the pod events.
-        - alert: HermesGatewayRestarting
-          expr: >-
-            increase(kube_pod_container_status_restarts_total{namespace="hermes"}[30m])
-            > 0
+              Kyverno rule {{ $labels.rule_name }} of policy
+              {{ $labels.policy_name }} recorded {{ $value | humanize }}
+              non-passing results in the last hour (audit mode — the resources
+              were still admitted). Inspect
+              kyverno_policy_results_total{rule_result="fail"} and the
+              PolicyReports for the affected resource_kind /
+              resource_namespace, then either fix the manifest or narrow the
+              policy.
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: tetragon-runtime
+  namespace: monitoring
+spec:
+  groups:
+    - name: tetragon-runtime
+      rules:
+        # No per-event alert is shipped for the tracing policies: the live
+        # :2112 endpoint exposes tetragon_policy_events_total{policy=...}
+        # (sensitive-host-files: 72+22+2+22+52+112+2+148 = 432 events since
+        # deploy) but carries NO enforcement-action label, so a Sigkill block
+        # is indistinguishable from the monitor-only policy's normal traffic.
+        # A plain "increase > 0" rule would therefore fire permanently on the
+        # monitor policy instead of only on enforcement. The two rules below
+        # cover what can be decided from verified series: whether a policy
+        # actually loaded, and whether events are being lost.
+        - alert: TetragonTracingPolicyNotLoaded
+          # tetragon_tracingpolicy_loaded is exported with state labels
+          # disabled/enabled/error/load_error (all four observed live, value 0
+          # for everything but enabled=1). A non-zero error state means a
+          # TracingPolicy failed to attach, i.e. it provides no detection or
+          # enforcement at all.
+          expr: tetragon_tracingpolicy_loaded{state=~"error|load_error"} > 0
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "Hermes gateway container restarting"
+            summary: "Tetragon tracing policy failed to load"
             description: >-
-              The hermes-0 gateway container restarted within the last 30
-              minutes. A single restart can be a deliberate rollout; repeated
-              ones mean a crash loop. Check `kubectl -n hermes describe pod
-              hermes-0` (last state, exit code) and the gateway logs.
-        - alert: HermesSandboxPodOOMKilled
-          # Reason alone would latch for the pod's whole lifetime, so the
-          # restart increase bounds it to a recent OOM.
+              {{ $value }} Tetragon tracing policy(ies) are in state
+              {{ $labels.state }}: their kprobes/tracepoints are not attached,
+              so the policy is blind. Check the tetragon agent logs for the
+              load error (BTF/kprobe mismatch after a kernel or chart change is
+              the usual cause).
+        - alert: TetragonEventsDropped
+          # All three counters exist live on :2112 and are currently 0, so any
+          # increase is a real loss: listener-buffer overflow, ring-buffer
+          # event loss, or export rate limiting. Each one means the runtime
+          # security feed (and any downstream log/pipeline consumer) is
+          # incomplete.
           expr: >-
-            (kube_pod_container_status_last_terminated_reason{namespace="hermes-sandbox",
-            reason="OOMKilled"} == 1)
-            and on(namespace, pod, container)
-            (increase(kube_pod_container_status_restarts_total{namespace="hermes-sandbox"}[1h]) > 0)
-          for: 10m
+            increase(tetragon_notify_overflowed_events_total[10m]) > 0
+            or increase(tetragon_observer_ringbuf_events_lost_total[10m]) > 0
+            or increase(tetragon_export_ratelimit_events_dropped_total[10m]) > 0
+          for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "Sandbox container OOM-killed: {{ $labels.pod }}"
+            summary: "Tetragon dropped kernel events"
             description: >-
-              A container in hermes-sandbox whose most recent termination was
-              OOMKilled has restarted within the last hour. The sandbox node
-              also runs the P100 inference workloads and the image builders
-              (accepted co-tenancy), so memory pressure and OOMs run in both
-              directions there. Check the container's memory limit against
-              what the task actually used.
-        - alert: HermesSandboxPodEvicted
-          expr: >-
-            kube_pod_status_reason{namespace="hermes-sandbox", reason="Evicted"}
-            == 1
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Sandbox pod evicted: {{ $labels.pod }}"
-            description: >-
-              Pod {{ $labels.pod }} in hermes-sandbox has carried
-              status.reason=Evicted for over 10 minutes: the kubelet evicted
-              it under node pressure while the shared node was oversubscribed.
-              Check the pod's status.message and the node alerts
-              (HermesSandboxNodeMemoryPressure / HermesSandboxNodeMemoryLow).
-        - alert: HermesSandboxNodeMemoryPressure
-          expr: >-
-            kube_node_status_condition{node="talos-919-w9u",
-            condition="MemoryPressure", status="true"} == 1
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Sandbox node {{ $labels.node }} under memory pressure"
-            description: >-
-              The performance/P100 node that hosts the Kata warm pool (pinned
-              by label workload.hermes.io/sandbox=true) has reported
-              MemoryPressure=true for over 10 minutes. Pressure on this shared
-              node precedes both sandbox evictions and inference-workload
-              failures. The node name is pinned in the expression — update it
-              with the live label selector if the node is renamed.
-        - alert: HermesSandboxNodeMemoryLow
-          expr: >-
-            (1 - node_memory_MemAvailable_bytes{instance="10.30.0.22:9100"}
-            / node_memory_MemTotal_bytes{instance="10.30.0.22:9100"}) > 0.92
+              Tetragon dropped or failed to deliver kernel events in the last
+              10m (listener buffer overflow, perf ring buffer loss, or export
+              rate limiting) — runtime security visibility is incomplete while
+              this is non-zero and blocked actions may go unrecorded. Check the
+              tetragon agent pod's CPU/memory limits and its log pipeline.
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: crowdsec
+  namespace: monitoring
+spec:
+  groups:
+    - name: crowdsec
+      rules:
+        # There is deliberately no "active decisions > 0" rule here: neither
+        # :6060 endpoint exports a decisions or alerts gauge. The complete
+        # live family list is cs_info, cs_lapi_machine_requests_total,
+        # cs_lapi_request_duration_seconds, cs_lapi_route_requests_total,
+        # cs_machines_last_heartbeat_timestamp and cs_papi_* on the LAPI, plus
+        # cs_filesource_hits_total, cs_node_hits_{,ok_,ko_}total,
+        # cs_parser_hits_{,ko_}total and cs_parsing_time_seconds on the agent —
+        # the crowdsec dashboards' cs_alerts / cs_active_decisions / cs_buckets
+        # series do not exist in this deployment at all. A rule on them could
+        # never fire, so the two rules below alert on the scrape/intake being
+        # alive instead, which is the strongest signal the live series support.
+        - alert: CrowdSecLapiMetricsAbsent
+          # cs_lapi_* is LAPI-only (verified: present on crowdsec-service
+          # :6060, absent on the agent endpoint). Its absence means the LAPI is
+          # down or this scrape target broke — no decisions/alerts can be
+          # served to bouncers while it lasts.
+          expr: absent(cs_lapi_route_requests_total)
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: "Sandbox node memory nearly exhausted"
+            summary: "CrowdSec LAPI metrics absent"
             description: >-
-              Over 92% of memory is in use on the sandbox node (talos-919-w9u,
-              node-exporter instance 10.30.0.22:9100) for more than 15 minutes.
-              This is the early warning before kubelet evictions or inference
-              OOMs: the node's baseline use is ~19%, so a 92% reading is a real
-              excursion. The instance is pinned because node labels are not
-              queryable from metrics here; update it with the live node.
+              No cs_lapi_route_requests_total series has been scraped for 15m:
+              the CrowdSec LAPI is down, or the crowdsec-lapi
+              VMServiceScrape/Service was broken or removed. Bouncers cannot
+              pull decisions while the LAPI is unreachable, so the cluster is
+              running without IP-reputation enforcement.
+        - alert: CrowdSecAgentLogIntakeAbsent
+          # cs_node_hits_total is agent-only (verified: present on
+          # crowdsec-agent-service :6060, absent on the LAPI endpoint) and
+          # exists per acquisition source/stage. Its absence means the agent
+          # is not reading a single log line — e.g. the authentik pod-log
+          # acquisition that is the only detection feed on Talos.
+          expr: absent(cs_node_hits_total)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CrowdSec agent has no log intake"
+            description: >-
+              No cs_node_hits_total series has been scraped for 15m: the
+              crowdsec agent DaemonSet is down, or its acquisition (the
+              authentik pod logs mounted from /var/log/pods) is reading
+              nothing. Parsers and scenarios cannot fire without input, so
+              brute-force detection is effectively off.

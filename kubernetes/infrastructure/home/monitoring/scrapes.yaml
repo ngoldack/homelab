@@ -324,59 +324,95 @@ spec:
     # no port name and discovered zero targets.
     - port: metrics
 ---
-# ---- agent-sandbox Router (ns agent-sandbox-system): the Go router exposes
-# Prometheus metrics ONLY on its dedicated --metrics-bind-address=:9090
-# (container port name "metrics"); the Service sandbox-router-svc publishes
-# just the 8080 proxy port, so this must be a pod scrape. The probe port 8081
-# ("healthz") is NOT a Prometheus endpoint (GET :8081/metrics -> 404;
-# /healthz and /readyz return plain "ok" JSON/text — verified live
-# 2026-09-17) and is therefore deliberately not an endpoint here.
-# The monitoring egress allowlist must carry 9090 or Cilium drops the scrape
-# (monitoring/cilium-allowlist.yaml, monitoring-scrapers-allowlist).
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMPodScrape
-metadata:
-  name: sandbox-router
-  namespace: agent-sandbox-system
-spec:
-  namespaceSelector:
-    matchNames: [agent-sandbox-system]
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sandbox-router
-      app.kubernetes.io/component: sandbox-router
-  podMetricsEndpoints:
-    - port: "9090"
----
-# ---- agent-sandbox controller (ns agent-sandbox-system): metrics on :8080
-# (container port name "metrics", Service agent-sandbox-controller port 8080,
-# container args `--leader-elect=true --extensions`). Exposes the
-# agent_sandboxes gauge (per namespace / owned_by / sandbox_template /
-# ready_condition) — the only warm-pool state signal in the cluster, see the
-# hermes-sandbox VMRule group in rules.yaml — plus controller-runtime
-# reconcile counters and process metrics. There are NO SandboxClaim/
-# SandboxWarmPool custom-resource metrics: this stack's kube-state-metrics
-# runs without a custom-resource-state config, so kube_customresource_*
-# returns nothing (verified live 2026-09-17).
+# ---- kyverno: all four controller metrics Services (kyverno-svc-metrics for
+# the admission controller, plus the background/cleanup/reports controllers)
+# expose :8000 under the endpoint port NAME "metrics-port" and share the label
+# app.kubernetes.io/part-of=kyverno, so ONE object covers the controllers (the
+# external-dns entry above is the precedent for one object over several
+# Services). The two other Services carrying that label — kyverno-svc and
+# kyverno-cleanup-controller, the :443 webhooks — expose only an "https"
+# endpoint port, so discovery finds no "metrics-port" target there and they
+# are skipped. Port NAME rather than number, per the note at the top of this
+# file: vmagent keeps targets on __meta_kubernetes_endpoint_port_name, so a
+# numeric "8000" here discovers exactly nothing.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
-  name: agent-sandbox-controller
-  namespace: agent-sandbox-system
+  name: kyverno
+  namespace: kyverno
 spec:
   namespaceSelector:
-    matchNames: [agent-sandbox-system]
+    matchNames: [kyverno]
   selector:
     matchLabels:
-      app: agent-sandbox-controller
+      app.kubernetes.io/part-of: kyverno
   endpoints:
-    - port: "8080"
+    - port: metrics-port
 ---
-# ---- hermes: deliberately NO scrape object. The gateway exposes no
-# Prometheus endpoint: GET 127.0.0.1:8642/metrics returns 404 and
-# GET 127.0.0.1:9119/metrics returns 302 to /login?next=%2Fmetrics (uvicorn
-# session-auth dashboard — not a scrapeable exposition). Probed live
-# 2026-09-17 via kubectl exec into hermes-0; do not repeat the probe blind.
-# If Hermes ever ships /metrics, add the scrape here AND a monitoring ingress
-# allow for that port in ../hermes/cilium-policy.yaml — the hermes namespace
-# default-denies all ingress, so the scrape would silently fail otherwise.
+# ---- tetragon: the agent DaemonSet's metrics Service ("tetragon") serves
+# :2112 and tetragon-operator-metrics serves :2113. Both Services name their
+# endpoint port "metrics" (verified on the live Endpoints objects, not just
+# the Service spec), so the port NAME form is what discovery needs here too.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: tetragon
+  namespace: tetragon
+spec:
+  namespaceSelector:
+    matchNames: [tetragon]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tetragon
+  endpoints:
+    - port: metrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: tetragon-operator-metrics
+  namespace: tetragon
+spec:
+  namespaceSelector:
+    matchNames: [tetragon]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tetragon-operator
+  endpoints:
+    - port: metrics
+---
+# ---- crowdsec: the LAPI (crowdsec-service) and the per-node agent
+# (crowdsec-agent-service) both serve Prometheus metrics on :6060 under the
+# endpoint port NAME "metrics". The LAPI Service also exposes the :8080
+# decision API under the name "lapi" — only "metrics" is scraped. NOTE the
+# selector: these two Services carry only app=crowdsec-<name> in their
+# metadata (the k8s-app/type labels exist solely in their pod selectors, which
+# a VMServiceScrape never sees), so each object matches its own Service by
+# that `app` label.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: crowdsec-lapi
+  namespace: crowdsec
+spec:
+  namespaceSelector:
+    matchNames: [crowdsec]
+  selector:
+    matchLabels:
+      app: crowdsec-service
+  endpoints:
+    - port: metrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: crowdsec-agent
+  namespace: crowdsec
+spec:
+  namespaceSelector:
+    matchNames: [crowdsec]
+  selector:
+    matchLabels:
+      app: crowdsec-agent-service
+  endpoints:
+    - port: metrics

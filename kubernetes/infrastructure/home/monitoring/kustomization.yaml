@@ -188,5 +188,52 @@ configMapGenerator:
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
 
+  # Security components (cluster-hardening work): kyverno admission policy and
+  # crowdsec. Pinned upstream sources are recorded here because
+  # dashboards/README.md is not touched by this change:
+  #   kyverno.json   kyverno/kyverno @ tag v1.19.1 (= the deployed chart
+  #                  kyverno-3.9.1, appVersion v1.19.1), path
+  #                  charts/kyverno/charts/grafana/dashboard/kyverno-dashboard.json
+  #   crowdsec.json  crowdsecurity/grafana-dashboards @ master commit
+  #                  0d34f686930aab1f11562bdf664ffad60c567e39, path
+  #                  dashboards_v5/Crowdsec Overview.json
+  # Tetragon ships no dashboard JSON upstream (cilium/tetragon @ main has no
+  # dashboard file and its chart has no dashboard template), so there is no
+  # tetragon.json here — see the tetragon note in rules.yaml.
+  #
+  # Metric-coverage caveat (both files are the unmodified upstream dashboards,
+  # so panels can only show series this deployment actually exports):
+  #   kyverno.json  6 of its 14 kyverno_* families are live (admission_
+  #                 requests_total, admission_review_duration_seconds,
+  #                 policy_changes_total, policy_execution_duration_seconds,
+  #                 policy_results_total, policy_rule_info_total). Kyverno
+  #                 1.19.1 here does not export the per-policy-type families
+  #                 (kyverno_{validating,mutating,generating,image_validating}_
+  #                 policy_results_total / _execution_duration_seconds), so
+  #                 the panels scoped to those stay empty.
+  #   crowdsec.json cs_info, cs_filesource_hits_total, cs_node_hits_ok/ko_total
+  #                 and cs_parser_hits_total are live; cs_alerts,
+  #                 cs_active_decisions and cs_bucket* are not exported by
+  #                 CrowdSec v1.8.1 in this deployment, so those panels stay
+  #                 empty (the LAPI-only "LAPI Metrics" dashboard in the same
+  #                 upstream repo matches cs_lapi_* exactly if LAPI latency
+  #                 views are wanted instead).
+  - name: grafana-dashboard-kyverno
+    namespace: monitoring
+    files: [dashboards/kyverno.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-crowdsec
+    namespace: monitoring
+    files: [dashboards/crowdsec.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+
 generatorOptions:
   disableNameSuffixHash: true

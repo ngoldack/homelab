@@ -28,6 +28,18 @@ Sources, all pinned:
   hubble.json    Cilium v1.20.1 dashboard (chart-shipped @ install/kubernetes/cilium/files/hubble/dashboards/hubble-dashboard.json), from helm chart cilium v1.20.1
   cilium-operator.json  grafana.com dashboard 15514 (Cilium Operator), rev 1
   valkey.json           grafana.com dashboard 763 (Redis Exporter 1.x), rev 6
+  kyverno.json          kyverno/kyverno @ v1.19.1 (chart 3.9.1) —
+                        charts/kyverno/charts/grafana/dashboard/kyverno-dashboard.json
+                        (uid Rg8lWBG7k). Coverage caveat recorded in
+                        kustomization.yaml: this build exports 6 of the 14
+                        kyverno_* families the dashboard queries, so the
+                        per-policy-type panels stay empty.
+  crowdsec.json         crowdsecurity/grafana-dashboards @ 0d34f686
+                        (dashboards_v5/Crowdsec Overview.json, uid hjmZdB4nk).
+                        Caveat: v1.8.1 here exports cs_info,
+                        cs_filesource/node_hits/parser_hits only —
+                        cs_alerts/cs_active_decisions/cs_buckets do not exist,
+                        so those panels stay empty.
   flux.json             fluxcd/flux2-monitoring-example control-plane.json
                         (official Flux Control Plane dashboard, pinned at its
                         main-branch state when vendored)

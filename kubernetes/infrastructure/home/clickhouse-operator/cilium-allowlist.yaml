@@ -31,7 +31,8 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: monitoring
-    # The operator serves an admission webhook (9443) and metrics (8080) that the API server and node-local scrapers call.
+    # The operator serves an admission webhook (9443) and metrics (8080) that
+    # the API server and node-local scrapers call.
     - fromEntities:
         - kube-apiserver
         - host

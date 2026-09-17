@@ -96,8 +96,8 @@ unready pool.
     tool calls takes minutes, so the default budget interrupted calls with
     "Operation interrupted: waiting for model response".
   Budget accordingly: `hack/hermes-e2e.sh` allows `HERMES_E2E_MAX_TIME`
-  (default 900 s) for the chat call and polls for the claim for
-  `HERMES_E2E_POLL_TRIES` × `HERMES_E2E_POLL_SLEEP` (default 450 × 2 s).
+  (default 1800 s) for the chat call and polls for the claim for
+  `HERMES_E2E_POLL_TRIES` × `HERMES_E2E_POLL_SLEEP` (default 900 × 2 s).
 - **Acceptance:** `task hermes:e2e` runs `hack/hermes-e2e.sh`, the real
   gate. It asserts: 401 without / 200 with the bearer key; pre-flight refusal
   when stray claims already exist; HTTP 200 on the chat task; a claim labeled

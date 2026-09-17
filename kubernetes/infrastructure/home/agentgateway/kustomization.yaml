@@ -36,3 +36,5 @@ resources:
   - httproute-edge.yaml
   - otel-collector.yaml
   - api-keys.sops.yaml
+  - policy-apikey.yaml
+  - httproute-key.yaml

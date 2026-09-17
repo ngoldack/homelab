@@ -37,12 +37,3 @@ spec:
                 port: 80
               jwksPath: /application/o/aigateway/jwks/
               cacheDuration: 5m
-
-    # Static keys for CLI consumers (opencode): AgentGateway ORs multiple
-    # authentication methods — a request is authenticated if it presents a
-    # valid JWT (above) OR one of these keys. Keys live in the SOPS Secret
-    # agentgateway-api-keys; the default location is `Authorization: Bearer`.
-    apiKeyAuthentication:
-      mode: Strict
-      secretRef:
-        name: agentgateway-api-keys

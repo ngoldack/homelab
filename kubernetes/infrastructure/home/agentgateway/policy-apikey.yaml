@@ -1,0 +1,28 @@
+# Static API-key authentication for the /v1/key/* client path.
+#
+# Deliberately ROUTE-scoped, not Gateway-scoped: AgentGateway does not OR
+# authentication methods — with the Gateway-level JWT policy Strict, a
+# request carrying an opaque API key is rejected by the JWT parser before the
+# key is ever considered (observed: 401 "the token header is malformed").
+# This policy targets the local-llm-key route and overrides the jwt field
+# (mode Permissive — ignore token errors here) while requiring a valid key.
+#
+# Keys live in the SOPS Secret agentgateway-api-keys (identifier: opencode),
+# sent as `Authorization: Bearer <key>`.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: api-key-auth
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: local-llm-key
+  traffic:
+    jwtAuthentication:
+      mode: Permissive
+    apiKeyAuthentication:
+      mode: Strict
+      secretRef:
+        name: agentgateway-api-keys

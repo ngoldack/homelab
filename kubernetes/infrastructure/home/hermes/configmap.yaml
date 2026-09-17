@@ -19,13 +19,19 @@ data:
   # onto the data PVC only when this value differs from the revision recorded
   # at /opt/data/.config-rev; bump it together with the pod-template
   # annotation hermes.ngoldack.de/config-rev to roll the pod.
-  config-rev: "2"
+  config-rev: "3"
   config.yaml: |
     # LLM via the agentgateway (agentgateway.dev data plane, ns agentgateway):
     # custom OpenAI-compatible provider, base_url at the in-cluster Service.
     # Auth is the aigateway-oidc client_credentials JWT — same issuer/audience
     # the old gateway used, so the stored token in hermes-secret keeps
     # validating (HERMES_LLM_JWT env -> OPENAI_API_KEY on the pod).
+    # `provider` MUST name the custom entry ("custom:<name>"): with the default
+    # `auto`, Hermes resolved model "local" to the OpenRouter provider and sent
+    # calls to api.openrouter.ai, which this namespace's egress allowlist
+    # deliberately blocks — every session then failed with "Hermes can't reach
+    # the model provider" while a direct curl to the Service worked (2026-09-17).
+    provider: custom:agentgateway
     # model "local" routes to the P100 (qwen36-35b) via local-p100 backend;
     # /v1/chat/completions only — hermes does not use the /v1/chat chain
     # prefix (that route is for hindsight-style single-model clients).

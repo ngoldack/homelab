@@ -1,0 +1,46 @@
+#  allowlist — namespace-scoped zero-trust policy (stage 1: the namespace
+# is one trust domain; everything crossing the namespace boundary is denied
+# unless named below). The cross-namespace edges below are the ones observed as
+# live traffic on this cluster; add a rule here (and on the peer's side) rather
+# than widening the boundary when a new integration appears.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: media-allowlist
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: media
+    - fromEntities:
+        - ingress
+        - health
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+    # This namespace's SSO-gated UIs are reached through the authentik proxy outpost.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: media
+    # Internet egress for indexers/Usenet/torrent traffic — arbitrary remote
+    # ports, so this rule is port-open by design (the download path's VPN leg
+    # rides a macvlan interface outside Cilium's datapath anyway).
+    - toEntities:
+        - world

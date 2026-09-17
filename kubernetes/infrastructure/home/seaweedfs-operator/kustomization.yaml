@@ -1,6 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
   - namespace.yaml
   - sources.yaml
   - helmrelease.yaml

@@ -1,0 +1,16 @@
+# unpoller default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml). This directory's Flux Kustomization
+# is named homelab-infra-metrics, but the namespace it creates is `unpoller`.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: unpoller-default-deny
+  namespace: unpoller
+spec:
+  description: Deny-all ingress and egress for every endpoint in unpoller.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

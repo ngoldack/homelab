@@ -1,0 +1,18 @@
+# authentik default-deny baseline — same semantics as the paperless pilot
+# (see ../paperless/cilium-default-deny.yaml). Cross-namespace traffic is off
+# by default; cilium-allowlist.yaml names the only exceptions.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: authentik-default-deny
+  namespace: authentik
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in authentik. The allowlist in
+    cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

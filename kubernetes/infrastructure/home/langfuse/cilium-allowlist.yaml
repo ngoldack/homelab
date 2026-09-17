@@ -1,0 +1,93 @@
+#  allowlist — namespace-scoped zero-trust policy (stage 1: the namespace
+# is one trust domain; everything crossing the namespace boundary is denied
+# unless named below). The cross-namespace edges below are the ones observed as
+# live traffic on this cluster; add a rule here (and on the peer's side) rather
+# than widening the boundary when a new integration appears.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: langfuse-allowlist
+  namespace: langfuse
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+    - fromEntities:
+        - ingress
+        - health
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+    # The ClickHouse operator manages this namespace's OLAP cluster.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: clickhouse-operator
+    # The SeaweedFS operator manages this namespace's blob store.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: seaweedfs-operator
+    # The valkey operator manages this namespace's Valkey pods.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: valkey-operator-system
+    # The CNPG operator and barman plugin manage this namespace's database.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+    # In-cluster OTLP/trace senders.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+    # The Kubernetes API (entity, control-plane VIP, in-cluster Service CIDR) —
+    # the CNPG instance manager reports status and backup results through it.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # Outbound HTTPS (LLM provider + update checks).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+    # OTLP export to the in-cluster collector.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "4317", protocol: TCP}
+            - {port: "4318", protocol: TCP}

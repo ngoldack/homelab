@@ -77,6 +77,8 @@ resources:
   # CrowdSec: local detection engine, detection-only (no bouncer — see the
   # namespace file for why the Cilium-Gateway stack has no remediation path).
   - crowdsec.yaml
-  # The cluster-wide zero-trust floor + Flux's own namespace policies. Applied
-  # last so every namespace it covers already has its allowlist reconciling.
+  # Flux's own namespace policies (default-deny + allowlist). There is
+  # deliberately NO cluster-wide floor here — a CCNP deny broke every Gateway
+  # route on 2026-09-17 and was rolled back; see
+  # infrastructure/home/security-baseline/kustomization.yaml for the evidence.
   - security-baseline.yaml

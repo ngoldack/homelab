@@ -38,7 +38,16 @@
 # langfuse-secret.sops.yaml and are referenced by valueFrom.secretKeyRef, never
 # inlined here.
 #
-# Sign-up is disabled (features.signUpDisabled) so only authentik logins work;
+# The username/password provider is off (auth.disableUsernamePassword), so
+# authentik is the only way in. langfuse.features.signUpDisabled must stay
+# FALSE: it renders AUTH_DISABLE_SIGNUP, and langfuse's own next-auth adapter
+# aborts the SSO callback with `throw Error("Sign up is disabled.")` before it
+# inserts the row (see createUser in its auth adapter) — which is exactly what
+# the first SSO login does on a database with an empty users table. With the
+# flag on, that login dies as next-auth error OAuthCreateAccount. Who may
+# reach the app is decided by the authentik application binding, not by this
+# flag — the same reasoning paperless records for
+# PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS.
 # namespaces/pooler are the repo's home conventions (nodeSelector to home).
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -75,8 +84,15 @@ spec:
         # Reports basic usage stats; the repo precedent is a standalone site,
         # so leave the default to avoid a surprise integration.
         telemetryEnabled: false
-        # Only authentik logins; disable self-service sign-up.
-        signUpDisabled: true
+        # Keep sign-up ENABLED (the chart default): this renders
+        # AUTH_DISABLE_SIGNUP, and langfuse's adapter refuses to create the
+        # user while it is "true" ("Sign up is disabled." thrown before the
+        # insert). On a database with no rows in `users`, the first SSO login
+        # IS that insert, so "true" makes the login fail with next-auth error
+        # OAuthCreateAccount. The authentik application binding restricts who
+        # can reach the app; the password provider stays off
+        # (auth.disableUsernamePassword), so no self-service path is exposed.
+        signUpDisabled: false
       nodeSelector:
         topology.homelab/site: home
       # NextAuth (OIDC handshake) — URL is the externally resolvable host.
@@ -106,10 +122,9 @@ spec:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
         - name: AUTH_AUTHENTIK_ALLOW_ACCOUNT_LINKING
-          # Langfuse already holds an account for this email (created before
-          # SSO). Without linking, next-auth refuses the OIDC sign-in with
-          # error=OAuthCreateAccount instead of attaching the authentik
-          # identity to the existing account.
+          # When a row with the same email already exists, attach the authentik
+          # identity to it instead of failing the sign-in; the first login on a
+          # fresh database creates the row instead (see signUpDisabled above).
           value: "true"
         - name: AUTH_AUTHENTIK_ISSUER
           # NO trailing slash — langfuse's own schema requirement for authentik

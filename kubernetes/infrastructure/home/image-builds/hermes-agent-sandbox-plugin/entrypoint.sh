@@ -1,13 +1,23 @@
 #!/bin/sh
-# Entrypoint for the agent_sandbox image. The gateway container runs
-# `args: ["gateway", "run"]` and the web-UI container passes its own argv, so
-# this wrapper honours argv (Kubernetes supervises each container separately,
-# with its own probes).
+# Entrypoint for the agent_sandbox gateway image.
 #
-# s6-overlay stays bypassed (its preinit cannot run under uid 10000 / PSA
-# restricted); with no args the gateway is the historical default.
+# WHY this wrapper exists: s6-overlay's preinit cannot run as uid 10000 under
+# PSA restricted, so the image bypasses s6 and starts the gateway binary
+# directly. The gateway container therefore also owns the web dashboard, which
+# is backgrounded under a supervision loop so a dashboard crash cannot leave a
+# Ready pod with a dead Desktop backend; the container's readiness probe checks
+# both listeners (8642 API, 9119 dashboard).
+#
+# The command line is fixed here on purpose: Kubernetes passes no args and
+# anything an operator adds to the pod spec would be silently ignored, so the
+# StatefulSet deliberately declares none.
 set -eu
-if [ "$#" -gt 0 ]; then
-  exec /opt/hermes/bin/hermes "$@"
-fi
+
+# Supervise the dashboard: restart it if it exits, and keep the exit status of
+# a failed start from killing the container (the gateway is the critical path).
+while :; do
+  /opt/hermes/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open || true
+  sleep 2
+done &
+
 exec /opt/hermes/bin/hermes gateway run

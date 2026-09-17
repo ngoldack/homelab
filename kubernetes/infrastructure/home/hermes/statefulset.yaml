@@ -2,15 +2,17 @@
 # terminal backend. Holds NO Kubernetes credentials beyond its own claim
 # RBAC (approved scoped grant in rbac.yaml): it talks to the sandbox-router
 # for files (v2 scoped tokens), gRPC-execs into adopted sandboxes directly
-# (user-approved fallback), and calls OpenRouter for the model.
+# (user-approved fallback), and calls the agentgateway data plane for the
+# model.
 #
 # Hardening (restricted PSA): runAsNonRoot (hermes uid 10000), fsGroup
 # 10000, RuntimeDefault seccomp, drop ALL caps, read-only rootfs, /tmp
 # emptyDir, no hostPath/sockets/kubeconfig. s6-overlay is bypassed in the
-# image (entrypoint.sh honours argv), so the gateway and the dashboard run as
-# the unprivileged hermes uid in separate containers, each with its own
-# probes; Kubernetes supervises the single replica. /opt/data/config.yaml is
-# seeded revision-aware from the hermes-config key "config-rev".
+# image, whose entrypoint runs the gateway and supervises the dashboard in the
+# same unprivileged container (the pod passes no argv, so the command line
+# cannot drift), and readiness checks both listeners; Kubernetes supervises
+# the single replica. /opt/data/config.yaml is seeded revision-aware from the
+# hermes-config key "config-rev".
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -45,7 +47,9 @@ spec:
       containers:
         - name: hermes
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
-          args: ["gateway", "run"]
+          # No args: the image entrypoint owns the command line (it starts the
+          # gateway and supervises the dashboard); declaring args here would be
+          # silently ignored.
           env:
             # LLM credential for the agentgateway custom provider
             # (config.yaml custom_providers -> OPENAI_API_KEY convention).
@@ -108,8 +112,16 @@ spec:
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
-            tcpSocket:
-              port: 8642
+            # Both listeners must answer: the API (401 without a bearer key is
+            # a healthy answer, curl returns 0 without -f) and the dashboard.
+            # A single container has one readiness probe, so this checks both.
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  curl -s -o /dev/null --max-time 3 http://127.0.0.1:8642/v1/models &&
+                  curl -s -o /dev/null --max-time 3 http://127.0.0.1:9119/
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
@@ -123,58 +135,6 @@ spec:
               mountPath: /opt/data/router-token
               subPath: token
               readOnly: true
-            - name: tmp
-              mountPath: /tmp
-        - name: dashboard
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
-          args: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open"]
-          env:
-            # Dashboard auth only — the dashboard container holds no LLM or
-            # API-server credential.
-            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-secret
-                  key: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
-            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-secret
-                  key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
-            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-secret
-                  key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: true
-          resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              cpu: "1"
-              memory: 1Gi
-          startupProbe:
-            tcpSocket:
-              port: 9119
-            periodSeconds: 5
-            failureThreshold: 60
-          readinessProbe:
-            tcpSocket:
-              port: 9119
-            periodSeconds: 10
-          livenessProbe:
-            tcpSocket:
-              port: 9119
-            periodSeconds: 15
-            failureThreshold: 4
-          volumeMounts:
-            - name: data
-              mountPath: /opt/data
             - name: tmp
               mountPath: /tmp
       initContainers:

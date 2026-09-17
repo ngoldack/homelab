@@ -81,7 +81,23 @@ unready pool.
     http://hermes.hermes.svc:8642/v1/chat/completions
   ```
   `model: local` routes to the P100 (qwen36-35b) through the in-cluster
-  agentgateway.
+  agentgateway. The ConfigMap pins that path explicitly, and all three keys
+  matter:
+  - `provider: custom:agentgateway` — with the default `auto` Hermes resolved
+    `local` to the **OpenRouter** provider, whose public API this namespace's
+    egress allowlist blocks (every session then failed with "Hermes can't reach
+    the model provider" while a direct curl to the Service worked);
+  - `custom_providers[0].key_env: OPENAI_API_KEY` — without it the request
+    reached agentgateway with an empty bearer token and was rejected 401
+    ("token header is malformed"); `key_env` names the pod env var, so no
+    credential is stored in the ConfigMap;
+  - `custom_providers[0].timeout: 600` — the P100 is a reasoning model on one
+    GPU: a single call runs ~125 s (≈11k-token system prompt) and a turn with
+    tool calls takes minutes, so the default budget interrupted calls with
+    "Operation interrupted: waiting for model response".
+  Budget accordingly: `hack/hermes-e2e.sh` allows `HERMES_E2E_MAX_TIME`
+  (default 900 s) for the chat call and polls for the claim for
+  `HERMES_E2E_POLL_TRIES` × `HERMES_E2E_POLL_SLEEP` (default 450 × 2 s).
 - **Acceptance:** `task hermes:e2e` runs `hack/hermes-e2e.sh`, the real
   gate. It asserts: 401 without / 200 with the bearer key; pre-flight refusal
   when stray claims already exist; HTTP 200 on the chat task; a claim labeled
@@ -194,7 +210,9 @@ manual per the steps above.
 | `Unknown TERMINAL_ENV 'agent_sandbox'` | Plugin not registered: `hermes plugins list` inside the pod must show `agent_sandbox`; the entry point must name the module (`hermes_agent_sandbox.provider`, `register(ctx)` on it). The image build asserts importability + entry point, so a failed build is the earlier signal |
 | 403 on sandboxclaims | Pod is not using SA `hermes` (`serviceAccountName`), or the RoleBinding in `hermes-sandbox` is missing (`hermes/rbac.yaml`) |
 | Claim created but exec fails | Warm pool down (`task hermes:e2e` asserts `status.replicas=1` after cleanup); sandbox ingress: 9090 only from the `hermes` namespace, Router 8080 only from the Router's own pod labels |
-| Model calls fail ("offline") | hermes egress: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
+| Model calls fail ("offline" / "can't reach the model provider") | Check the *provider* first: `grep -E '^provider:' /opt/data/config.yaml` must say `custom:agentgateway` — with `auto` Hermes calls OpenRouter, which the egress allowlist blocks. Then the network path: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
+| agentgateway rejects the call 401 "token header is malformed" | The `custom_providers` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
+| Model turn interrupted ("waiting for model response") | `custom_providers[0].timeout` is too small for the P100: a single call is ~125 s and tool turns take minutes; keep it at 600 s |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |
 | `router-token` wrong size | Must be exactly 32 bytes under `data:` (base64 of the raw seed) — never `stringData` (44-char base64 text). The plugin fails the doctor row instead of the first file operation |

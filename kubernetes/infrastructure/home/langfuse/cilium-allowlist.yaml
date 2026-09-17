@@ -75,6 +75,16 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
+    # Auth.js fetches the provider metadata (discovery + JWKS) and exchanges
+    # the code server-side from AUTH_AUTHENTIK_ISSUER, which is the EDGE
+    # hostname (https://authentik.ngoldack.de/application/o/langfuse) — the
+    # request traverses the Gateway, so it is checked as this pod's egress
+    # against the route's backend (the portal-bridge pod in the authentik
+    # namespace). Without this pair of rules the edge answers 403
+    # "Access denied" and the sign-in page renders OAuthSignin.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
     # Outbound HTTPS (LLM provider + update checks).
     - toEntities:
         - world

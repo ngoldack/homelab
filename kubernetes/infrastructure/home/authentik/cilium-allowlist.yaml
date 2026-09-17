@@ -33,6 +33,24 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
+    # The native-OIDC apps (grafana, langfuse, headlamp, paperless) point their
+    # provider endpoints at the edge hostname (https://authentik.ngoldack.de/…)
+    # rather than an in-cluster URL, so their server-side discovery/JWKS/token
+    # calls traverse the Gateway. Cilium evaluates Gateway traffic against the
+    # CLIENT identity with the route's backend pod as the peer (the
+    # authentik.ngoldack.de route backends the portal-bridge in this
+    # namespace), so each client needs its own rule here as well as the
+    # matching egress rule in its own allowlist — without the pair the edge
+    # answers 403 "Access denied" before the request reaches the app.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: headlamp
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: paperless
     # Hindsight's control-plane UI is published through this namespace's proxy outpost.
     - fromEndpoints:
         - matchLabels:

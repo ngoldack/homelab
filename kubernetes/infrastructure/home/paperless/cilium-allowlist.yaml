@@ -82,6 +82,16 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    # OIDC login: the allauth provider's server_url is the edge hostname
+    # (https://authentik.ngoldack.de/application/o/paperless/…), so the
+    # discovery/token/userinfo calls traverse the Gateway and Cilium checks
+    # this pod's egress against the route's backend — the portal-bridge pod in
+    # the authentik namespace. Needs the matching ingress rule in
+    # ../authentik/cilium-allowlist.yaml; without the pair the edge answers
+    # 403 "Access denied" and SSO login fails.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
 ---
 # Tika: stateless text extraction, reachable only from the app pod.
 apiVersion: cilium.io/v2

@@ -69,6 +69,15 @@ spec:
     # JWKS from validatorIssuerURL (https://authentik.ngoldack.de/application/o/
     # headlamp-oidc) — an edge hostname, i.e. internet traffic, not an
     # in-cluster endpoint. Without this the login flow cannot validate tokens.
+    #
+    # It also traverses the Gateway, so Cilium checks it as this pod's egress
+    # against the route's backend — the portal-bridge pod in the authentik
+    # namespace, NOT `world` — and the matching ingress rule in
+    # ../authentik/cilium-allowlist.yaml. Both halves are required; without
+    # them the edge answers 403 "Access denied".
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
     - toEntities:
         - world
       toPorts:

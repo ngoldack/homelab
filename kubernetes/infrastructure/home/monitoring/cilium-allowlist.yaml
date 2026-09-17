@@ -216,14 +216,22 @@ spec:
     #                   internal data path: vmagent writes, vmalert and grafana
     #                   query, vmauth fronts them)
     #   9093       alertmanager (vmalert -> vmalertmanager)
-    #   9090       sandbox-router metrics (VMPodScrape sandbox-router;
-    #              the router's :8081 probe port is not a scrape target)
     - toEntities:
         - cluster
       toPorts:
         - ports:
             - {port: "10250", protocol: TCP}
             - {port: "3000", protocol: TCP}
+            # Component metrics added with the Kyverno/Tetragon/CrowdSec
+            # monitoring: Kyverno's four controller metrics services (8000),
+            # Tetragon + its operator (2112/2113 — the DS is hostNetwork, so
+            # these targets are node IPs and only this egress side can gate
+            # them), CrowdSec LAPI/agent (6060). Without these the scrapes
+            # discover targets but every one reports up=0.
+            - {port: "8000", protocol: TCP}
+            - {port: "2112", protocol: TCP}
+            - {port: "2113", protocol: TCP}
+            - {port: "6060", protocol: TCP}
             - {port: "5000", protocol: TCP}
             - {port: "7979", protocol: TCP}
             - {port: "8080", protocol: TCP}
@@ -235,7 +243,6 @@ spec:
             - {port: "8435", protocol: TCP}
             - {port: "8888", protocol: TCP}
             - {port: "8889", protocol: TCP}
-            - {port: "9090", protocol: TCP}
             - {port: "9093", protocol: TCP}
             - {port: "9100", protocol: TCP}
             - {port: "9121", protocol: TCP}

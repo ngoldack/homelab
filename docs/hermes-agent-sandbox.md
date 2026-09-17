@@ -13,9 +13,10 @@ too).
 ```mermaid
 graph LR
     C[Client] -->|API_SERVER_KEY bearer| A[hermes:8642<br/>StatefulSet]
-    A -->|gRPC PodIP:9090<br/>direct exec, approved fallback| S[Sandboxd in Kata guest]
-    A -->|v2 scoped tokens<br/>GET/PUT/DELETE /v1/files| R[Router ClusterIP:8080]
-    R -->|proxy| S
+    D[Hermes Desktop] -->|kubectl port-forward :9119<br/>basic auth| A
+    A -->|gRPC podIP:9090<br/>direct exec| S[Sandboxd in Kata guest]
+    A -->|v2 scoped token<br/>GET /v1/files| R[Router ClusterIP:8080]
+    R -->|proxy :8080| S
     A -.SandboxClaim CRUD via SA token.- K[kube-apiserver]
     K --> W[agent-sandbox controller]
     W --> S
@@ -24,78 +25,149 @@ graph LR
 Layers (Flux dependencies in this order):
 `agent-sandbox` (controller + Router + admission + policies) →
 `hermes-sandbox` (namespace, RuntimeClass `kata`, `hermes-go`
-template/warm pool, Cilium) → `hermes` (gateway).
+template/warm pool, Cilium) → `hermes` (gateway). The `hermes-sandbox`
+Kustomization carries `healthCheckExprs` on `SandboxWarmPool`
+(`status.readyReplicas == spec.replicas`), so a half-provisioned warm pool
+blocks the gateway instead of reporting Ready: the SandboxWarmPool CRD has
+no `conditions`, and without the CEL expression kstatus cannot see an
+unready pool.
 
-### Trust model and the two documented design decisions
+### Trust model and the documented design decisions
 - **Claim RBAC (user-approved):** the sandbox-router (Go, v1.0.2) proxies to
   already-adopted sandboxes and has no claim API, so the gateway's SDK
   creates/deletes its own SandboxClaims via the Kubernetes API. The `hermes`
   SA gets a Role in `hermes-sandbox` ONLY: `sandboxclaims`
   (create/get/list/watch/delete) + `sandboxes` (get). No pods, no secrets,
-  no exec/port-forward, no cluster scope.
+  no exec/port-forward, no cluster scope. Owned claims carry the label
+  `agent-sandbox.hermes/owner=<AGENT_SANDBOX_GATEWAY_ID>` (`hermes` in the
+  StatefulSet; pod hostname when unset); the plugin sweeps orphaned claims
+  once at provider startup and retries failed deletions.
 - **Direct gRPC exec (user-approved):** v1.0.2 sandboxd exposes execution
   only as gRPC ProcessService on podIP:9090 (REST is `/v1/files`,
   `/v1/health`, `/v1/metadata`); the Go Router is HTTP-only, so Router
   exec does not exist. The plugin executes via plaintext gRPC to the
-  adopted pod. Cilium admits pod→sandbox 9090 only from the `hermes` and
-  `agent-sandbox-system` namespaces; claim ownership is the trust boundary.
-  File transfer keeps the intended Router path (v2 scoped tokens).
+  adopted pod. Cilium admits pod→sandbox 9090 only from the `hermes`
+  namespace, and Router→sandbox 8080 only from the Router's own pod labels;
+  claim ownership is the trust boundary.
+- **Admission + runtime:** the `secure-hermes-sandbox`
+  ValidatingAdmissionPolicy (binding `validationActions: [Deny]`,
+  `failurePolicy: Fail`) covers `pods` CREATE/UPDATE **and**
+  `pods/ephemeralcontainers` UPDATE, enforcing the Kata-only, credential-less
+  sandbox shape on all containers; the RuntimeClass `kata` carries only
+  `scheduling.nodeSelector` (no toleration). File transfer is fetch-only
+  today: `GET /v1/files` through the Router with a v2 scoped token.
 
 ## Bootstrap / deploy order
 
 1. `task sandbox:preflight` (nested-virt on pmx-main) — must pass.
-2. Tofu worker + machine config (labels/taints) — `tofu apply` in `tofu/home`.
+2. Tofu worker + machine config — the performance worker carries the
+   `siderolabs/kata-containers` extension and the
+   `workload.hermes.io/sandbox=true` label; no taints are applied anywhere.
 3. Commit/push; Flux reconciles: `agent-sandbox` → `hermes-sandbox` →
-   `hermes`.
-4. Plugin/gateway image builds: one-shot buildkit Jobs in
-   `kubernetes/infrastructure/home/image-builds/` (see Upgrade below).
+   `hermes` (the last waits for the warm pool gate above).
+4. Plugin/gateway and runtime image builds: one-shot buildkit Jobs under
+   `kubernetes/infrastructure/home/image-builds/` (Flux-managed; see
+   Upgrade below).
 
 ## Operation
 
 - **Interaction path (v1):** private OpenAI-compatible API server,
   `hermes:8642`, bearer `API_SERVER_KEY`. No public route, no messaging
-  platform.
+  platform; the dashboard on `:9119` is reached with `kubectl port-forward`.
   ```bash
   curl -H "Authorization: Bearer $API_SERVER_KEY" \
     -H 'Content-Type: application/json' \
-    -d '{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"…"}]}' \
+    -d '{"model":"local","messages":[{"role":"user","content":"…"}]}' \
     http://hermes.hermes.svc:8642/v1/chat/completions
   ```
-- **Acceptance:** `hack/hermes-e2e.sh` (API auth gate, Go task through the
-  sandbox, claim/pool cleanup); `hack/hermes-plugin-integration.sh` for the
-  plugin live suite (exec assertions need `AGENT_SANDBOX_IN_CLUSTER=1`).
-- **Kata smoke:** `task kata:smoke`.
+  `model: local` routes to the P100 (qwen36-35b) through the in-cluster
+  agentgateway.
+- **Acceptance:** `task hermes:e2e` runs `hack/hermes-e2e.sh`, the real
+  gate. It asserts: 401 without / 200 with the bearer key; pre-flight refusal
+  when stray claims already exist; HTTP 200 on the chat task; a claim labeled
+  `agent-sandbox.hermes/owner=<gateway id>` observed *during* the turn; the
+  adopted pod running `runtimeClassName=kata` on the node labeled
+  `workload.hermes.io/sandbox=true`; in-guest evidence (the literal sentinel
+  `E2E_GUEST_MARKER` plus a kernel release that differs from the host's);
+  cleanup (warm pool back to `status.replicas=1`, no stray pods, no
+  gateway-owned claims); and backend identity (`agent_sandbox` in
+  `hermes plugins list`, `terminal.backend == agent_sandbox`). It prints
+  `E2E PASS` on success and exits non-zero otherwise.
+- **Kata smoke:** `task kata:smoke` schedules a `runtimeClassName: kata`
+  pod, resolves the expected node by the sandbox label, and checks the guest
+  kernel plus the absence of a serviceaccount token in the guest.
+- **Plugin live suite:** `hack/hermes-plugin-integration.sh` requires
+  `AGENT_SANDBOX_SEED` (the 32-byte Ed25519 seed, hex or base64) and runs
+  `pytest -m integration -rs` against a port-forwarded Router
+  (`GET /healthz` probe). Set `AGENT_SANDBOX_IN_CLUSTER=1` for the exec
+  assertions — from a pod in the `hermes` namespace, because sandbox
+  ingress allows gRPC exec only from there — or `0` for the deliberate
+  non-exec subset (skips are printed). Seed extraction:
+  ```bash
+  sops -d kubernetes/infrastructure/home/hermes/secret.sops.yaml \
+    | grep AGENT_SANDBOX_ROUTER_TOKEN | awk '{print $2}' \
+    | base64 -d | xxd -p
+  ```
 
 ## Secrets inventory & rotation
 
-| Secret | Where | Rotation |
+All keys live in `hermes/secret.sops.yaml`.
+
+| Key | Consumed as | Rotation |
 |---|---|---|
-| `OPENROUTER_API_KEY` | `hermes/secret.sops.yaml` (stringData) | values.sops, restart pod |
-| `API_SERVER_KEY` | same Secret | `openssl rand -hex 32`, restart pod |
-| `AGENT_SANDBOX_ROUTER_TOKEN` | same Secret, **`data:`** (raw 32 B seed) | new seed → derive pubkey → update `agent-sandbox/router-auth-keys.yaml` (`kid: hermes-1`) → rollout Router → update Secret → verify `wc -c /opt/data/router-token` == 32 |
+| `OPENAI_API_KEY` (`stringData`) | agentgateway client-credentials JWT — the `agentgateway` custom provider's key | re-encrypt a fresh JWT; `kubectl -n hermes rollout restart statefulset/hermes` |
+| `API_SERVER_KEY` (`stringData`) | bearer token for the `:8642` API | new random value; restart the pod |
+| `HERMES_DASHBOARD_BASIC_AUTH_USERNAME/PASSWORD/SECRET` (`stringData`) | dashboard auth only (the dashboard runs in the gateway container) | re-encrypt; restart the pod |
+| `AGENT_SANDBOX_ROUTER_TOKEN` (**`data:`**) | Ed25519 seed mounted at `/opt/data/router-token` | new 32-byte seed → derive pubkey → update `agent-sandbox/router-auth-keys.yaml` (`kid: hermes-1`) → rollout Router → update Secret → verify `wc -c /opt/data/router-token` == 32 |
+| `OPENROUTER_API_KEY` (`stringData`) | **unused** — no pod consumes it; the model path is agentgateway | retained for now; not injected |
 
 The token file must stay base64-encoded under `data:` — a `stringData`
-entry would mount the 44-char text and crash `Ed25519.from_private_bytes`.
+entry would mount the 44-char base64 text and the plugin's doctor row
+(`agent_sandbox token file (32 B Ed25519 seed)`) fails, because the seed
+must be exactly 32 bytes.
+
+Plugin-side knobs (StatefulSet env): `AGENT_SANDBOX_GATEWAY_ID=hermes`
+(claim ownership id; falls back to the pod hostname) and
+`AGENT_SANDBOX_MAX_CONCURRENT` (default 1 — the process-wide capacity
+semaphore).
 
 ## Upgrade / rebuild (gateway + runtime images)
 
-Build Jobs pin the repo commit SHA as build context, so an image rebuild is:
-1. Commit the change (plugin/dockerfile).
-2. Bump the Job name suffix + context SHA + tag in
-   `image-builds/hermes-agent-sandbox-plugin.yaml` (or
-   `hermes-sandbox-runtime.yaml`), commit, push.
-3. Apply the Job, wait for completion, read the pushed digest from its log.
-4. Repin the image digest in the StatefulSet/SandboxTemplate, commit, push.
-5. Flux applies; verify curator gate (`hermes plugins list`, `hermes doctor`,
-   e2e).
+Both build Jobs are Flux-managed (`image-builds/kustomization.yaml`), so a
+rebuild is git-driven. Jobs are immutable: a new Job name is what triggers
+Flux to apply it and prune its predecessor.
 
-Renovate is not configured in this repo; pinning + digest updates are
-manual per the steps above.
+1. Commit the change (plugin source / Dockerfile) and push.
+2. Bump the Job name suffix and BOTH the `--opt=context` SHA and the image
+   tag in `image-builds/hermes-agent-sandbox-plugin.yaml` (gateway) or
+   `hermes-sandbox-runtime.yaml` (runtime). The checked-in context SHAs
+   predate the 2026-09-17 pinning change, so they must be bumped to the
+   commit that carries the Dockerfile being built before a rebuild.
+3. Flux reconciles the new Job; wait for completion.
+4. Read the pushed digest: the gateway prints it with `task hermes:repin`
+   (digest of the newest `build-hermes-agent-sandbox-plugin-*` Job); for the
+   runtime read it from the Job log (`kubectl -n buildkit logs job/…`).
+5. Re-pin the digest: `hermes/statefulset.yaml` (gateway; all three image
+   references in that file) or `hermes-sandbox/sandbox-template.yaml`
+   (runtime, `registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-<sha>` tags
+   move with their context SHA). Commit, push, reconcile.
+6. `task hermes:e2e`.
+
+Build details worth knowing: both Dockerfiles pin their base images by
+digest, the runtime builds sandboxd from the v1.0.2 commit with upstream
+version stamping, and the runtime cache uses one ref
+(`buildcache-v3`) for `--export-cache` and `--import-cache` — bump both
+lines together. The plugin image installs
+`k8s-agent-sandbox[grpc]==1.0.2` and appends its venv through a `.pth`
+(no `PYTHONPATH`), asserting at build time that the plugin is importable
+and its entry point is discoverable.
 
 ### Upgrade-hermes (Hermes base image)
-Bump `FROM docker.io/nousresearch/hermes-agent` in the plugin Dockerfile,
-verify the plugin's import paths against the new layout (`agent.*` at
-v2026.9.7; `hermes plugins compat` inside the image), rebuild per above.
+Bump `FROM docker.io/nousresearch/hermes-agent:v2026.9.7@sha256:<index
+digest>` in the plugin Dockerfile (tag + digest together), verify the
+plugin's import paths against the new layout (`agent.*` at v2026.9.7;
+`hermes plugins compat` inside the image), rebuild per above. The build's
+import/entry-point assertion fails loudly if the layout moved.
 
 ### CRD/stack upgrades (agent-sandbox)
 `upstream/sandbox-with-extensions.yaml` is vendored verbatim (see its
@@ -103,47 +175,65 @@ README for tag + sha256). Kustomize patches carry all local changes. Treat
 CRD upgrades as manual-review (v1beta1); validate with `kubectl explain`
 before adopting new fields.
 
+Renovate is not configured in this repo; pinning + digest updates are
+manual per the steps above.
+
 ## Rollback
 1. `git revert` (or checkout) the offending commit — never force-push.
 2. If a claim/sandbox storm is in progress: scale the warm pool to 0
    (`kubectl -n hermes-sandbox scale sandboxwarmpool hermes-go --replicas=0`),
    delete stray claims.
 3. If the gateway misbehaves: `kubectl -n hermes rollout undo statefulset/hermes`.
-4. Confirm via `hack/hermes-e2e.sh`.
+4. Confirm via `task hermes:e2e`.
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Gateway pod CrashLoop: s6 preinit | Image must ENTRYPOINT the hermes shim directly (s6 cannot run as uid 10000); rebuild if missing |
-| `Unknown TERMINAL_ENV 'agent_sandbox'` | Plugin not registered: `hermes plugins list` inside the pod; entry point must name the MODULE (`register(ctx)` on it) |
-| 403 on sandboxclaims | Pod is not using SA `hermes` (`serviceAccountName`), or RoleBinding missing |
-| Claim created but exec fails | Warm pool down (`sandboxwarmpool` replicas); sandbox ingress policy; gRPC port 9090 reachable only from `hermes`/`agent-sandbox-system` |
-| Model calls fail ("offline") | hermes egress: Cloudflare CIDR rule (104.18.0.0/15, 172.64.0.0/13:443); kube-apiserver egress for claims |
-| `router-token` wrong size | Must be exactly 32 bytes; token under `data:` (base64), not stringData |
-| Sessions run LOCAL despite `terminal.backend: agent_sandbox` | A hermes-generated `config.yaml` from an early boot (no terminal key) can shadow the operator config; the seed initContainer only replaces a MISSING file (`[ -f ] \|\| cp`), so fix once by removing the stale file and rolling. Verify `hermes config get terminal.backend` == `agent_sandbox` (TERMINAL_ENV=agent_sandbox is the hard override) |
-| Desktop connects then WS drops (~1s) | Dashboard couldn't persist config (`os.replace` EBUSY on a read-only config mount) — config.yaml must live on the PVC (seeded by initContainer), never a mounted ConfigMap |
+| Gateway pod CrashLoop: s6 preinit | Image must ENTRYPOINT the wrapper (`agent-sandbox-entrypoint.sh`) directly — s6 cannot run as uid 10000; rebuild if missing |
+| `Unknown TERMINAL_ENV 'agent_sandbox'` | Plugin not registered: `hermes plugins list` inside the pod must show `agent_sandbox`; the entry point must name the module (`hermes_agent_sandbox.provider`, `register(ctx)` on it). The image build asserts importability + entry point, so a failed build is the earlier signal |
+| 403 on sandboxclaims | Pod is not using SA `hermes` (`serviceAccountName`), or the RoleBinding in `hermes-sandbox` is missing (`hermes/rbac.yaml`) |
+| Claim created but exec fails | Warm pool down (`task hermes:e2e` asserts `status.replicas=1` after cleanup); sandbox ingress: 9090 only from the `hermes` namespace, Router 8080 only from the Router's own pod labels |
+| Model calls fail ("offline") | hermes egress: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
+| Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
+| A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |
+| `router-token` wrong size | Must be exactly 32 bytes under `data:` (base64 of the raw seed) — never `stringData` (44-char base64 text). The plugin fails the doctor row instead of the first file operation |
+| Sessions run LOCAL despite `terminal.backend: agent_sandbox` | The seed is revision-aware: `/opt/data/config.yaml` is re-copied (with a `config.yaml.bak` backup) whenever `hermes-config`'s `config-rev` differs from `/opt/data/.config-rev`. To change config, edit `hermes/configmap.yaml` and bump BOTH `config-rev` and the pod-template annotation `hermes.ngoldack.de/config-rev`. `TERMINAL_ENV=agent_sandbox` is the hard override; verify `hermes config get terminal.backend` == `agent_sandbox` |
+| Dashboard 9119 unreachable or WS drops (~1s) | The dashboard runs inside the gateway container, started and supervised by the image entrypoint (`hermes dashboard … 9119`), and the container's readiness probe checks both listeners — reach it via `kubectl port-forward svc/hermes 9119:9119` with basic auth; its config must live on the PVC (seeded by the initContainer), never a mounted ConfigMap (a read-only mount breaks persistence) |
 | Sandbox `go test` fails "read-only file system" on build cache | Runtime image must set `HOME=/tmp` (writable emptyDir); runtime ≥1.0.3 has it |
-| `task check` fails | `yamllint`/`tofu fmt`/`kustomize`/sops — run at repo root with `SOPS_AGE_KEY_FILE` set |
+| `task check` fails | `yamllint` / `tofu fmt` / `kustomize` / `lint:orphans` / sops — run at repo root with `SOPS_AGE_KEY_FILE` set |
 
 ## Capacity
 One warm + one active sandbox maximum, sized from the **shared** node's
-headroom rather than a dedicated VM: `wk-main-performance` gives 16 CPU /
-48 GiB while qwen36-35b (4 CPU / 8 GiB requests), buildkitd (12 CPU /
-20 GiB limits, mostly idle) and ~25 other pods live there too. Warm pool
+headroom rather than a dedicated VM: `wk-main-performance` (`talos-919-w9u`,
+16 CPU / 48 GiB VM, ~46.5 GiB allocatable) also carries qwen36-35b (4 CPU /
+8 GiB requests), nomic-embed-v15 (2 CPU / 4 GiB), buildkitd (12 CPU /
+20 GiB limits, mostly idle) and roughly three dozen other pods. Warm pool
 `replicas: 1`; sandbox limits 4 CPU / 5 GiB.
 
 The node is deliberately mixed-use (operator decision 2026-09-17, replacing
-the 2026-09-13 dedicated-worker carve): the `workload.hermes.io/sandbox`
+the earlier dedicated-worker carve): the `workload.hermes.io/sandbox`
 label only **attracts** sandbox pods — it excludes nothing, and no taint is
 applied. Accepted consequences: a sandbox session competes with GPU
 inference and the image builder for CPU/RAM, so a runaway session can
 starve inference and an inference burst can starve or OOM-kill a session;
 a host-side Kata/QEMU escape would land on a node that also runs
-`sandbox-router`, nvidia device plugin, tetragon, crowdsec and the
+`sandbox-router`, the nvidia device plugin, tetragon, crowdsec and the
 `truenas-csi` node plugin. To support more concurrency, raise real headroom
 first (more RAM on the VM, or move a tenant off it), then re-derive the
 limits — never raise replicas without the capacity.
+
+## Monitoring
+`monitoring/scrapes.yaml` scrapes `sandbox-router` (pod scrape, :9090) and
+the agent-sandbox controller (service scrape, :8080). The VMRule group
+`hermes-sandbox` in `monitoring/rules.yaml` carries the alerts:
+`HermesSandboxWarmPoolNotReady`, `HermesSandboxClaimStuck`,
+`HermesGatewayNotReady`, `HermesGatewayRestarting`,
+`HermesSandboxPodOOMKilled`, `HermesSandboxPodEvicted`,
+`HermesSandboxNodeMemoryPressure`, `HermesSandboxNodeMemoryLow`. The node
+name (`talos-919-w9u`) and node-exporter instance (`10.30.0.22:9100`) are
+pinned in the expressions because node labels are not queryable from
+metrics here — update them with the live node if it is renamed.
 
 ## Backup
 `data-hermes-0` PVC (10 GiB, `truenas-fast-nfs`) is covered by the repo's
@@ -153,21 +243,23 @@ selector at it. Sandbox emptyDirs, warm-pool pods and runtime caches are
 never backed up.
 
 ## Known gaps (tracked, deliberate)
-- **No alerting yet** — the monitoring stack vendors no rules by design
-  ("deliberate, visible gap" in `monitoring/helmrelease.yaml`). When the VM
-  operator + vendored VMRules land, add: sandbox node NotReady, warm pool
-  unavailable >10m, claims stuck Pending/Terminating, hermes crashloop,
-  Router auth failures, sandbox→management-network drops.
-- **`toFQDNs` is inert in this cluster** — the Cilium DNS proxy has
-  transparent mode off (split-horizon DNS conflict, `tofu/home/cilium.tf`),
-  so FQDN egress rules never learn IPs. The hermes model egress uses
-  OpenRouter's anycast CIDRs instead. The sandbox stack's
-  github.com/proxy.golang.org `toFQDNs` rules share this inertness; a
-  coding task that needs module downloads must first switch those to CIDRs
-  or route through an internal mirror.
-- **`write_file`/`read_file` on sandbox paths** — HERMES_WRITE_SAFE_ROOT
-  defaults to /opt/data, so host-side file tools cannot reach
-  `/workspace`; the model writes files through the terminal instead.
-  Upload via `PUT /v1/files` + `HERMES_WRITE_SAFE_ROOT=/workspace` is the
-  follow-up.
+- **Sandbox egress is DNS-only; module/package downloads fail** — the
+  sandbox CNP (`hermes-sandbox/cilium-policy.yaml`) allows cluster DNS and
+  nothing else; the old github.com/proxy.golang.org `toFQDNs` rule was
+  deleted because the Cilium DNS proxy is not in transparent mode
+  (`tofu/home/cilium.tf`), so an FQDN allow could never learn IPs. A coding
+  task that needs downloads requires an internal mirror selected with
+  `toEndpoints`, or a deliberate CIDR allow added there. The plugin injects
+  the same facts into every session prompt.
+- **`write_file`/`read_file` on sandbox paths** — the host-side write root
+  stays `/opt/data` (the data PVC; the container rootfs is read-only); the
+  plugin implements the fetch half (`GET /v1/files` through the Router with
+  v2 scoped tokens) but not the write half of the environment protocol. The
+  fix is a plugin-side PUT/upload path through the Router — not widening the
+  host-side write root, which would keep model bytes in the gateway
+  container instead of the guest.
+- **Monitoring does not scrape the gateway, by design** — hermes exposes no
+  Prometheus endpoint (`:8642/metrics` → 404, `:9119/metrics` → 302 to
+  `/login?next=%2Fmetrics`); do not re-probe. A scrape (plus a monitoring
+  ingress allow) only becomes worthwhile if Hermes ever ships `/metrics`.
 - **No Renovate** — pin/digest updates are manual (see Upgrade).

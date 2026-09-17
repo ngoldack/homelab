@@ -1,0 +1,74 @@
+# Tetragon tracing policies.
+#
+# Design decision, recorded here because it is the difference between a
+# security tool and an outage: **nothing in this file blocks anything.** Every
+# selector ends in the default `Post` (event) action.
+#
+# Why: the pilot namespaces proved that the Kubernetes API is reached by
+# basically everything that matters — the CNPG instance managers report status
+# through it, vmagent does service discovery through it, the operators watch
+# their CRs through it, and every one of those clients reads the very
+# service-account token this policy watches. A Sigkill on token reads is
+# therefore an outage generator, not an exfil control. It is safe only in a
+# namespace with *verified* zero API egress, and on this cluster the sandbox
+# namespace grants API egress on purpose (see
+# ../hermes-sandbox/cilium-policy.yaml — it allows the service CIDR), so no
+# namespace currently qualifies. Flip a selector to `Sigkill` here only after
+# proving that namespace has no API egress.
+#
+# Note process_exec events (every execve, with arguments) are emitted by
+# Tetragon's base sensor already — no policy is needed for exec auditing.
+---
+# Host-sensitive file writes, cluster-wide. /etc, /etc/shadow and the root
+# SSH keys are the classic persistence targets; on an immutable Talos host any
+# write here is either a bug or an attack.
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: sensitive-host-files
+spec:
+  kprobes:
+    - call: "security_file_permission"
+      syscall: false
+      args:
+        - index: 0
+          type: "file"
+        - index: 1
+          type: "int"
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: "Prefix"
+              values:
+                - "/etc/passwd"
+                - "/etc/shadow"
+                - "/etc/sudoers"
+                - "/root/.ssh/"
+          matchActions:
+            - action: Post
+---
+# Service-account token reads inside the agent sandbox, monitor-only (see the
+# header). This is the namespace where a leaked token would matter most, so
+# the events are worth having even though nothing is blocked yet.
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: sa-token-read-monitor
+  namespace: hermes-sandbox
+spec:
+  kprobes:
+    - call: "fd_install"
+      syscall: false
+      args:
+        - index: 0
+          type: "int"
+        - index: 1
+          type: "file"
+      selectors:
+        - matchArgs:
+            - index: 1
+              operator: "Prefix"
+              values:
+                - "/var/run/secrets/kubernetes.io/serviceaccount/token"
+          matchActions:
+            - action: Post

@@ -72,3 +72,8 @@ resources:
   # eBPF runtime security (observability-first). Like Kyverno it observes
   # rather than gates, so nothing depends on it.
   - tetragon.yaml
+  # Tetragon's tracing policies (CRD-before-CR split, as above).
+  - tetragon-policies.yaml
+  # CrowdSec: local detection engine, detection-only (no bouncer — see the
+  # namespace file for why the Cilium-Gateway stack has no remediation path).
+  - crowdsec.yaml

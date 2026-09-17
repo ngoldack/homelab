@@ -1,0 +1,89 @@
+# CrowdSec — local detection engine (chart 0.24.2 / app v1.8.1, pinned).
+#
+# Scope: detection only. The LAPI holds decisions and the agent (DaemonSet)
+# parses container logs from the node's /var/log/pods. No bouncer is deployed
+# (see namespace.yaml for the reasoning) and the Console enrolment stays off —
+# decisions never leave the cluster.
+#
+# The agent's first feed is authentik: it is the cluster's authentication
+# front door and its logs carry the client IP of every request. The custom
+# parser in config.parsers.s01-parse labels those lines so scenarios can act on
+# them; because the parser's pattern is matched against authentik's escaped
+# JSON request lines, verify it against live traffic after rollout with
+# `cscli metrics` (acquisition lines parsed > 0) before adding scenarios on top.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: crowdsec
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: crowdsec
+      version: "0.24.2"
+      sourceRef:
+        kind: HelmRepository
+        name: crowdsec
+      interval: 1h
+  targetNamespace: crowdsec
+  releaseName: crowdsec
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Talos runs containerd; the chart defaults to docker and would look for
+    # the wrong socket.
+    container_runtime: containerd
+    lapi:
+      enabled: true
+    agent:
+      enabled: true
+      # Node-local: the agent must read container logs from the host.
+      hostVarLog: true
+      # Pod log acquisitions — one entry per app worth parsing. The agent
+      # resolves these to the node's pod log files.
+      acquisition:
+        - namespace: authentik
+          podName: authentik-server
+          program: authentik
+        - namespace: authentik
+          podName: authentik-worker
+          program: authentik
+    config:
+      parsers:
+        s01-parse:
+          authentik.yaml: |
+            name: local/authentik
+            description: "Parse authentik's JSON request log lines"
+            filter: "evt.Line.Labels.type == 'authentik'"
+            nodes:
+              # authentik logs structured JSON with - at least for the request
+              # lines - a spans array carrying "remote" (the client address)
+              # and "path". The quotes inside the message arrive escaped, hence
+              # the doubled backslashes in the pattern.
+              - grok:
+                  name: local/authentik
+                  pattern: '\\"remote\\": \\"::ffff:%{IPV4:source_ip}'
+                  apply_on: Line.Raw
+                statics:
+                  - meta: log_type
+                    value: authentik_http_request
+                  - meta: service
+                    value: authentik
+                  - meta: source_ip
+                    expression: "evt.Parsed.source_ip"
+        s00-raw:
+          authentik-raw.yaml: |
+            name: local/authentik-raw
+            description: "Label authentik container log lines so the parse stage can see them"
+            filter: "evt.Line.Labels.type == 'authentik'"
+            nodes:
+              - statics:
+                  - meta: log_type
+                    value: authentik_raw

@@ -63,3 +63,7 @@ talosconfig-home.yaml
 
 # Editor settings (references machine-local absolute paths)
 .vscode/
+
+# Python bytecode (never commit build artifacts)
+__pycache__/
+*.pyc

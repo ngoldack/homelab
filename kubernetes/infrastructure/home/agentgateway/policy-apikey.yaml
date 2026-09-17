@@ -40,5 +40,13 @@ spec:
               cacheDuration: 5m
     apiKeyAuthentication:
       mode: Strict
+      # Read the key from a DEDICATED header, not Authorization: the client's
+      # Authorization header is forwarded to the upstream provider, which
+      # clobbers the provider's own credential from `policies.auth.secretRef`
+      # (observed: synthetic.new/Clerk rejecting the opaque sk- key with
+      # "Invalid JWT form" instead of authenticating as synthetic-key).
+      location:
+        header:
+          name: X-Api-Key
       secretRef:
         name: agentgateway-api-keys

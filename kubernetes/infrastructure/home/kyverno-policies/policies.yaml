@@ -2,11 +2,18 @@
 #
 # Why audit: this cluster is reconciled from Git by Flux, so a blocking policy
 # fails the *reconcile* of whatever manifest it catches, not a human's
-# `kubectl apply`. Turning these to Enforce is a per-namespace decision made
-# once PolicyReports for that namespace are clean — the enforcement switch is
-# a one-line change (`validationFailureAction: Enforce`) applied deliberately,
-# never as a side effect of this rollout. Pod Security Admission labels on the
-# namespaces carry the actual pod-hardening enforcement in the meantime.
+# `kubectl apply`. Flipping one to Enforce (`validationFailureAction: Enforce`)
+# is a deliberate per-namespace decision — and clean PolicyReports are NOT the
+# gate for it. These four policies only cover latest tags, host namespaces,
+# hostPath volumes and privileged/escalation, whereas `restricted` PSA also
+# requires runAsNonRoot, a seccompProfile, all capabilities dropped and a
+# read-only root filesystem — none of which any policy here checks. A namespace
+# can therefore report clean and still be rejected the moment enforce=restricted
+# lands, and because enforcement only evaluates new pods the breakage arrives
+# late and looks unrelated. A live census on 2026-09-17 found 40 of 52 in-scope
+# pods failing at least one restricted control, so those securityContexts have
+# to be added per workload first. Pod Security Admission labels carry the actual
+# pod-hardening enforcement in the meantime.
 #
 # Scope: the app namespaces (authentik, paperless, immich, langfuse, hindsight,
 # headlamp, hermes, agentgateway, aigateway, registry, llmkube-system,

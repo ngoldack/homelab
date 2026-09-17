@@ -1,0 +1,35 @@
+# The immich server's Prometheus exporter ports: 8081 (api) and 8082
+# (microservices), enabled by IMMICH_TELEMETRY_INCLUDE=all. Verified live — a
+# probe from the scraper to both ports returns Prometheus output.
+#
+# Why a Service instead of declaring container ports: the VM operator's
+# pod-scrape discovery keys on the container port NAME and this container
+# declares only http(2283), while s  VMPodScrape has no targetPort field to
+# bypass that. The container spec comes from immich-charts (which renders the
+# http port the probes reference), so editing the chart's values risks dropping
+# that name and crashlooping a core app for a metrics win.
+#
+# A Service does not require the container to declare the target port, and
+# SERVICE-scrape discovery keys on the Service port NAME — which is exactly what
+# the VMServiceScrape in ../../monitoring/scrapes.yaml addresses.
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server-metrics
+  namespace: immich
+  labels:
+    app.kubernetes.io/instance: immich
+    app.kubernetes.io/name: server-metrics
+spec:
+  selector:
+    app.kubernetes.io/instance: immich
+    app.kubernetes.io/name: server
+  ports:
+    - name: metrics-api
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: metrics-microservices
+      port: 8082
+      targetPort: 8082
+      protocol: TCP

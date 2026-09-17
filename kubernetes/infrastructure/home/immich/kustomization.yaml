@@ -12,3 +12,4 @@ resources:
   - library-pvc.yaml
   - helmrelease.yaml
   - httproute.yaml
+  - service-metrics.yaml

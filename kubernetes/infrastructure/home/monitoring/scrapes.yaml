@@ -10,7 +10,7 @@
 # the server container (../immich/helmrelease.yaml). Pod-level scrape, since
 # the Service only carries :2283.
 apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMPodScrape
+kind: VMServiceScrape
 metadata:
   name: immich-server
   namespace: immich
@@ -18,12 +18,15 @@ spec:
   namespaceSelector:
     matchNames: [immich]
   selector:
+    # Matches the Service's METADATA labels (not the pod selector).
     matchLabels:
-      app.kubernetes.io/instance: immich
-      app.kubernetes.io/name: server
-  podMetricsEndpoints:
-    - port: "8081"
-    - port: "8082"
+      app.kubernetes.io/name: server-metrics
+  endpoints:
+    # Port NAMES from immich/service-metrics.yaml: service-scrape discovery
+    # keeps targets on __meta_kubernetes_endpoint_port_name, so the numeric
+    # form this object used to carry discovered nothing (no up series at all).
+    - port: metrics-api
+    - port: metrics-microservices
 ---
 # ---- zot registry: metrics on the HTTP port once
 # extensions.metrics.enable is set (../registry/helmrelease.yaml).

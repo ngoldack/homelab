@@ -37,7 +37,9 @@ metadata:
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
-  # PolicyReports and the audit log (the review found the applier saw nothing).
+  # PolicyReports and to the applier as a kubectl warning (the review found
+  # the applier saw nothing; note this cluster runs no kube-apiserver audit
+  # policy, so the `audit:` PSA level records nothing either).
   emitWarning: true
   background: true
   rules:
@@ -131,7 +133,9 @@ metadata:
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
-  # PolicyReports and the audit log (the review found the applier saw nothing).
+  # PolicyReports and to the applier as a kubectl warning (the review found
+  # the applier saw nothing; note this cluster runs no kube-apiserver audit
+  # policy, so the `audit:` PSA level records nothing either).
   emitWarning: true
   background: true
   rules:
@@ -188,7 +192,9 @@ metadata:
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
-  # PolicyReports and the audit log (the review found the applier saw nothing).
+  # PolicyReports and to the applier as a kubectl warning (the review found
+  # the applier saw nothing; note this cluster runs no kube-apiserver audit
+  # policy, so the `audit:` PSA level records nothing either).
   emitWarning: true
   background: true
   rules:
@@ -244,7 +250,9 @@ metadata:
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
-  # PolicyReports and the audit log (the review found the applier saw nothing).
+  # PolicyReports and to the applier as a kubectl warning (the review found
+  # the applier saw nothing; note this cluster runs no kube-apiserver audit
+  # policy, so the `audit:` PSA level records nothing either).
   emitWarning: true
   background: true
   rules:

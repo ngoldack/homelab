@@ -3,16 +3,21 @@ kind: Namespace
 metadata:
   name: headlamp
   labels:
-    # Required before httproute.yaml can attach to the public Gateway. Despite
-    # the label name this is LAN-only: the hostname exists solely in local DNS.
+    # Gate labels the Gateway's allowedRoutes selectors require. The edge label
+    # is what httproute-edge.yaml attaches headlamp.ngoldack.de with; the
+    # public-ingress label is vestigial (the LAN twin route was retired with the
+    # split-horizon design) but kept so re-adding a LAN route needs no label
+    # change. Headlamp authenticates with native OIDC — there is no proxy
+    # outpost in front of it.
     gateway.ngoldack.de/public-ingress: "true"
-    # Separate gate for the edge Gateway (Hetzner VIP): headlamp is reachable
-    # there only through the authentik outpost — see httproute-edge.yaml and
-    # the SECURITY NOTE in httproute.yaml, which this satisfies.
     gateway.ngoldack.de/edge-ingress: "true"
     # Pod Security Admission: audit+warn at `restricted`, enforcement left to
-    # Talos' cluster default (`baseline`) — drift is reported, nothing is
-    # rejected. Same posture as the app namespaces.
+    # Talos' cluster default (`baseline`). Reported-only on purpose: a live
+    # check on 2026-09-17 found almost every workload in these namespaces
+    # violating `restricted` (runAsNonRoot, seccompProfile, capabilities.drop,
+    # allowPrivilegeEscalation) and Kyverno's four audit policies do not cover
+    # those fields — so `enforce: restricted` needs those securityContexts added
+    # workload by workload first; clean policy reports alone are not the gate.
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ---
@@ -69,12 +74,12 @@ spec:
         installOptions:
           parallel: true
           maxConcurrent: 3
-    # Not exposed on the public Gateway: this chart's pod ServiceAccount is
-    # bound to cluster-admin, and no OIDC provider is configured here (the
-    # chart supports real per-user OIDC login — config.oidc.* — but that
-    # needs an external IdP client the operator sets up first). Reach it via
-    # `kubectl -n headlamp port-forward` until an OIDC provider is wired up;
-    # re-enable httpRoute (parentRefs: [{name: public, namespace: network}],
-    # hostnames: [headlamp.network.svc.${CLUSTER_DOMAIN}]) only once it is.
+    # The chart's built-in httpRoute stays disabled because this namespace's
+    # exposure is declared explicitly in httproute-edge.yaml (edge Gateway), and
+    # login is native OIDC via config.oidc.* above — the provider is seeded in
+    # ../authentik/seed.yaml. Security note: this release's pod ServiceAccount
+    # carries a cluster-admin binding, so the dashboard's server-side identity
+    # is far more privileged than any signed-in user; that binding is the
+    # remaining item to retire now that per-user OIDC works.
     httpRoute:
       enabled: false

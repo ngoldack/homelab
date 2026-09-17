@@ -13,11 +13,12 @@ metadata:
   name: agentgateway
   labels:
     # Pod Security Admission: audit+warn at `restricted`, enforcement left to
-    # Talos' cluster default (`baseline`). Restricted-level drift becomes
-    # visible in the API audit log, in kubectl warnings and in Kyverno's
-    # PolicyReports without being able to reject a pod; the flip to
-    # `enforce: restricted` is a per-namespace decision once those reports are
-    # clean.
+    # Talos' cluster default (`baseline`). Reported-only on purpose: a live
+    # check on 2026-09-17 found almost every workload in these namespaces
+    # violating `restricted` (runAsNonRoot, seccompProfile, capabilities.drop,
+    # allowPrivilegeEscalation) and Kyverno's four audit policies do not cover
+    # those fields — so `enforce: restricted` needs those securityContexts added
+    # workload by workload first; clean policy reports alone are not the gate.
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
     gateway.ngoldack.de/edge-ingress: "true"

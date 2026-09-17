@@ -1,11 +1,15 @@
-# The cluster-wide zero-trust baseline: Flux's own namespace policies plus the
-# CiliumClusterwideNetworkPolicy that denies every non-system namespace by
-# default (see the files in this directory for the exclusion reasoning).
+# The cluster-wide zero-trust baseline is deliberately *per namespace*: this
+# Kustomization carries Flux's own namespace policies (default-deny + allowlist
+# in flux-system-cilium.yaml), NOT a cluster-wide CiliumClusterwideNetworkPolicy.
+# A CCNP floor was trialled on 2026-09-17 and rolled back the same day because
+# Cilium enforces it inside the Gateway's Envoy — every route answered 403
+# "Access denied"; the evidence is recorded in
+# infrastructure/home/security-baseline/kustomization.yaml.
 #
-# dependsOn network and monitoring-crds: the former because this is network
-# policy (and the CCNP is only meaningful once the per-namespace allowlists it
-# works with are reconciling), the latter because the VMRules that surface
-# policy violations from this layer live in monitoring.
+# dependsOn network only (ordering intent for a network-policy layer). There is
+# deliberately no monitoring-crds dependency here: this Kustomization ships no
+# VMRules — policy-violation alerting lives with the rest of the rules in
+# infrastructure/home/monitoring/rules.yaml.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -20,7 +24,6 @@ spec:
   retryInterval: 2m
   dependsOn:
     - name: network
-    - name: monitoring-crds
   sourceRef:
     kind: GitRepository
     name: flux-system

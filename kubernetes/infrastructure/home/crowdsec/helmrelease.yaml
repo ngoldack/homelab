@@ -53,12 +53,14 @@ spec:
           enabled: false
     agent:
       enabled: true
-      # Log acquisitions. Talos keeps container logs only at
-      # /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log — the kubelet's
-      # /var/log/containers symlink farm does not exist there, so the chart's
-      # pod-name shorthand (which builds /var/log/containers/<pod>_<ns>_*.log
-      # patterns) matches nothing and the agent parses zero lines. These are
-      # raw file datasources instead, with the labels the parser filters on.
+      # Log acquisitions. The chart's pod-name shorthand builds
+      # /var/log/containers/<podName>_<namespace>_*.log — those files do exist
+      # on this node, but the shorthand takes an EXACT pod name and Deployment
+      # pods carry a -<replicaset>-<id> suffix, so `podName: authentik-server`
+      # matched nothing (the chart's own values example passes a glob like
+      # `ingress-nginx-controller-*` for exactly this reason). Explicit file
+      # datasources over the pod-log directory are unambiguous and carry the
+      # label the parser filters on.
       hostVarLog: true
       additionalAcquisition:
         - source: file

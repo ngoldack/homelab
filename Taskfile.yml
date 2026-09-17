@@ -331,8 +331,18 @@ tasks:
           exit 1
         }
         echo "job: $job"
-        kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" \
-          | grep -oE 'sha256:[0-9a-f]{64}' | tail -1
+        # The log carries several digests (config, image manifest, and the cache
+        # image manifest written last) — only "exporting manifest" is the pushed
+        # image manifest. Cross-check by hand when wanted:
+        #   skopeo inspect --format '{{.Digest}}' docker://<the Job's output tag>
+        digest=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" \
+          | grep -oE 'exporting manifest sha256:[0-9a-f]{64}' | tail -1 \
+          | grep -oE 'sha256:[0-9a-f]{64}')
+        [ -n "$digest" ] || {
+          echo "no image-manifest digest in $job's log — inspect it by hand" >&2
+          exit 1
+        }
+        echo "$digest"
 
   tofu:run:
     internal: true

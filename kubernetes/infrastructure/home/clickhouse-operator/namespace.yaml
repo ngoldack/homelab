@@ -7,11 +7,15 @@ metadata:
   name: clickhouse-operator
   labels:
     # Pod Security Admission: audit+warn at `restricted`, enforcement left to
-    # Talos' cluster default (`baseline`). Reported-only on purpose: a live
-    # check on 2026-09-17 found almost every workload in these namespaces
-    # violating `restricted` (runAsNonRoot, seccompProfile, capabilities.drop,
-    # allowPrivilegeEscalation) and Kyverno's four audit policies do not cover
-    # those fields — so `enforce: restricted` needs those securityContexts added
-    # workload by workload first; clean policy reports alone are not the gate.
+    # Talos' cluster default (`baseline`). What actually surfaces drift here is
+    # the `warn` level (kubectl warnings) and Kyverno's PolicyReports — NOT the
+    # `audit` level: this cluster runs no API audit policy (Talos leaves audit
+    # logging off and nothing in tofu/ configures it), so `audit:` records
+    # nothing today. Reported-only on purpose besides: a live check on
+    # 2026-09-17 found almost every workload violating `restricted`
+    # (runAsNonRoot, seccompProfile, capabilities.drop, allowPrivilegeEscalation)
+    # and Kyverno's four policies do not cover those fields, so
+    # `enforce: restricted` needs those securityContexts added workload by
+    # workload first.
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

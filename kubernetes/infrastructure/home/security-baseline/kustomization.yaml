@@ -39,3 +39,14 @@ resources:
 # object two Flux owners. Fixing it properly means regenerating the bootstrap
 # with the label, or moving namespace ownership out of the generated file —
 # both bigger than this rollout.
+
+# Known control gap, recorded so the next review does not rediscover it — this
+# cluster configures NO Kubernetes API audit policy. Talos leaves API audit
+# logging off by default and nothing in tofu/home/ sets
+# `cluster.apiServer.auditPolicy`, so the
+# `pod-security.kubernetes.io/audit` labels on the app namespaces record
+# nothing: only `warn` (kubectl warnings) and Kyverno's PolicyReports surface
+# PSA drift, and there is no audit trail at all for Secret reads or policy
+# changes. Enabling it is a Talos config change (auditPolicy + a log
+# destination) and a deliberate operator decision about volume and retention,
+# not a one-line policy fix.

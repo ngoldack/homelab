@@ -2,9 +2,27 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   # Flux's own namespace: the reconciliation plane gets an allowlist like any
-  # other workload namespace, so it is inside the cluster-wide deny floor.
+  # other workload namespace.
   - flux-system-cilium.yaml
-  # The floor itself: every workload namespace not listed as a system
-  # namespace is denied in both directions, including namespaces that do not
-  # exist yet.
-  - cluster-default-deny.yaml
+
+# There is deliberately NO CiliumClusterwideNetworkPolicy here.
+#
+# A cluster-wide default-deny CCNP (`endpointSelector` matching every
+# non-system namespace with `ingress: [- {}]` / `egress: [- {}]`) was trialled
+# and rolled back on 2026-09-17: Cilium enforces cluster-wide policy inside the
+# Gateway's Envoy as well as in the datapath, so the moment the CCNP landed
+# every HTTP route on the edge Gateway answered "Access denied" (HTTP 403,
+# `server: envoy`) — all apps, on every hostname, from inside and outside the
+# cluster. Per-namespace allowlists did not rescue it; the deny is evaluated at
+# the proxy before those allows apply. Deleting the CCNP restored service
+# immediately.
+#
+# The zero-trust property is therefore delivered per namespace
+# (`cilium-default-deny.yaml` + `cilium-allowlist.yaml` in each app directory,
+# which lock exactly that namespace's pods and were verified not to disturb the
+# Gateway path). The operational consequence, to be explicit: a *new*
+# namespace starts open and must ship its own policy pair — there is no
+# automatic floor. If a floor is wanted later, it has to be built and tested
+# against the Gateway path first (e.g. scoped to workload namespaces and
+# verified with a browser + curl pass over every hostname in
+# kubernetes/infrastructure/home/*/httproute*.yaml), not assumed.

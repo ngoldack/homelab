@@ -1,27 +1,24 @@
 # Build the Hermes gateway image (hermes-agent-sandbox-plugin).
 #
-# --opt=context pins the plugin commit
-# 035bc51a1a7345c2f0e811e69dbd67e0f03cea67. NOTE: that SHA predates the
-# 2026-09-17 pinning change (base index digest + interpreter wiring), so bump
-# --opt=context to the commit that carries it before rebuilding; the pins then
-# live in the Dockerfile at that commit. It derives from the Hermes base image
-# (nousresearch/hermes-agent:v2026.9.7, index-digest-pinned in the Dockerfile
-# itself), installs the agent-sandbox SDK + plugin into a plain venv, and
-# registers the plugin via the hermes_agent.plugins entry point.
+# --opt=context pins the repo commit whose Dockerfile carries the build: the
+# base image is index-digest-pinned, the plugin venv is wired via a .pth
+# derived from the interpreter, and the build asserts the plugin is importable
+# and discoverable. It derives from the Hermes base image
+# (nousresearch/hermes-agent:v2026.9.7) and installs the agent-sandbox SDK +
+# plugin, registering the plugin via the hermes_agent.plugins entry point.
 #
 # OUTPUT: this Job records the digest of the image it BUILT (the base image's
-# digest lives in the Dockerfile). Last built digest — the one
-# hermes/statefulset.yaml pins today — is
+# digest lives in the Dockerfile). Previous build (context ...#035bc51a1a73),
+# which hermes/statefulset.yaml pinned until the 2026-09-17 rebuild:
 #   sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
-# A rebuild from the changed Dockerfile yields a NEW digest: re-record it here
-# and re-pin the StatefulSet.
+# Re-record the new digest here and re-pin the StatefulSet after every rebuild.
 #
 # RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
 # tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-035bc51
+  name: build-hermes-agent-sandbox-plugin-970fd38
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -43,9 +40,9 @@ spec:
             - --tlskey=/certs/tls.key
             - build
             - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#035bc51a1a7345c2f0e811e69dbd67e0f03cea67
+            - --opt=context=https://github.com/ngoldack/homelab.git#970fd38265526b9b150471093bf867fb540b32b6
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0,push=true
+            - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-970fd38,push=true
             - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max
             - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache
             - --progress=plain

@@ -1,29 +1,26 @@
 # nomic-embed-text-v1.5 (f16) on the Tesla P100 — the fleet's embedding endpoint.
 #
-# 768-dim mean-pooled vectors, 8192-token trained maximum, served over
-# llama.cpp's OpenAI-compatible POST /v1/embeddings on port 8080. This service
-# shares the single P100 with the qwen36-35b chat model: the device plugin's
-# time-slicing advertises nvidia.com/gpu: 2 so both pods can open the whole
-# device, which means VRAM is budgeted here by hand (see nvidia/helmrelease.yaml).
+# 768-dim mean-pooled vectors served over llama.cpp's OpenAI-compatible
+# POST /v1/embeddings on port 8080. This service shares the single P100 with the
+# qwen36-35b chat model: the device plugin's time-slicing advertises
+# nvidia.com/gpu: 2 so both pods can open the whole device, which means VRAM is
+# budgeted here by hand (see nvidia/helmrelease.yaml).
 #
 # `--pooling mean` in extraArgs is LOAD-BEARING, not decoration: llmkube's
 # embedding mode injects `--pooling last` for embedding Models, and flags passed
 # through extraArgs win over the operator's own (verified in llmkube v0.9.25
 # internal/controller/runtime_llamacpp_args.go). Omit it and every similarity
-# score silently degrades to last-token pooling.
+# score silently degrades to last-token pooling. (The GGUF does declare
+# nomic-bert.pooling_type = MEAN, so an unforced server agrees — the flag is what
+# keeps the operator's own default from overriding the file.)
 #
 # llmkube stages the GGUF into the shared model cache PVC mounted at /models, so
-# llama-server is handed /models/<cacheKey>/nomic-embed-text-v1.5.f16.gguf — the
-# source URL below is a prefetch input, never a runtime fetch (hence prefetch).
+# llama-server is handed /models/<cacheKey>/nomic-embed-v15.gguf — the source URL
+# below is a prefetch input, never a runtime fetch (hence prefetch).
 #
 # Embedding mode also auto-appends `--cache-ram 0`. llama.cpp's host-side prompt
 # cache exists for completion (it keeps the prompt prefix for the next token),
 # which is meaningless for a one-shot embedding request and would only pin RAM.
-#
-# contextSize 8192 is the architecture's trained maximum and the largest VRAM
-# consumer after the weights: qwen36-35b already holds ~15 GiB of the P100's
-# 16 GiB, so the ~137M f16 parameters (~0.27 GiB) plus the 8192-token KV must
-# fit the ~1.3 GiB that remains. layers: -1 keeps the model fully GPU-resident.
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: Model
 metadata:
@@ -73,9 +70,23 @@ spec:
       value: nvidia
       effect: NoSchedule
   mode: embedding
-  # The model's trained maximum; going higher would silently truncate inputs
-  # while still costing KV cache.
-  contextSize: 8192
+  # 2048 is the model's declared context (nomic-bert.context_length = 2048), and
+  # llama.cpp treats it as a ceiling: at --ctx-size 8192 it logs
+  # `n_ctx_seq (8192) > n_ctx_train (2048)` and /props then reports n_ctx = 2048.
+  # The model card's 8192-token claim needs dynamic RoPE scaling at load time,
+  # which this file does not carry (no rope.scaling keys; freq_base is a bare
+  # 1000.0), so asking for 8192 would only advertise a capability that silently
+  # degrades long inputs. Raising it is a separate job: an explicit ropeScaling
+  # and an HF-transformers reference to check the embedding geometry against.
+  contextSize: 2048
+  # Embedding requests are not decoded — llama.cpp pushes the whole sequence
+  # through ONE physical micro-batch and llama-server forces n_batch = n_ubatch
+  # in embedding mode. At llama.cpp's default ubatch of 512 every input over 512
+  # tokens fails with `input (N tokens) is too large to process. increase the
+  # physical batch size`, which would cap this endpoint at a quarter of the
+  # model's context, so both batch sizes are pinned to the context length.
+  batchSize: 2048
+  uBatchSize: 2048
   # Single slot: embeddings are one-shot, and llama.cpp otherwise splits the
   # context across slots, shrinking what a single request may carry.
   parallelSlots: 1

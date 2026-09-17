@@ -1,0 +1,15 @@
+# agentgateway default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agentgateway-default-deny
+  namespace: agentgateway
+spec:
+  description: Deny-all ingress and egress for every endpoint in agentgateway.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

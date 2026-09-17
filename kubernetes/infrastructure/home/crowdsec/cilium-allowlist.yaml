@@ -1,0 +1,49 @@
+# crowdsec allowlist — the only traffic that may cross the default-deny baseline.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: crowdsec-allowlist
+  namespace: crowdsec
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: crowdsec
+    - fromEntities:
+        - ingress
+        - health
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+    # The node agents post events to the LAPI in this namespace; vmagent
+    # scrapes the LAPI's metrics.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - {port: "6060", protocol: TCP}
+            - {port: "8080", protocol: TCP}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: crowdsec
+    # CAPI (the online blocklist/decision service) — the only internet
+    # dependency of the engine.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

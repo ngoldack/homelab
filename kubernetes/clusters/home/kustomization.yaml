@@ -77,3 +77,6 @@ resources:
   # CrowdSec: local detection engine, detection-only (no bouncer — see the
   # namespace file for why the Cilium-Gateway stack has no remediation path).
   - crowdsec.yaml
+  # The cluster-wide zero-trust floor + Flux's own namespace policies. Applied
+  # last so every namespace it covers already has its allowlist reconciling.
+  - security-baseline.yaml

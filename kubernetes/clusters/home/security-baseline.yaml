@@ -1,0 +1,34 @@
+# The cluster-wide zero-trust baseline: Flux's own namespace policies plus the
+# CiliumClusterwideNetworkPolicy that denies every non-system namespace by
+# default (see the files in this directory for the exclusion reasoning).
+#
+# dependsOn network and monitoring-crds: the former because this is network
+# policy (and the CCNP is only meaningful once the per-namespace allowlists it
+# works with are reconciling), the latter because the VMRules that surface
+# policy violations from this layer live in monitoring.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: security-baseline
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/security-baseline
+  prune: true
+  wait: false
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

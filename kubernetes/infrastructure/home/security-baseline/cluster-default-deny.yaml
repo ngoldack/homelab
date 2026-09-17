@@ -1,0 +1,55 @@
+# The cluster-wide floor: cross-namespace traffic off by default, for every
+# namespace that exists now and every one created later.
+#
+# This is the CiliumClusterwideNetworkPolicy counterpart of the per-namespace
+# cilium-default-deny.yaml files. Those lock each namespace deliberately as it
+# is migrated; this one means a namespace nobody remembered to migrate is
+# isolated anyway, because the selector excludes only the namespaces Cilium
+# and Kubernetes themselves own.
+#
+# Semantics (verified live on this cluster): an empty rule (`- {}`) in a
+# direction whitelists no peer, so selecting an endpoint with both sections
+# puts it into default-deny in both directions. Allows are additive across
+# policies, which is how the per-namespace allowlists reopen their own flows.
+#
+# Excluded, with reasons:
+#   kube-system          Cilium agents/operator, CoreDNS, cilium-envoy, the
+#                        kubelet-facing machinery — the datapath itself.
+#   kube-public          cluster-info, no workloads.
+#   kube-node-lease      lease objects, no workloads.
+#   cilium-secrets       Cilium's own identity secrets.
+#   default              deliberately excluded: it is the namespace humans
+#                        `kubectl run` ad-hoc probes into, and locking it
+#                        would make every debugging pod fail DNS before it
+#                        could report anything. It hosts no workloads.
+#   reach-test           leftover test namespace (a completed pod from an
+#                        earlier reachability experiment).
+#   aigateway            holds only Secrets for the AI gateway; no workloads.
+#
+# Everything else — every app, operator, and the monitoring/auth/build planes
+# — is covered, and each has its own allowlist in this repo.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: cluster-default-deny-workloads
+spec:
+  description: >-
+    Default-deny ingress and egress for every non-system workload namespace,
+    including namespaces created in the future. Per-namespace allowlists are
+    the only exceptions.
+  endpointSelector:
+    matchExpressions:
+      - key: io.kubernetes.pod.namespace
+        operator: NotIn
+        values:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - cilium-secrets
+          - default
+          - reach-test
+          - aigateway
+  ingress:
+    - {}
+  egress:
+    - {}

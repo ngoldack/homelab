@@ -1,0 +1,82 @@
+# Flux's namespace: default-deny plus the flows the controllers actually need.
+#
+# Flux is the one workload whose egress *is* the delivery mechanism: it pulls
+# the Git repository this cluster is reconciled from (over SSH: the
+# GitRepository source is ssh://git@github.com/ngoldack/homelab) and fetches
+# Helm charts over HTTPS. Everything else — the in-cluster API it reconciles
+# against, DNS, and admission webhooks calling back in — is listed explicitly.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flux-system-default-deny
+  namespace: flux-system
+spec:
+  description: Deny-all ingress and egress for every Flux controller pod.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flux-system-allowlist
+  namespace: flux-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flux-system
+    - fromEntities:
+        - health
+    # vmagent scrapes the controllers' :8080 metrics (VMPodScrape
+    # flux-controllers).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flux-system
+    # Reconciling: writing Kustomizations/HelmReleases and reading Secrets.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # The Git remote over SSH (github.com:22) and HTTPS for Helm charts /
+    # OCI artifacts — the two egresses this cluster's release process depends
+    # on. Losing either stops reconciliation.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "22", protocol: TCP}
+            - {port: "443", protocol: TCP}

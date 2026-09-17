@@ -1,0 +1,17 @@
+# kyverno default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+# Privileged admission engine: see the allowlist for the webhook path the API
+# server needs.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kyverno-default-deny
+  namespace: kyverno
+spec:
+  description: Deny-all ingress and egress for every endpoint in kyverno.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

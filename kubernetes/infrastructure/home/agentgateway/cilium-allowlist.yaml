@@ -1,0 +1,72 @@
+# agentgateway allowlist — the only traffic that may cross the default-deny baseline.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agentgateway-allowlist
+  namespace: agentgateway
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+    - fromEntities:
+        - ingress
+        - health
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+    # In-cluster OTLP senders (every app exporting traces/metrics).
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "4317", protocol: TCP}
+            - {port: "4318", protocol: TCP}
+            - {port: "80", protocol: TCP}
+            - {port: "8080", protocol: TCP}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+    # Model backends (llmkube inference Services) in another namespace.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # Upstream model providers (OpenRouter etc.) and OTLP export.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

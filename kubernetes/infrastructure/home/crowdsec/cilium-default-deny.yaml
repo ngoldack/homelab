@@ -1,0 +1,16 @@
+# crowdsec default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+# Detection engine (LAPI + node agents), no bouncer: see namespace.yaml.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: crowdsec-default-deny
+  namespace: crowdsec
+spec:
+  description: Deny-all ingress and egress for every endpoint in crowdsec.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

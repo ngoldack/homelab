@@ -1,0 +1,16 @@
+# tetragon default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+# Privileged eBPF daemon (host PID/net namespaces): see the allowlist.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tetragon-default-deny
+  namespace: tetragon
+spec:
+  description: Deny-all ingress and egress for every endpoint in tetragon.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

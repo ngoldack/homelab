@@ -99,6 +99,24 @@ spec:
                 secretKeyRef:
                   name: hermes-secret
                   key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+            # Edge access (https://hermes.ngoldack.de, ../httproute-edge.yaml)
+            # uses the dashboard's own OIDC login — provider
+            # hermes-dashboard-oidc in ../../authentik/seed.yaml. The
+            # basic-auth vars above stay: the dashboard's
+            # /auth/password-login coexists with the OIDC flow and Hermes
+            # Desktop / port-forward keep using those credentials.
+            # PUBLIC_URL makes the redirect URI absolute
+            # (<public_url>/auth/callback), which is exactly the provider's
+            # registered redirect_uris entry.
+            - name: HERMES_DASHBOARD_PUBLIC_URL
+              value: https://hermes.ngoldack.de
+            # Per-provider issuer, shaped by the application slug
+            # (hermes-dashboard); must match the browser-visible host so the
+            # ID token's `iss` validates.
+            - name: HERMES_DASHBOARD_OIDC_ISSUER
+              value: https://authentik.ngoldack.de/application/o/hermes-dashboard/
+            - name: HERMES_DASHBOARD_OIDC_CLIENT_ID
+              value: hermes-dashboard-oidc
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

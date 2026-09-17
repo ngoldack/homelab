@@ -7,6 +7,10 @@ kind: Namespace
 metadata:
   name: hermes
   labels:
+    # The edge Gateway's https-apex listener only attaches HTTPRoutes from
+    # namespaces carrying this label (see ../hermes/httproute-edge.yaml for
+    # the dashboard route).
+    gateway.ngoldack.de/edge-ingress: "true"
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

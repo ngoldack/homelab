@@ -2,9 +2,11 @@
 # only egress is the explicit allowlist in the second document below:
 # cluster DNS, the sandbox Router :8080, adopted sandbox pods :9090, the
 # Kubernetes API 443/6443 (SandboxClaim lifecycle only), agentgateway :80,
-# and two public-internet rules on 443 (PyPI + GitHub fetches). No ingress
-# is needed in v1: the API server is reached via kubectl exec / in-pod
-# loops and nothing in-cluster calls the gateway.
+# the authentik issuer host 443 (dashboard OIDC), and two public-internet
+# rules on 443 (PyPI + GitHub fetches). Ingress is exactly one grant: the
+# edge Gateway serving the dashboard port for hermes.ngoldack.de. The API
+# port 8642 stays closed: it is reached via kubectl exec / in-pod loops and
+# nothing in-cluster calls the gateway.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -21,7 +23,13 @@ spec:
   egress:
     - {}
 ---
-# hermes egress allowlist — the complete grant set, one rule per destination:
+# hermes allowlist — the complete grant set, one rule per destination.
+# Ingress (exactly one):
+#   * cilium ingress entity    9119       — the edge Gateway serving
+#     hermes.ngoldack.de (dashboard). The dashboard authenticates the user
+#     itself via OIDC; port 8642 is deliberately NOT granted, so the
+#     OpenAI-compatible API cannot be reached from the edge.
+# Egress:
 #   * kube-dns (kube-system)   UDP/TCP 53 — cluster DNS
 #   * sandbox-router           8080       — Router REST file transfer
 #   * hermes-sandbox pods      9090       — gRPC exec into adopted sandboxes
@@ -37,12 +45,23 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: hermes-egress-allowlist
+  name: hermes-allowlist
   namespace: hermes
 spec:
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: hermes
+  ingress:
+    # The edge Gateway reaches this pod as the cilium "ingress" entity (its
+    # envoy data plane), health checks as "health" — the same shape as
+    # ../../langfuse/cilium-allowlist.yaml.
+    - fromEntities:
+        - ingress
+        - health
+      toPorts:
+        - ports:
+            - port: "9119"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
@@ -123,6 +142,19 @@ spec:
         - cidr: 185.199.109.0/22
         - cidr: 185.199.110.0/22
         - cidr: 185.199.111.0/22
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Dashboard OIDC (discovery, authorization-code token exchange, ID-token
+    # JWKS) all go to the issuer host, which MUST stay the browser-visible
+    # URL (https://authentik.ngoldack.de/application/o/hermes-dashboard/) so
+    # the ID token's `iss` matches what the browser used. From inside the pod
+    # that hostname resolves to the Hetzner edge address (verified: getent
+    # hosts in the gateway pod → 2.28.31.116), and toFQDNs rules are inert in
+    # this cluster, so the /32 is the only workable form.
+    - toCIDRSet:
+        - cidr: 2.28.31.116/32
       toPorts:
         - ports:
             - port: "443"

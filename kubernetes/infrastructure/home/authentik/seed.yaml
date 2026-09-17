@@ -60,6 +60,56 @@ data:
           meta_name: Headlamp
           meta_launch_url: https://headlamp.ngoldack.de/
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, headlamp-oidc]]
+      # ---------- hermes dashboard: native OIDC federation (NOT the outpost) ----------
+      # The gateway's dashboard ships its own OIDC login
+      # (plugins/dashboard_auth/self_hosted: authorization-code + PKCE as a
+      # PUBLIC client) and does its own handshake against authentik, so this
+      # provider must stay client_type: public — it never sends a
+      # client_secret, and a confidential provider would fail the token
+      # exchange with invalid_client. No !File secret, no seed-secrets volume.
+      # The outpost proxy would break the app's own /auth/callback, the same
+      # lesson as headlamp/langfuse. The application slug below shapes the
+      # issuer (/application/o/hermes-dashboard) and MUST equal
+      # HERMES_DASHBOARD_OIDC_ISSUER in ../hermes/statefulset.yaml; the
+      # redirect URI is derived from HERMES_DASHBOARD_PUBLIC_URL there.
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        identifiers:
+          name: hermes-dashboard-oidc
+        attrs:
+          client_id: hermes-dashboard-oidc
+          client_type: public
+          # Explicit RSA signing key: with signing_key unset authentik signs
+          # ID tokens with HS256 and the provider's JWKS is EMPTY ({}), which
+          # the dashboard plugin — RS256/ES256 verified against jwks_uri —
+          # cannot validate. Same trap as the langfuse provider above.
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
+          # grant_types MUST be pinned (see grafana-oidc): an empty model
+          # default [] denies every OIDC login.
+          issuer_mode: per_provider
+          grant_types:
+            - authorization_code
+            - refresh_token
+          redirect_uris:
+            - matching_mode: strict
+              url: https://hermes.ngoldack.de/auth/callback
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_groups]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: hermes-dashboard
+        attrs:
+          name: hermes-dashboard
+          meta_name: Hermes Dashboard
+          meta_launch_url: https://hermes.ngoldack.de/
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, hermes-dashboard-oidc]]
       # ---------- hindsight control-plane UI behind the edge outpost ----------
       # The owning application is what gives the outpost its vhost (learned
       # the hard way with grafana-proxy: without it the outpost silently
@@ -866,6 +916,14 @@ data:
         state: present
         identifiers:
           target: !Find [authentik_core.application, [slug, langfuse]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, hermes-dashboard]]
           order: 0
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]

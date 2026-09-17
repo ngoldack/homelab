@@ -7,8 +7,9 @@ resources:
   - secret.sops.yaml
   - statefulset.yaml
   - service.yaml
+  - httproute-edge.yaml
   # Deviation from the repo's cilium-default-deny.yaml + cilium-allowlist.yaml
   # pair: this namespace keeps both in one cilium-policy.yaml (two documents)
-  # because the gateway has no ingress rules at all, so the whole reachability
-  # of the credential-holding pod reads in one file.
+  # because the reachability of the credential-holding pod is short enough to
+  # read in one file (one ingress grant: the edge route's dashboard port).
   - cilium-policy.yaml

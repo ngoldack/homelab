@@ -1,0 +1,24 @@
+# Hermes Dashboard on the edge, gated by authentik SSO. The dashboard does
+# its OWN OIDC handshake (plugins/dashboard_auth/self_hosted, provider
+# hermes-dashboard-oidc in ../../authentik/seed.yaml), so this backend is the
+# hermes Service directly — NOT the authentik outpost, whose proxy would break
+# the dashboard's /auth/callback (same lesson as headlamp and langfuse).
+# Unauthenticated requests are redirected by the dashboard to authentik.
+# Only the dashboard port is routed: the OpenAI-compatible API on 8642 stays
+# in-cluster (kubectl exec / sandbox calls) and is NOT published here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hermes-dashboard-edge
+  namespace: hermes
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - hermes.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: hermes
+          port: 9119

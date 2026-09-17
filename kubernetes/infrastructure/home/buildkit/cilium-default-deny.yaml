@@ -1,0 +1,22 @@
+# buildkit default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+#
+# This namespace holds the cluster's most privileged workload (the rootless-
+# config-but-kernel-shared build daemon) plus the one-shot buildctl Jobs whose
+# pods carry no labels of their own, so the allowlist is namespace-scoped
+# rather than per-workload — see cilium-allowlist.yaml.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: buildkit-default-deny
+  namespace: buildkit
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in buildkit. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

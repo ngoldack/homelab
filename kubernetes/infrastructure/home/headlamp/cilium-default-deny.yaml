@@ -1,0 +1,17 @@
+# headlamp default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml). One pod, one allowlist file.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: headlamp-default-deny
+  namespace: headlamp
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in headlamp. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

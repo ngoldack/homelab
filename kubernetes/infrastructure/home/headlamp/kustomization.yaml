@@ -1,6 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # Zero-trust network policy first: the namespace's default-deny baseline and
+  # the single allowlist that reopens exactly headlamp's flows.
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
   - oidc-headlamp.sops.yaml
   - helmrelease.yaml
   # httproute.yaml (LAN twin) retired with the split-horizon design:

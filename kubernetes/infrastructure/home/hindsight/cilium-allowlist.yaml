@@ -1,0 +1,269 @@
+# hindsight allowlists — the only traffic that may cross the default-deny
+# baseline. Selectors are live pod labels: the three app components share
+# app.kubernetes.io/name=hindsight and are told apart by
+# app.kubernetes.io/component (api | control-plane | worker); the database
+# pod carries cnpg.io/cluster=hindsight-database.
+#
+# Cross-namespace edges this file establishes (mirror these when the peer
+# namespace is migrated):
+#   monitoring -> api:8888, worker:8889, database:9187   (scrapes)
+#   authentik  -> control-plane:3000                     (proxy outpost)
+#   world      -> api/worker:443 (OpenRouter), database:443 (S3)
+---
+# The API. Published on the LAN Gateway (reserved `ingress` identity) and
+# scraped by vmagent on its own port; the control-plane talks to it in-cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-api-allowlist
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: hindsight
+      app.kubernetes.io/name: hindsight
+      app.kubernetes.io/component: api
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # LLM calls go straight to OpenRouter (world), not through an in-cluster
+    # gateway — see the provider config in ../hindsight/helmrelease.yaml.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# The control-plane UI. Reachable only through the authentik proxy outpost
+# (seed.yaml: hindsight-ui-proxy). The outpost is configured with the app's
+# route URL, so the request can arrive either through the Gateway (reserved
+# `ingress` identity) or directly from the outpost pod in the authentik
+# namespace — both are allowed rather than guessing which hop the outpost
+# takes; the steady-state drop monitor is what tells us whether one of them is
+# dead weight to remove.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-control-plane-allowlist
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: hindsight
+      app.kubernetes.io/name: hindsight
+      app.kubernetes.io/component: control-plane
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: hindsight
+            app.kubernetes.io/name: hindsight
+            app.kubernetes.io/component: api
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+---
+# The worker StatefulSet: runs the memory-processing jobs, so it needs the DB
+# and the LLM provider.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-worker-allowlist
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: hindsight
+      app.kubernetes.io/name: hindsight
+      app.kubernetes.io/component: worker
+  ingress:
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "8889"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8889"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# The CNPG instance(s). Ingress: the api/worker pods on 5432, the operator and
+# barman plugin from cnpg-system (instance manager 8000), and the monitoring
+# scrape of the CNPG exporter. Egress: DNS, the Kubernetes API (entity + the
+# control-plane VIP — k8sServiceHost=127.0.0.1 means the VIP is not covered by
+# the entity), S3 for backups + WAL archiving, and sibling instances.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-database-allowlist
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: hindsight-database
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: hindsight
+            app.kubernetes.io/name: hindsight
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

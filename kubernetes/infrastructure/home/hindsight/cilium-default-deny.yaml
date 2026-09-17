@@ -1,0 +1,21 @@
+# hindsight default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+#
+# Four workloads: the API, the control-plane UI (published behind the edge
+# authentik proxy outpost), the worker StatefulSet, and the CNPG cluster.
+# cilium-allowlist.yaml is the only thing that reopens traffic.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-default-deny
+  namespace: hindsight
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in hindsight. The
+    per-workload allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

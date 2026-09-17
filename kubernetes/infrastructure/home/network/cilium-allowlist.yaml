@@ -1,0 +1,74 @@
+# network allowlist: the two external-dns instances (LAN-scoped `external-dns`
+# and the edge `external-dns-edge`) — one CNP covers both because they share
+# app.kubernetes.io/name=external-dns.
+#
+# Records are created through the Hetzner Cloud DNS API over HTTPS and the
+# sources are Kubernetes Gateways/HTTPRoutes, so egress is DNS + the API server
+# + the internet. Ingress is health probes plus the monitoring scrape of the
+# :7979 metrics service.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-dns-allowlist
+  namespace: network
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+  ingress:
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "7979"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "7979"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Watching Gateways/HTTPRoutes (and reading the Hetzner token Secret).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # Hetzner Cloud DNS API (api.hetzner.cloud).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

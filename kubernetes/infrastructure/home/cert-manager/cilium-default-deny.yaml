@@ -1,0 +1,20 @@
+# cert-manager default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+#
+# Four workloads: the controller, cainjector, the admission webhook, and the
+# Hetzner DNS-01 webhook; cilium-allowlist.yaml reopens exactly their flows.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-default-deny
+  namespace: cert-manager
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in cert-manager. The
+    allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

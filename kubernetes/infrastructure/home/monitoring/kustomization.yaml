@@ -1,6 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # Zero-trust network policy: namespace default-deny + per-workload allowlists
+  # (the scrape hub's exporter-port egress is documented in the allowlist).
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
   - helmrelease.yaml
   # httproute.yaml (LAN twin) retired with the split-horizon design:
   # grafana is edge-only now, SSO via authentik everywhere.

@@ -1,0 +1,68 @@
+# buildkit allowlist — deliberately ONE namespace-wide policy.
+#
+# The buildctl clients are ephemeral Job pods created from
+# ../image-builds/*.yaml and they carry no labels of their own, so there is no
+# stable selector to scope a client-only rule to. Rather than leave the Jobs
+# default-denied (every build would fail at gRPC dial) or skip locking this
+# namespace (the builder is the most privileged pod in the cluster), the
+# namespace is treated as a single trust domain: build daemon and its clients
+# share one allowlist. If the Jobs ever gain labels, split this into
+# per-workload policies the way the other namespaces do.
+#
+# Flows: buildctl -> buildkitd:1234 (gRPC, TLS), buildkitd -> zot:5000
+# (image push), buildkitd -> the internet for base images and build-time
+# package fetches (docker.io/ghcr + apt/npm/pip), DNS for both.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: buildkit-allowlist
+  namespace: buildkit
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEntities:
+        - health
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: buildkit
+      toPorts:
+        - ports:
+            - port: "1234"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: buildkit
+      toPorts:
+        - ports:
+            - port: "1234"
+              protocol: TCP
+    # Push destination.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: registry
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    # Base images + build-time fetches (HTTP and HTTPS: some base-image
+    # toolchains still fetch over plain HTTP).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP

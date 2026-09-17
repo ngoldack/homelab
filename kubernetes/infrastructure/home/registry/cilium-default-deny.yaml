@@ -1,0 +1,18 @@
+# registry default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml). One workload: the zot StatefulSet
+# that is both the cluster's image registry and its pull-through cache.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: registry-default-deny
+  namespace: registry
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in registry. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

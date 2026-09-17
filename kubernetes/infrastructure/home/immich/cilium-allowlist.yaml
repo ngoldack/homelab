@@ -1,0 +1,252 @@
+# immich allowlists — the only traffic that may cross the default-deny
+# baseline. Selectors are live pod labels (app-template renders
+# app.kubernetes.io/name=server|machine-learning|valkey with instance=immich;
+# the database pods carry cnpg.io/cluster=immich-database), never Service
+# names: Cilium matches endpoint identities, so a Service-based rule would
+# miss the backing pods.
+---
+# The main API/webserver: the edge Gateway route backends immich-server:2283
+# directly (OIDC handled in-app), so its inbound path is the Gateway (reserved
+# `ingress` identity), kubelet probes (`health`) and the monitoring scrape of
+# its OpenTelemetry exporter ports.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-server-allowlist
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: immich
+      app.kubernetes.io/name: server
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "2283"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "2283"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
+            - port: "8082"
+              protocol: TCP
+    # vmagent (monitoring ns) scrapes the PrometheusExporter endpoints enabled
+    # via IMMICH_TELEMETRY_INCLUDE (VMPodScrape immich-server, ports 8081/8082).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+            - port: "8082"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # DB (via immich-database-rw), cache and the ML service for smart search.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: immich-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: immich
+            app.kubernetes.io/name: valkey
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: immich
+            app.kubernetes.io/name: machine-learning
+      toPorts:
+        - ports:
+            - port: "3003"
+              protocol: TCP
+---
+# The ML service: only the server calls it (smart search / face detection).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-machine-learning-allowlist
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: immich
+      app.kubernetes.io/name: machine-learning
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: immich
+            app.kubernetes.io/name: server
+      toPorts:
+        - ports:
+            - port: "3003"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "3003"
+              protocol: TCP
+  egress:
+    # Model weights are fetched from HuggingFace on first use of a model and
+    # then cached on the model PVC — so this is startup-time traffic only, but
+    # it must be allowed or a fresh model load fails. HTTPS to the internet
+    # (world), nothing in-cluster.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Valkey (cache + job queue): the server is the only client.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-valkey-allowlist
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: immich
+      app.kubernetes.io/name: valkey
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: immich
+            app.kubernetes.io/name: server
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+---
+# The CNPG cluster (two instances: streaming replication is instance-to-
+# instance inside this namespace, so both directions must be allowed).
+# Ingress: the server on 5432, the operator + barman plugin from cnpg-system
+# (instance manager 8000), and the monitoring scrape of the CNPG exporter.
+# Egress: DNS, the Kubernetes API (the instance manager reports status —
+# proven in the paperless pilot by the drop monitor), the control-plane VIP
+# (the API endpoint the instance is configured with; k8sServiceHost=127.0.0.1
+# means the VIP does not resolve to the kube-apiserver entity), S3 for base
+# backups + WAL archiving, and its sibling instances.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-database-allowlist
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: immich-database
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: immich
+            app.kubernetes.io/name: server
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
+    # Streaming replication between the two instances.
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: immich-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: immich-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # Barman sidecar -> s3://home-cnpg-backups-*/ (fsn1.your-objectstorage.com).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

@@ -1,0 +1,77 @@
+# headlamp allowlist. Headlamp federates *natively* against the authentik OIDC
+# provider (seed.yaml: "native OIDC federation (NOT the outpost proxy)" — the
+# proxy outpost breaks its oidc-callback), and its edge HTTPRoute backends
+# headlamp-headlamp:80 directly, so inbound traffic arrives from the Gateway
+# with the reserved `ingress` identity. The container port is 4466 (the
+# Service's named `http` targetPort).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: headlamp-allowlist
+  namespace: headlamp
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: headlamp-headlamp
+      app.kubernetes.io/name: headlamp
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "4466"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "4466"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The dashboard's whole purpose: proxying the signed-in user's requests to
+    # the Kubernetes API. Three rules because the API is reachable at three
+    # addresses and which one a client uses depends on how it was configured:
+    # the kube-apiserver entity (the API as Cilium knows it), the control-plane
+    # VIP the kubeconfig points at (10.30.0.10 — NOT covered by the entity when
+    # k8sServiceHost=127.0.0.1, proven by drops in the paperless pilot), and
+    # the in-cluster `kubernetes.default` Service address.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # OIDC validation: headlamp fetches the provider's discovery document and
+    # JWKS from validatorIssuerURL (https://authentik.ngoldack.de/application/o/
+    # headlamp-oidc) — an edge hostname, i.e. internet traffic, not an
+    # in-cluster endpoint. Without this the login flow cannot validate tokens.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

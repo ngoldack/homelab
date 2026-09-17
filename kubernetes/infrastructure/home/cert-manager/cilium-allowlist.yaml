@@ -1,0 +1,214 @@
+# cert-manager allowlists.
+#
+# The subtlety here is the webhook direction: the Kubernetes API server calls
+# the admission webhooks — the client is the API server, which runs on the
+# nodes, so that traffic arrives as the kube-apiserver entity (with `host` as
+# the fallback identity for node-local paths). Miss it and every Certificate
+# create starts failing admission review.
+---
+# Controller + cainjector: both are API clients, and the controller also
+# performs ACME HTTP-01/DNS-01 validation against the internet.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-controller-allowlist
+  namespace: cert-manager
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - controller
+          - cainjector
+  ingress:
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "9402"
+              protocol: TCP
+            - port: "9403"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9402"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # ACME (Let's Encrypt) over HTTPS, and DNS lookups for DNS-01 validation
+    # against the zone's authoritative nameservers.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+              # world:53 as an egress allow for validation queries.
+            - port: "53"
+              protocol: TCP
+---
+# The cert-manager admission webhook (port 10250). The API server is the
+# webhook client, so the inbound rule allows it by entity and by host
+# (node-local path).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-webhook-allowlist
+  namespace: cert-manager
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: webhook
+  ingress:
+    - fromEntities:
+        - kube-apiserver
+        - host
+        - remote-node
+        - health
+      toPorts:
+        - ports:
+            - port: "10250"
+              protocol: TCP
+            - port: "6080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
+# The Hetzner DNS-01 solver webhook (port 8443) — a separate CNP because the
+# pod carries a different label set; a single endpointSelector with both label
+# expressions would AND them and match nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-webhook-hetzner-allowlist
+  namespace: cert-manager
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cert-manager-webhook-hetzner
+  ingress:
+    - fromEntities:
+        - kube-apiserver
+        - host
+        - remote-node
+        - health
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The solver reads/writes Challenge objects (and its own config Secret)
+    # through the API — a sustained drop here, not just at issuance time.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # Hetzner DNS API for the challenge records.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

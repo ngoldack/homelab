@@ -1,0 +1,77 @@
+# registry (zot) allowlist.
+#
+# zot's inbound clients are unusual and easy to get wrong: the actual image
+# pulls are performed by **containerd on the nodes**, not by pods, so the
+# traffic arrives as the host/remote-node entity — a pod-scoped allow would
+# silently break every image pull on the next rollout. The remaining clients
+# are the BuildKit builder (pushes), the monitoring scrape, and the LAN
+# Gateway route for direct pulls.
+#
+# Egress is the pull-through cache's upstreams (docker.io, registry.k8s.io,
+# ghcr.io, quay.io — all HTTPS) over the internet.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: zot-allowlist
+  namespace: registry
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  ingress:
+    # Node-local containerd pulls + pulls from the other three nodes.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    # BuildKit pushes the images it builds here.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: buildkit
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    # registry.ngoldack.de on the LAN Gateway (external-dns publishes it as
+    # LAN-only; the Gateway backend is this Service).
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Pull-through cache upstreams (registry-1.docker.io, registry.k8s.io,
+    # ghcr.io, quay.io).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

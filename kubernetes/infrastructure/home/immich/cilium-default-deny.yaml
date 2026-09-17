@@ -1,0 +1,23 @@
+# immich default-deny baseline — same zero-trust posture as the paperless
+# pilot (see ../paperless/cilium-default-deny.yaml for the semantics note:
+# selecting an endpoint with an ingress/egress section flips that direction to
+# default-deny, and an empty rule whitelists no peer).
+#
+# The namespace has four workloads (server, machine-learning, valkey, and the
+# two-instance CNPG cluster); cilium-allowlist.yaml is the only thing that
+# reopens traffic between them and to the outside.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-default-deny
+  namespace: immich
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in immich. The per-workload
+    allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

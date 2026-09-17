@@ -1,0 +1,18 @@
+# network default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml). This namespace holds the Gateway
+# objects and the two external-dns instances; only external-dns has pods.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: network-default-deny
+  namespace: network
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in network. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

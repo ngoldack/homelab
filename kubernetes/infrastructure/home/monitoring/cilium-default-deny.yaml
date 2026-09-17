@@ -1,0 +1,22 @@
+# monitoring default-deny baseline — same semantics as the paperless pilot
+# (../paperless/cilium-default-deny.yaml).
+#
+# The stack has many workloads (grafana, kube-state-metrics, the VM operator,
+# vmagent/vmalert/vlsingle/vlagent, node-exporter); the allowlists in
+# cilium-allowlist.yaml reopen exactly what each needs — above all vmagent's
+# reach into every namespace that exposes an exporter.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: monitoring-default-deny
+  namespace: monitoring
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in monitoring. The
+    per-workload allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

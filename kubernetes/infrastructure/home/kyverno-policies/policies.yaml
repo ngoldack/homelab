@@ -301,7 +301,7 @@ spec:
                 - tetragon
                 - crowdsec
       validate:
-        message: "privileged and allowPrivilegeEscalation must be false."
+        message: "allowPrivilegeEscalation must be explicitly false (it defaults to true when omitted, which is what most of these findings are) and privileged must be false."
         pattern:
           spec:
             containers:

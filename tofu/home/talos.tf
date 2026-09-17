@@ -83,6 +83,31 @@ locals {
     }
   })
 
+  # Pull-through-cache mirrors: containerd on the HOME nodes resolves the
+  # four big public registries through the cluster's own zot (see
+  # kubernetes/infrastructure/home/registry/helmrelease.yaml — the sync
+  # extension fetches on first pull, later pulls are served from cache).
+  # Path-style endpoints (…/v2/<upstream>) with overridePath, because zot's
+  # onDemand sync reverse-maps the LOCAL repository name (docker.io/nginx)
+  # to the upstream one; a hostname-only zot mirror would push pulls into
+  # zot's own root namespace instead. Must match Talos v1.13's
+  # RegistryMirrorConfig schema: endpoints[].url (NOT endpoint).
+  #
+  # Home-only by construction: these locals concat into the
+  # talos_machine_configuration data sources that iterate var.nodes, and
+  # cloud_nodes (the Hetzner edge) is deliberately a separate map that can
+  # never reach the LAN-only registry name.
+  registry_mirror_hosts = ["docker.io", "registry.k8s.io", "ghcr.io", "quay.io"]
+  registry_mirrors = [for host in local.registry_mirror_hosts : yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "RegistryMirrorConfig"
+    name       = host
+    endpoints = [{
+      url          = "https://registry.ngoldack.de/v2/${host}"
+      overridePath = true
+    }]
+  })]
+
   # Prefer the live QEMU-agent-reported address (needed pre-bootstrap: the
   # node is still on DHCP, its eventual static IP isn't live yet), but fall
   # back to the known static IP if the agent query comes back empty. A
@@ -165,6 +190,10 @@ data "talos_machine_configuration" "controlplane" {
         }
       }),
       local.csi_kubelet_extra_mounts,
+      # Pull-through-cache mirrors for the public registries — see the
+      # registry_mirrors local above for why these exist and why they are
+      # home-only.
+      local.registry_mirrors,
       # Lets a pod obtain a scoped Talos API credential by creating a
       # ServiceAccount CR (serviceaccounts.talos.dev). Enabling this is what
       # makes Talos install and serve that CRD at all, and it runs a
@@ -274,6 +303,8 @@ data "talos_machine_configuration" "worker" {
         }
       }),
       local.csi_kubelet_extra_mounts,
+      # Pull-through-cache mirrors — same as the control plane above.
+      local.registry_mirrors,
     ],
     each.value.gpu ? [
       yamlencode({

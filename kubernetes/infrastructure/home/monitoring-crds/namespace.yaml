@@ -27,10 +27,10 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
     # enforce is relaxed, but audit and warn are deliberately left at baseline
     # so anything ELSE in this namespace that starts demanding host access
-    # still shows up — as a warning on apply. It will NOT appear in a Kyverno
+    # still shows up — as a warning on apply — instead of the exemption quietly
+    # covering the whole namespace forever. It will NOT appear in a Kyverno
     # report: this namespace is in every policy's exclude list. And the cluster
     # runs no kube-apiserver audit policy, so the `audit:` level below records
     # nothing yet either.
-    # instead of the exemption quietly covering the whole namespace forever.
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/warn: baseline

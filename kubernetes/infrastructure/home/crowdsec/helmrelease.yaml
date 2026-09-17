@@ -42,6 +42,15 @@ spec:
     container_runtime: containerd
     lapi:
       enabled: true
+      # No persistent volumes: this cluster has no default StorageClass, and
+      # the LAPI's volume holds bouncer API keys — of which there are none in a
+      # detection-only deployment. Decisions and config are rebuilt on restart,
+      # which is the documented trade for keeping the deployment stateless.
+      persistentVolume:
+        data:
+          enabled: false
+        config:
+          enabled: false
     agent:
       enabled: true
       # Node-local: the agent must read container logs from the host.

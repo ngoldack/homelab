@@ -1,0 +1,66 @@
+# Kyverno — cluster policy engine for the admission layer (chart 3.9.1 / app
+# v1.19.1, pinned). Role in this cluster: keep the *authored* policy set in
+# Git and produce background-scan PolicyReports, while Pod Security Admission
+# labels (added per namespace in the same commit as the first policies) remain
+# the native enforcement path for pod hardening. Policies are Audit-only in
+# this rollout — see policies.yaml for the reasoning and the exclusion scope.
+#
+# Deliberately NOT set here:
+#   - prometheusRule.enabled — this repo's monitoring uses the VictoriaMetrics
+#     operator CRDs (VMRule), not PrometheusRule; rules live in
+#     ../../monitoring/rules.yaml.
+#   - grafana.enabled — dashboards are vendored as JSON into
+#     ../../monitoring/dashboards/ and wired via that directory's
+#     configMapGenerator, the same path as every other dashboard here.
+#   - openreports / reports-server — the built-in PolicyReport CRDs are enough
+#     at this scale; enabling OpenReports would add a second reporting stack.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: kyverno
+      version: "3.9.1"
+      sourceRef:
+        kind: HelmRepository
+        name: kyverno
+      interval: 1h
+  targetNamespace: kyverno
+  releaseName: kyverno
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # One replica per controller: this is a single-node-class homelab control
+    # plane, and every extra replica is another webhook backend that must stay
+    # reachable.
+    admissionController:
+      replicas: 1
+    backgroundController:
+      replicas: 1
+    cleanupController:
+      replicas: 1
+    reportsController:
+      replicas: 1
+    features:
+      # Availability decision: a Kyverno outage must never stall API writes.
+      # With every policy in Audit mode there is nothing to enforce strictly,
+      # so letting webhook failures be ignored costs no real security here and
+      # removes an availability foot-gun (a downed Kyverno otherwise blocks
+      # every pod and workload create/update cluster-wide).
+      forceFailurePolicyIgnore:
+        enabled: true
+      # Background scanning is what produces PolicyReports for resources that
+      # already exist (audit of the running state, not just of new writes).
+      backgroundScan:
+        enabled: true
+        backgroundScanInterval: 1h

@@ -1,0 +1,34 @@
+# Kyverno: the cluster's admission-policy engine (Audit-only policies).
+#
+# dependsOn network (so the cluster's shared plumbing exists before another
+# webhook joins the request path) and monitoring-crds (the VM operator CRDs
+# are needed by the scrape object this Kustomization will carry). Installing
+# Kyverno adds webhooks to every API write, which is why the chart runs with
+# features.forceFailurePolicyIgnore — a Kyverno outage degrades policy
+# evaluation instead of blocking the cluster.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/kyverno
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+    - name: monitoring-crds
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

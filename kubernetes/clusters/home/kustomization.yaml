@@ -63,3 +63,6 @@ resources:
   # Media stack: Jellyfin/Jellyseerr + the *arr download chain, with the
   # download pods' egress VPN-routed via VLAN 2080.
   - media.yaml
+  # Admission policy engine (Kyverno, audit-only policies + PSA labels). No
+  # app depends on it: it observes rather than gates.
+  - kyverno.yaml

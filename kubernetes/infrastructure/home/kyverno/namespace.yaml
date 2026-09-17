@@ -1,0 +1,11 @@
+# Kyverno's namespace. No gateway labels: Kyverno has no user-facing surface —
+# only the API server talks to it (admission webhooks on 9443), and nothing
+# routes through the edge Gateway.
+#
+# PSA audit labels are deliberately absent here: Kyverno's own pods are the
+# enforcement plane and are covered by the clusterwide default-deny later in
+# the rollout, not by Pod Security Admission.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno

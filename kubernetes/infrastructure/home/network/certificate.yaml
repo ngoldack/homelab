@@ -22,4 +22,5 @@ spec:
     - "*.${CLUSTER_DOMAIN}"
     - "*.svc.${CLUSTER_DOMAIN}"
     - "*.media.svc.${CLUSTER_DOMAIN}"
+    - "*.aigateway.svc.${CLUSTER_DOMAIN}"
     - "${CLUSTER_DOMAIN}"

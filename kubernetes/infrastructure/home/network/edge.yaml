@@ -87,3 +87,22 @@ spec:
           selector:
             matchLabels:
               gateway.ngoldack.de/edge-ingress: "true"
+    # llm.aigateway.svc.{domain}: the public LLM gateway (agentgateway.dev
+    # data plane). One per-namespace *.svc. listener per consuming namespace,
+    # same single-label rule as the LAN gateway's https-media-svc. The agent
+    # gateway's JWT SecurityPolicy (policy-jwt.yaml, aigateway-oidc issuer)
+    # enforces auth on everything routed under it.
+    - name: https-aigateway-svc
+      protocol: HTTPS
+      port: 443
+      hostname: "*.aigateway.svc.${CLUSTER_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-svc-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.ngoldack.de/edge-ingress: "true"

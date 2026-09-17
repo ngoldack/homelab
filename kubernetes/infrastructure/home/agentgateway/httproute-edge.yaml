@@ -1,0 +1,37 @@
+# llm.aigateway.svc.ngoldack.de on the EDGE path — the PUBLIC route to the
+# agentgateway data plane (the agentgateway LoadBalancer Service on
+# 10.30.0.203). This is the agentgateway replacement for the retired Envoy AI
+# Gateway's public host (previously llm.ngoldack.de on the aigateway lane).
+#
+# Auth: agentgateway's JWT SecurityPolicy (policy-jwt.yaml) validates the
+# client's Bearer token against authentik's JWKS (the aigateway-oidc
+# client_credentials provider in ../authentik/seed.yaml) — Strict-mode auth is
+# enforced by the gateway itself on every route, so this edge route is fully
+# authorized; there is no outpost/Basic-auth hop in front (the old
+# authentik-outpost M2M path was retired).
+#
+# Attached to the https-aigateway-svc listener on the edge Gateway
+# (network/edge.yaml), which is the per-namespace *.svc. listener for
+# *.aigateway.svc.{domain} — the wildcard cert in network/certificate.yaml
+# carries the *.aigateway.svc.ngoldack.de SAN. external-dns-edge publishes the
+# A record for this hostname (edge external-dns gateway-httproute source).
+#
+# Data plane is in the same namespace (agentgateway), so the backendRef needs
+# no ReferenceGrant.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-edge
+  namespace: agentgateway
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-aigateway-svc
+  hostnames:
+    - llm.aigateway.svc.${CLUSTER_DOMAIN}
+  rules:
+    - backendRefs:
+        - name: agentgateway
+          namespace: agentgateway
+          port: 80

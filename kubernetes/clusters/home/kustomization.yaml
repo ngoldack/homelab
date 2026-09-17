@@ -35,12 +35,7 @@ resources:
   - authentik.yaml
   # Hindsight agent memory: local LLM + CNPG/pgvector, LAN-only surface.
   - hindsight.yaml
-  # Envoy AI Gateway (Agent Router lineage) -> Phoenix via OpenInference/OTel.
-  - aigateway-envoy-gateway.yaml
-  - aigateway-crds.yaml
-  - aigateway.yaml
-  # LLM AI gateway (agentgateway.dev control plane, parallel to the aigateway
-  # Envoy AI Gateway LAN gateway). CRD-before-CR split like aigateway-crds.
+  # LLM AI gateway (agentgateway.dev control plane). CRD-before-CR split.
   - agentgateway-crds.yaml
   - agentgateway.yaml
   # Paperless-ngx document management (app-template chart on CNPG + valkey +

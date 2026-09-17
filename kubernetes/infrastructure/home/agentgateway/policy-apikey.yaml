@@ -20,8 +20,24 @@ spec:
       kind: HTTPRoute
       name: local-llm-key
   traffic:
+    # jwtAuthentication requires providers even when only relaxing the mode;
+    # Permissive = validate when a JWT is present but never reject on token
+    # errors, so an opaque API key falls through to apiKeyAuthentication.
     jwtAuthentication:
       mode: Permissive
+      providers:
+        - issuer: https://authentik.ngoldack.de/application/o/aigateway/
+          audiences:
+            - aigateway-oidc
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: authentik-server
+                namespace: authentik
+                port: 80
+              jwksPath: /application/o/aigateway/jwks/
+              cacheDuration: 5m
     apiKeyAuthentication:
       mode: Strict
       secretRef:

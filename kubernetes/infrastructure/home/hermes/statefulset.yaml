@@ -102,9 +102,10 @@ spec:
             # Edge access (https://hermes.ngoldack.de, ../httproute-edge.yaml)
             # uses the dashboard's own OIDC login — provider
             # hermes-dashboard-oidc in ../../authentik/seed.yaml. The
-            # basic-auth vars above stay: the dashboard's
-            # /auth/password-login coexists with the OIDC flow and Hermes
-            # Desktop / port-forward keep using those credentials.
+            # basic-auth vars above stay: they back the dashboard's `basic`
+            # password provider (the /login form and POST
+            # /auth/password-login, which returns the session cookies Desktop
+            # and port-forward use). HTTP Basic itself is not accepted.
             # PUBLIC_URL makes the redirect URI absolute
             # (<public_url>/auth/callback), which is exactly the provider's
             # registered redirect_uris entry.

@@ -145,9 +145,11 @@ the headlamp/langfuse lesson). Wiring, all of it in this repo:
 
 No client secret exists: the provider is a public PKCE client, so nothing in
 `hermes/secret.sops.yaml` covers OIDC. The `HERMES_DASHBOARD_BASIC_AUTH_*`
-credentials stay valid (`/auth/password-login` coexists with the OIDC flow)
-for Desktop and port-forward use. The dashboard is the only published port;
-`https://hermes.ngoldack.de/:8642` does not exist.
+credentials stay valid — they back the dashboard's `basic` password provider
+(the `/login` form and `POST /auth/password-login`, which mints the session
+cookies Desktop and port-forward sessions use); HTTP Basic itself is not
+accepted once a session provider is configured. The dashboard is the only
+published port; `https://hermes.ngoldack.de/:8642` does not exist.
 
 ## Secrets inventory & rotation
 
@@ -241,11 +243,12 @@ manual per the steps above.
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |
 | `router-token` wrong size | Must be exactly 32 bytes under `data:` (base64 of the raw seed) — never `stringData` (44-char base64 text). The plugin fails the doctor row instead of the first file operation |
 | Sessions run LOCAL despite `terminal.backend: agent_sandbox` | The seed is revision-aware: `/opt/data/config.yaml` is re-copied (with a `config.yaml.bak` backup) whenever `hermes-config`'s `config-rev` differs from `/opt/data/.config-rev`. To change config, edit `hermes/configmap.yaml` and bump BOTH `config-rev` and the pod-template annotation `hermes.ngoldack.de/config-rev`. `TERMINAL_ENV=agent_sandbox` is the hard override; verify `hermes config get terminal.backend` == `agent_sandbox` |
-| Dashboard 9119 unreachable or WS drops (~1s) | The dashboard runs inside the gateway container, started and supervised by the image entrypoint (`hermes dashboard … 9119`), and the container's readiness probe checks both listeners — reach it via `https://hermes.ngoldack.de` (edge, authentik SSO) or `kubectl port-forward svc/hermes 9119:9119` (basic auth); its config must live on the PVC (seeded by the initContainer), never a mounted ConfigMap (a read-only mount breaks persistence) |
+| Dashboard 9119 unreachable or WS drops (~1s) | The dashboard runs inside the gateway container, started and supervised by the image entrypoint (`hermes dashboard … 9119`), and the container's readiness probe checks both listeners — reach it via `https://hermes.ngoldack.de` (edge, authentik SSO) or `kubectl port-forward svc/hermes 9119:9119` and the `basic` password provider (the `HERMES_DASHBOARD_BASIC_AUTH_*` credentials; HTTP Basic is not accepted); its config must live on the PVC (seeded by the initContainer), never a mounted ConfigMap (a read-only mount breaks persistence) |
 | Edge dashboard login loops back to the login page | The issuer must be the **browser-visible** host (`https://authentik.ngoldack.de/application/o/hermes-dashboard/`) so the ID token's `iss` matches; a trailing-slash difference is tolerated (the plugin `rstrip`s). Also confirm the pod can reach it: `kubectl -n hermes exec hermes-0 -c hermes -- curl -sS https://authentik.ngoldack.de/application/o/hermes-dashboard/.well-known/openid-configuration` must return JSON — if it says `Access denied`, the hermes↔authentik Cilium pair is missing (`hermes/cilium-policy.yaml` egress + `authentik/cilium-allowlist.yaml` ingress) |
 | OIDC token exchange fails (`invalid_client`) | The provider must be `client_type: public` — the dashboard is a PKCE public client and sends no `client_secret`. Setting it to `confidential` requires a secret: add `HERMES_DASHBOARD_OIDC_CLIENT_SECRET` to `hermes/secret.sops.yaml` + the StatefulSet, and mount the same value into authentik as a `seed-secrets-*` volume with `client_secret: !File` (the headlamp shape) |
 | Dashboard rejects the ID token (signature / empty JWKS) | The provider lost `signing_key` (see `authentik/seed.yaml`): without it authentik signs HS256 and `/application/o/hermes-dashboard/jwks/` returns `{}` while the plugin verifies RS256/ES256 |
 | 302/404 on `https://hermes.ngoldack.de/` with no redirect to authentik | Route not attached: the `hermes` namespace needs `gateway.ngoldack.de/edge-ingress: "true"`, and the CNP must allow the cilium `ingress` entity on 9119 |
+| Edge name will not resolve from a LAN workstation although the route is live | The LAN resolver can serve a cached NXDOMAIN (and plain port-53 probes are intercepted here, so `dig @1.1.1.1` lies the same way — google/cloudflare/Hetzner all returning an identical blank answer is the tell). Read the truth over DoH (`curl 'https://dns.google/resolve?name=hermes.ngoldack.de&type=A'`) and bypass the cache for the request itself (`curl --resolve hermes.ngoldack.de:443:2.28.31.116 https://hermes.ngoldack.de/`) |
 | Sandbox `go test` fails "read-only file system" on build cache | Runtime image must set `HOME=/tmp` (writable emptyDir); runtime ≥1.0.3 has it |
 | `task check` fails | `yamllint` / `tofu fmt` / `kustomize` / `lint:orphans` / sops — run at repo root with `SOPS_AGE_KEY_FILE` set |
 

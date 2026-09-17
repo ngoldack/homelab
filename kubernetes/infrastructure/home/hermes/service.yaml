@@ -1,10 +1,11 @@
 # hermes — ClusterIP service for the private OpenAI-compatible API server
 # (port 8642, bearer API_SERVER_KEY) and the Hermes Desktop dashboard
-# (port 9119; OIDC login via authentik on the edge, basic auth for
-# port-forward/Desktop). The API has no public route — it is reached with
-# kubectl exec — and the namespace's default-deny grants no ingress except
-# the edge Gateway's dashboard port (see cilium-policy.yaml). The dashboard
-# IS published: https://hermes.ngoldack.de (../hermes/httproute-edge.yaml).
+# (port 9119; OIDC login via authentik on the edge, dashboard password
+# provider for port-forward/Desktop). The API has no public route — it is
+# reached with kubectl exec — and the namespace's default-deny grants no
+# ingress except the edge Gateway's dashboard port (see cilium-policy.yaml).
+# The dashboard IS published: https://hermes.ngoldack.de
+# (../hermes/httproute-edge.yaml).
 apiVersion: v1
 kind: Service
 metadata:

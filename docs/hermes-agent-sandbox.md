@@ -276,6 +276,16 @@ never backed up.
   fix is a plugin-side PUT/upload path through the Router — not widening the
   host-side write root, which would keep model bytes in the gateway
   container instead of the guest.
+  **Observed consequence (2026-09-17):** the deployed local model reaches for
+  `write_file` rather than the terminal, gets `Write denied: …` (root
+  `/opt/data`), and the turn then produces no sandbox claim at all — the
+  acceptance gate fails on exactly that (it requires a claim observed during
+  the turn plus in-guest evidence). So a green `task hermes:e2e` currently
+  depends on the model choosing the terminal for file creation; prompt or
+  route accordingly, or implement the plugin's write path. The terminal path
+  itself is verified independently of the model: a claim → adopt → gRPC exec
+  → teardown run inside the gateway pod returns the guest kernel, uid 10001
+  and `/workspace`.
 - **Monitoring does not scrape the gateway, by design** — hermes exposes no
   Prometheus endpoint (`:8642/metrics` → 404, `:9119/metrics` → 302 to
   `/login?next=%2Fmetrics`); do not re-probe. A scrape (plus a monitoring

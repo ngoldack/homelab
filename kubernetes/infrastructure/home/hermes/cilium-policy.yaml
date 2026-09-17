@@ -2,9 +2,10 @@
 # only egress is the explicit allowlist in the second document below:
 # cluster DNS, the sandbox Router :8080, adopted sandbox pods :9090, the
 # Kubernetes API 443/6443 (SandboxClaim lifecycle only), agentgateway :80,
-# the authentik issuer host 443 (dashboard OIDC), and two public-internet
-# rules on 443 (PyPI + GitHub fetches). Ingress is exactly one grant: the
-# edge Gateway serving the dashboard port for hermes.ngoldack.de. The API
+# the in-cluster Langfuse :3000 (trace export), the authentik issuer host 443
+# (dashboard OIDC), and two public-internet rules on 443 (PyPI + GitHub
+# fetches). Ingress is exactly one grant: the edge Gateway serving the
+# dashboard port for hermes.ngoldack.de. The API
 # port 8642 stays closed: it is reached via kubectl exec / in-pod loops and
 # nothing in-cluster calls the gateway.
 apiVersion: cilium.io/v2
@@ -37,6 +38,8 @@ spec:
 #     network reach to the API server exists, but its use is the in-cluster
 #     SDK's claim CRUD (RBAC is scoped to that), not a management plane
 #   * agentgateway             80         — in-cluster model API
+#   * langfuse (ns langfuse)   3000       — trace export from the bundled
+#     observability/langfuse plugin (paired ingress half in that namespace)
 #   * PyPI / Fastly anycast    443        — Hermes lazy dep installs
 #   * GitHub raw content       443        — dashboard model catalogue +
 #     update-banner fetches
@@ -122,6 +125,19 @@ spec:
       toPorts:
         - ports:
             - port: "80"
+              protocol: TCP
+    # Trace export — the bundled observability/langfuse plugin (enabled in
+    # config.yaml) posts turns to the in-cluster Langfuse ingestion API
+    # (HERMES_LANGFUSE_BASE_URL=http://langfuse-web.langfuse.svc.cluster.local:3000).
+    # Paired with the `fromEndpoints: hermes` ingress rule in
+    # ../../langfuse/cilium-allowlist.yaml: that namespace is default-deny, so
+    # without both halves the plugin fails open and traces are silently lost.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+      toPorts:
+        - ports:
+            - port: "3000"
               protocol: TCP
     # PyPI for Hermes lazy-dep installs (faster-whisper, edge-tts, …) —
     # widest grant in this set: three Fastly anycast /16s on 443, not

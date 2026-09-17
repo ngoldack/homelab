@@ -41,6 +41,14 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
+    # The Hermes gateway exports turns through the bundled
+    # observability/langfuse plugin (port 3000, the SDK's ingestion API).
+    # Paired with the `toEndpoints: langfuse` egress rule in
+    # ../../hermes/cilium-policy.yaml — that namespace is default-deny, so
+    # without both halves the plugin fails open and traces are silently lost.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
   egress:
     - toEndpoints:
         - matchLabels:

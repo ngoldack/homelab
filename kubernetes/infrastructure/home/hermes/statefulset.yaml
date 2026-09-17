@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "4"
+        hermes.ngoldack.de/config-rev: "5"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -57,7 +57,7 @@ spec:
           # silently ignored.
           env:
             # LLM credential for the agentgateway custom provider
-            # (config.yaml custom_providers -> OPENAI_API_KEY convention).
+            # (config.yaml providers.agentgateway.key_env -> OPENAI_API_KEY).
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -118,6 +118,39 @@ spec:
               value: https://authentik.ngoldack.de/application/o/hermes-dashboard/
             - name: HERMES_DASHBOARD_OIDC_CLIENT_ID
               value: hermes-dashboard-oidc
+            # Observability: the bundled observability/langfuse plugin (enabled
+            # in config.yaml) exports turns to the in-cluster Langfuse. The
+            # `langfuse` SDK is baked into the image — without it the plugin's
+            # hooks fail open and nothing is sent. Keys come from the same
+            # Langfuse project as the OTLP exporter in
+            # ../agentgateway/langfuse-otel.sops.yaml.
+            - name: HERMES_LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_PUBLIC_KEY
+            - name: HERMES_LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_SECRET_KEY
+            # In-cluster Langfuse web/ingestion Service (ns langfuse); the
+            # plugin defaults to cloud.langfuse.com, which this namespace's
+            # egress allowlist does not permit. The matching ingress half is
+            # ../../langfuse/cilium-allowlist.yaml.
+            - name: HERMES_LANGFUSE_BASE_URL
+              value: http://langfuse-web.langfuse.svc.cluster.local:3000
+            # P100 request budget, 600 s (default is 1800). This is the knob the
+            # client actually reads: run_agent._resolved_api_call_timeout and
+            # chat_completion_helpers._stream_timeouts both prefer a per-provider
+            # providers.<id>.request_timeout_seconds and fall back to this env —
+            # and the per-provider key does not match here, because a named
+            # custom endpoint resolves to the bare provider id "custom" (see the
+            # CAVEAT in configmap.yaml). The read timeout for this local
+            # endpoint follows the same value (is_local_endpoint matches
+            # .cluster.local).
+            - name: HERMES_API_TIMEOUT
+              value: "600"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

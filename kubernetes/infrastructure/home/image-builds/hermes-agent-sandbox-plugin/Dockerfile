@@ -46,9 +46,18 @@ RUN apt-get update \
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml /tmp/plugin-build/
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/README.md /tmp/plugin-build/README.md
 COPY kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/src /tmp/plugin-build/src/
+# langfuse==4.15.4 — the observability/langfuse plugin the base image already
+# ships (plugins/observability/langfuse) imports `Langfuse` +
+# `propagate_attributes` and calls `client.create_trace_id` /
+# `start_as_current_observation` / `flush` / `shutdown`: the v4 SDK surface.
+# Without the SDK the plugin's hooks fail open (no trace, no error), which is
+# why it is installed here rather than lazily: the runtime venv is read-only and
+# the container runs with HERMES_DISABLE_LAZY_INSTALLS=1.
+# 4.15.4 = latest release on PyPI at 2026-09-17, verified against the shipped
+# plugin's call sites under this image's interpreter before pinning.
 RUN python3 -m venv /opt/hermes/plugin-venv \
     && /opt/hermes/plugin-venv/bin/pip install --no-cache-dir \
-        "k8s-agent-sandbox[grpc]==1.0.2" /tmp/plugin-build
+        "k8s-agent-sandbox[grpc]==1.0.2" "langfuse==4.15.4" /tmp/plugin-build
 
 # Make the plugin venv importable by the interpreter that runs the gateway,
 # without hardcoding a python3.X path. `python3` IS that interpreter: the base
@@ -75,6 +84,12 @@ RUN set -eu; \
 # terminal backend at runtime. `grpc` proves the SDK's grpc extra resolved to
 # ABI-compatible wheels for this interpreter.
 RUN python3 -c 'import importlib.metadata as md, grpc, hermes_agent_sandbox.provider as p; assert callable(getattr(p, "register", None)), "hermes_agent_sandbox.provider.register is not callable"; eps = {e.value for e in md.entry_points(group="hermes_agent.plugins")}; assert "hermes_agent_sandbox.provider" in eps, "entry point missing; found %r" % sorted(eps); print("agent_sandbox: provider importable + entry point discoverable")'
+
+# Build-time gate (observability): same interpreter, no PYTHONPATH. `langfuse`
+# resolves through the .pth above; the version and the four call sites the
+# shipped plugin uses are asserted so an upgraded/ABI-broken SDK fails the build
+# instead of silently disabling tracing at runtime (the plugin fails open).
+RUN python3 -c 'import sys, langfuse; from langfuse import Langfuse, propagate_attributes; assert langfuse.__version__ == "4.15.4", "unexpected langfuse %s" % langfuse.__version__; assert callable(propagate_attributes), "propagate_attributes missing"; assert all(callable(getattr(Langfuse, a, None)) for a in ("create_trace_id", "start_as_current_observation", "flush", "shutdown")), "langfuse v4 client API surface incomplete"; print("langfuse %s: import + v4 API surface OK for %s" % (langfuse.__version__, sys.executable))'
 
 # ENTRYPOINT override: run the gateway binary DIRECTLY instead of the base
 # image's s6-overlay supervisor. s6's preinit demands /run owned by the

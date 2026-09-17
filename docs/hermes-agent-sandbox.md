@@ -18,6 +18,7 @@ graph LR
     D[Hermes Desktop] -->|kubectl port-forward :9119<br/>basic auth| A
     A -->|gRPC podIP:9090<br/>direct exec| S[Sandboxd in Kata guest]
     A -->|v2 scoped token<br/>GET /v1/files| R[Router ClusterIP:8080]
+    A -->|trace export :3000<br/>observability/langfuse| L[langfuse-web<br/>ns langfuse]
     R -->|proxy :8080| S
     A -.SandboxClaim CRUD via SA token.- K[kube-apiserver]
     K --> W[agent-sandbox controller]
@@ -91,14 +92,22 @@ unready pool.
     `local` to the **OpenRouter** provider, whose public API this namespace's
     egress allowlist blocks (every session then failed with "Hermes can't reach
     the model provider" while a direct curl to the Service worked);
-  - `custom_providers[0].key_env: OPENAI_API_KEY` — without it the request
+  - `providers.agentgateway.key_env: OPENAI_API_KEY` — without it the request
     reached agentgateway with an empty bearer token and was rejected 401
     ("token header is malformed"); `key_env` names the pod env var, so no
     credential is stored in the ConfigMap;
-  - `custom_providers[0].timeout: 600` — the P100 is a reasoning model on one
-    GPU: a single call runs ~125 s (≈11k-token system prompt) and a turn with
-    tool calls takes minutes, so the default budget interrupted calls with
-    "Operation interrupted: waiting for model response".
+  - `providers.agentgateway.request_timeout_seconds: 600` — the P100 is a
+    reasoning model on one GPU: a single call runs ~125 s (≈11k-token system
+    prompt) and a turn with tool calls takes minutes, so the default budget
+    interrupted calls with "Operation interrupted: waiting for model response".
+    This is the canonical v12+ shape; the old `custom_providers[0].timeout`
+    was an unknown key (`providers.?: unknown config keys ignored: timeout`)
+    and never took effect. On v2026.9.7 the runtime lookup
+    (`hermes_cli/timeouts.py`) keys on the *resolved* provider id, and a named
+    custom endpoint resolves to the bare id `custom`, so the LIVE knob is the
+    `HERMES_API_TIMEOUT=600` env in the StatefulSet (the documented fallback in
+    `run_agent._resolved_api_call_timeout` / `_stream_timeouts`); both are kept
+    in lockstep.
   Budget accordingly: `hack/hermes-e2e.sh` allows `HERMES_E2E_MAX_TIME`
   (default 1800 s) for the chat call and polls for the claim for
   `HERMES_E2E_POLL_TRIES` × `HERMES_E2E_POLL_SLEEP` (default 900 × 2 s).
@@ -151,6 +160,42 @@ cookies Desktop and port-forward sessions use); HTTP Basic itself is not
 accepted once a session provider is configured. The dashboard is the only
 published port; `https://hermes.ngoldack.de/:8642` does not exist.
 
+### Observability (Langfuse)
+Hermes exports every turn to the in-cluster Langfuse through the **bundled**
+`observability/langfuse` plugin (`/opt/hermes/plugins/observability/langfuse`
+in the base image; hooks for API requests, LLM calls, tool calls and session
+lifecycle). The plugin **fails open**: with the SDK or the credentials missing
+its hooks no-op and nothing is exported — no error surfaces, which is why the
+image build asserts the SDK and the tables below exist.
+
+| Piece | Where |
+|---|---|
+| Enablement | `hermes/configmap.yaml`: `plugins.enabled: [agent_sandbox, observability/langfuse]` (seeded by the `config-rev` bump) |
+| Credentials | `hermes-secret` keys `HERMES_LANGFUSE_PUBLIC_KEY` / `HERMES_LANGFUSE_SECRET_KEY` (StatefulSet env) — the same Langfuse project as the agentgateway OTLP exporter (`agentgateway/langfuse-otel.sops.yaml`) |
+| Endpoint | `HERMES_LANGFUSE_BASE_URL=http://langfuse-web.langfuse.svc.cluster.local:3000`; the plugin's default is `cloud.langfuse.com`, which the egress allowlist blocks |
+| SDK | baked into the gateway image by `image-builds/hermes-agent-sandbox-plugin/Dockerfile` (`langfuse==4.15.4`, installed into `/opt/hermes/plugin-venv` and exposed to the gateway interpreter through the same `.pth` as the agent_sandbox plugin). A runtime install is impossible by design: the venv is read-only and the container runs `HERMES_DISABLE_LAZY_INSTALLS=1` |
+| Network | `hermes/cilium-policy.yaml` egress to the `langfuse` namespace on **3000**, paired with `langfuse/cilium-allowlist.yaml` ingress from `hermes` — that namespace is default-deny, so one half alone silently drops the export |
+
+A turn appears as a `Hermes turn` chain with one generation per LLM call and a
+span per tool call, tagged `hermes`/`langfuse`. Content capture is the plugin
+default (`sanitized`: secret-pattern redaction, then truncation to
+`HERMES_LANGFUSE_MAX_CHARS`, default 12000); set
+`HERMES_LANGFUSE_CAPTURE=metadata` for sizes/ids/usage only,
+`HERMES_LANGFUSE_ENV`/`_RELEASE` for tagging. All of these are optional — the
+two required vars are the key pair.
+
+Verify from inside the pod (the container env carries the keys, so no secret is
+typed):
+
+```bash
+kubectl -n hermes exec hermes-0 -c hermes -- /opt/hermes/.venv/bin/python -c \
+  "import langfuse; print(langfuse.__version__)"
+kubectl -n hermes exec hermes-0 -c hermes -- hermes plugins list | grep langfuse
+kubectl -n hermes exec hermes-0 -c hermes -- curl -s -u \
+  "$HERMES_LANGFUSE_PUBLIC_KEY:$HERMES_LANGFUSE_SECRET_KEY" \
+  'http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/traces?limit=5'
+```
+
 ## Secrets inventory & rotation
 
 All keys live in `hermes/secret.sops.yaml`.
@@ -160,6 +205,7 @@ All keys live in `hermes/secret.sops.yaml`.
 | `OPENAI_API_KEY` (`stringData`) | agentgateway client-credentials JWT — the `agentgateway` custom provider's key | re-encrypt a fresh JWT; `kubectl -n hermes rollout restart statefulset/hermes` |
 | `API_SERVER_KEY` (`stringData`) | bearer token for the `:8642` API | new random value; restart the pod |
 | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME/PASSWORD/SECRET` (`stringData`) | dashboard auth only (the dashboard runs in the gateway container) | re-encrypt; restart the pod |
+| `HERMES_LANGFUSE_PUBLIC_KEY` / `HERMES_LANGFUSE_SECRET_KEY` (`stringData`) | Langfuse project key pair for the `observability/langfuse` plugin (trace export to `langfuse-web`) | rotate in the Langfuse project → re-encrypt **both** here and `agentgateway/langfuse-otel.sops.yaml` (same project pair) → restart the pod; the plugin rejects keys without the `pk-lf-`/`sk-lf-` prefixes and drops every event at flush time |
 | `AGENT_SANDBOX_ROUTER_TOKEN` (**`data:`**) | Ed25519 seed mounted at `/opt/data/router-token` | new 32-byte seed → derive pubkey → update `agent-sandbox/router-auth-keys.yaml` (`kid: hermes-1`) → rollout Router → update Secret → verify `wc -c /opt/data/router-token` == 32 |
 | `OPENROUTER_API_KEY` (`stringData`) | **unused** — no pod consumes it; the model path is agentgateway | retained for now; not injected |
 
@@ -237,8 +283,9 @@ manual per the steps above.
 | 403 on sandboxclaims | Pod is not using SA `hermes` (`serviceAccountName`), or the RoleBinding in `hermes-sandbox` is missing (`hermes/rbac.yaml`) |
 | Claim created but exec fails | Warm pool down (`task hermes:e2e` asserts `status.replicas=1` after cleanup); sandbox ingress: 9090 only from the `hermes` namespace, Router 8080 only from the Router's own pod labels |
 | Model calls fail ("offline" / "can't reach the model provider") | Check the *provider* first: `grep -E '^provider:' /opt/data/config.yaml` must say `custom:agentgateway` — with `auto` Hermes calls OpenRouter, which the egress allowlist blocks. Then the network path: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
-| agentgateway rejects the call 401 "token header is malformed" | The `custom_providers` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
-| Model turn interrupted ("waiting for model response") | `custom_providers[0].timeout` is too small for the P100: a single call is ~125 s and tool turns take minutes; keep it at 600 s |
+| agentgateway rejects the call 401 "token header is malformed" | The `providers.agentgateway` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
+| Model turn interrupted ("waiting for model response") | The 600 s budget is gone: keep `providers.agentgateway.request_timeout_seconds: 600` **and** the `HERMES_API_TIMEOUT=600` env in the StatefulSet (a single call is ~125 s and tool turns take minutes; on v2026.9.7 the env is what the client actually reads for a named custom provider — see the Operation bullets) |
+| Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/traces` works from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). Events are batched and the SDK does not send `x-langfuse-ingestion-version: 4`, so Langfuse's slow path can take ~10 min before a trace lists |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
 | A command returns 124 | `command exceeded {timeout}s and was cancelled; the sandbox was recycled, so /workspace state is gone — re-run setup if needed` — the gRPC deadline (`DEADLINE_EXCEEDED`) fired and the sandbox was torn down; other transport failures are reported as command errors, not 124 |
 | `router-token` wrong size | Must be exactly 32 bytes under `data:` (base64 of the raw seed) — never `stringData` (44-char base64 text). The plugin fails the doctor row instead of the first file operation |

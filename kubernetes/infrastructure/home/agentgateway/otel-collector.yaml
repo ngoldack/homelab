@@ -2,8 +2,11 @@
 #
 # Chart version 0.127.2 from the official open-telemetry helm charts.
 # The collector exposes OTLP traces at grpc:4317 and http:4318, sends traces
-# to Langfuse (langfuse-web.enc), and exposes metrics on 8888 for scraping.
-# LANGFUSE_AUTH is composed as "cGstbGYtUExBQ0VIT0xERVI=" base64(pk-lf-PLACEHOLDER:sk-lf-PLACEHOLDER).
+# to Langfuse (langfuse-web's /api/public/otel), and exposes metrics on 8888
+# for scraping.
+# LANGFUSE_AUTH is base64("<public key>:<secret key>"), the Basic credential
+# for Langfuse's OTLP intake; the pair lives in langfuse-otel.sops.yaml
+# (stringData.PUBLIC_KEY / SECRET_KEY / AUTH), never in cleartext here.
 # The OpenTelemetry Collector binary expands ${env:LANGFUSE_AUTH} in config by default.
 
 ---
@@ -73,6 +76,16 @@ spec:
           endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
           headers:
             Authorization: "Basic $${env:LANGFUSE_AUTH}"
+            # Langfuse v4 realtime ingestion. Without it the deployment falls
+            # back to the slow path (its docs: up to 10 minutes of lag), which
+            # makes the traces look missing right after a call.
+            x-langfuse-ingestion-version: "4"
+          # Langfuse is behind langfuse-web; a transient 5xx must not drop
+          # spans, so the exporter retries out of a queue instead of giving up.
+          retry_on_failure:
+            enabled: true
+          sending_queue:
+            enabled: true
       service:
         pipelines:
           traces:

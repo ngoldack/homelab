@@ -420,6 +420,13 @@ data:
           client_id: langfuse-oidc
           client_type: confidential
           client_secret: !File /secrets-langfuse/client_secret
+          # Explicit RSA signing key: with signing_key unset authentik signs
+          # ID tokens with HS256 (client-secret) and the provider's JWKS is
+          # EMPTY ({}) — openid-client (langfuse) verifies via RS256/JWKS and
+          # fails the signature ~16ms after every successful token exchange
+          # (OAUTH_CALLBACK_ERROR). Pin the internal RSA key so ID tokens are
+          # RS256 and jwks_uri serves keys.
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
           # grant_types MUST be pinned (see the grafana-oidc comment): an empty
           # model default [] denies every OIDC login.
           issuer_mode: per_provider

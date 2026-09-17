@@ -105,23 +105,16 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: AUTH_AUTHENTIK_CLIENT_SECRET
-        - name: AUTH_AUTHENTIK_AUTHORIZATION_URL
-          # Explicit gateway endpoint: with langfuse's openid-client factory,
-          # supplying the explicit authorize URL switches the provider OFF
-          # discovery (Issuer.discover double-slashes the well-known path for
-          # a trailing-slash issuer and authentik 404s it). The issuer value
-          # must still equal the ID-token iss byte-for-byte.
-          value: https://authentik.ngoldack.de/application/o/authorize/
         - name: AUTH_AUTHENTIK_ISSUER
-          # EXACT value of authentik's per-provider issuer — the discovery
-          # metadata's `issuer` AND the ID-token `iss` claim are
-          # `.../application/o/langfuse/` WITH trailing slash, and openid-client
-          # compares them byte-for-byte against this env (a missing slash
-          # fails the audience/issuer assertion with OAUTH_CALLBACK_ERROR ~16ms
-          # after a 200 token exchange). resolveWellKnownUri appends
-          # ".well-known/openid-configuration" to the issuero, so the trailing
-          # slash does NOT double up (verified single-slash fetch, 200).
-          value: https://authentik.ngoldack.de/application/o/langfuse/
+          # NO trailing slash — langfuse's own schema requirement for authentik
+          # ("must be ... without trailing slash"): langfuse fetches
+          # `${issuer}/.well-known/openid-configuration` itself, so a slash
+          # would double it (authentik 404s -> OAuthSignin). openid-client
+          # validates the ID-token iss against the DISCOVERED metadata issuer,
+          # which carries the slash regardless. The OAUTH_CALLBACK_ERROR was
+          # authentik signing HS256 with an empty JWKS — fixed by pinning the
+          # provider's RSA signing key in seed.yaml.
+          value: https://authentik.ngoldack.de/application/o/langfuse
         # ClickHouse `default` user runs no_password (the CR omits
         # settings.defaultUserPassword), so auth is off server-side — but the
         # app's migration stage hard-fails on an EMPTY CLICKHOUSE_PASSWORD

@@ -196,6 +196,16 @@ spec:
               protocol: TCP
             - port: "8000"
               protocol: TCP
+    # The CNPG exporter scrape (VMPodScrape paperless-database, port name
+    # `metrics` = 9187) — without this ingress rule the scrape is denied and the
+    # data-protection alerts have no series to evaluate.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
@@ -210,23 +220,32 @@ spec:
     # The instance manager reports instance status (and backup/archive
     # results) back through the Kubernetes API — without this the operator
     # watches a cluster whose instances never update, and archive/backup
-    # bookkeeping stalls. The Service-CIDR rule mirrors the router/hermes
-    # policies: entity resolution can race right after the policy lands.
+    # bookkeeping stalls.
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - port: "6443"
               protocol: TCP
+    # The control-plane VIP the instance is configured with (k8sServiceHost=
+    # 127.0.0.1, so the VIP does not resolve to the kube-apiserver entity) on
+    # the API port only — same /32 pin as immich/hindsight; the 443 leg and
+    # the whole Service CIDR are not needed.
     - toCIDRSet:
-        - cidr: 172.21.0.0/16
+        - cidr: 10.30.0.10/32
       toPorts:
         - ports:
-            - port: "443"
-              protocol: TCP
             - port: "6443"
               protocol: TCP
-    # Barman sidecar -> s3://home-cnpg-backups-*/ (fsn1.your-objectstorage.com).
+    # Barman sidecar -> s3://home-cnpg-backups-*/paperless/ at the Hetzner
+    # Object Storage endpoint. Deliberately `world` and not `toFQDNs`: an
+    # empirical test on 2026-09-17 (scratch pod + a toFQDNs-only CNP in the
+    # default namespace) showed FQDN rules are INERT here — dnsproxy
+    # transparent mode is off (tofu/home/cilium.tf), so the proxy never learns
+    # the name's IPs and the connect is denied (`nc -z fsn1...:443` blocked
+    # while the same FQDN was allowed by the rule). Narrowing this to an FQDN
+    # would silently stop WAL archiving and base backups, so the port-scoped
+    # world rule stays until FQDN enforcement is proven on this cluster.
     - toEntities:
         - world
       toPorts:

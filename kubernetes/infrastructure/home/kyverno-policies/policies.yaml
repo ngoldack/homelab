@@ -36,6 +36,9 @@ metadata:
     policies.kyverno.io/severity: medium
 spec:
   validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, not just to
+  # PolicyReports and the audit log (the review found the applier saw nothing).
+  emitWarning: true
   background: true
   rules:
     - name: require-image-tag
@@ -127,6 +130,9 @@ metadata:
     policies.kyverno.io/severity: high
 spec:
   validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, not just to
+  # PolicyReports and the audit log (the review found the applier saw nothing).
+  emitWarning: true
   background: true
   rules:
     - name: host-namespaces-false
@@ -181,6 +187,9 @@ metadata:
     policies.kyverno.io/severity: high
 spec:
   validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, not just to
+  # PolicyReports and the audit log (the review found the applier saw nothing).
+  emitWarning: true
   background: true
   rules:
     - name: no-host-path-volumes
@@ -234,6 +243,9 @@ metadata:
     policies.kyverno.io/severity: high
 spec:
   validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, not just to
+  # PolicyReports and the audit log (the review found the applier saw nothing).
+  emitWarning: true
   background: true
   rules:
     - name: privileged-and-escalation-false

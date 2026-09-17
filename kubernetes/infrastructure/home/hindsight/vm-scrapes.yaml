@@ -8,7 +8,9 @@ metadata:
   namespace: hindsight
 spec:
   endpoints:
-    - port: "8888"
+    # Discovery matches the port NAME (__meta_kubernetes_endpoint_port_name):
+    # the numeric "8888" matched no port name and discovered zero targets.
+    - port: http
   selector:
     matchLabels:
       app.kubernetes.io/component: api
@@ -20,7 +22,9 @@ metadata:
   namespace: hindsight
 spec:
   endpoints:
-    - port: "8889"
+    # Discovery matches the port NAME (__meta_kubernetes_endpoint_port_name):
+    # the numeric "8889" matched no port name and discovered zero targets.
+    - port: http
   selector:
     matchLabels:
       app.kubernetes.io/component: worker

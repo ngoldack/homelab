@@ -75,6 +75,26 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
+    # The proxy outposts front two UIs whose internal_host is an in-cluster
+    # Service (seed.yaml: hindsight-ui-proxy -> hindsight-control-plane:3000,
+    # grafana-proxy -> the grafana Service:80). The outpost pod lives in this
+    # namespace and is bound by this same egress list, so omitting these rules
+    # makes the outpost answer 502 to real browsers even though the SSO
+    # redirect itself succeeds — a failure this session's earlier 302-only
+    # check could not see.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
+            - {port: "3000", protocol: TCP}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hindsight
+      toPorts:
+        - ports:
+            - {port: "3000", protocol: TCP}
     # The proxy outposts forward authenticated requests to the media apps
     # they front (the media HTTPRoutes' service URLs).
     - toEndpoints:

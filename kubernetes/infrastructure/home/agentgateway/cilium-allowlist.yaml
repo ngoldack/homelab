@@ -17,15 +17,22 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: monitoring
-    # In-cluster OTLP senders (every app exporting traces/metrics).
+    # In-cluster OTLP senders (every app exporting traces/metrics) — OTLP only;
+    # the proxy's own listeners are scoped by the rules below, not to every pod.
     - fromEntities:
         - cluster
       toPorts:
         - ports:
             - {port: "4317", protocol: TCP}
             - {port: "4318", protocol: TCP}
+    # The Hermes gateway is the only in-cluster :80 client of the proxy
+    # (config.yaml: base_url http://agentgateway.agentgateway.svc.cluster.local:80/v1).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
             - {port: "80", protocol: TCP}
-            - {port: "8080", protocol: TCP}
   egress:
     - toEndpoints:
         - matchLabels:
@@ -40,9 +47,12 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
-    # Model backends (llmkube inference Services) in another namespace.
-    - toEntities:
-        - cluster
+    # Model backends: the only in-cluster backend is the llmkube llama.cpp
+    # InferenceService (backends.yaml: qwen36-35b.llmkube-system.svc:8080), so
+    # this is scoped to that namespace instead of every cluster endpoint.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llmkube-system
       toPorts:
         - ports:
             - {port: "8080", protocol: TCP}

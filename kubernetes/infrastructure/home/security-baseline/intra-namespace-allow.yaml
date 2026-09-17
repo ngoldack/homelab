@@ -1,0 +1,868 @@
+# Intra-namespace communication: allowed by default, in both directions, for
+# every workload namespace.
+#
+# Operator requirement (2026-09-17): pods inside a namespace must always be
+# able to talk to each other. The zero-trust boundary this cluster enforces is
+# the NAMESPACE boundary — cross-namespace traffic is denied unless a rule in
+# an app's own cilium-allowlist.yaml names the peer, port and direction.
+#
+# The nine namespaces that carry per-workload allowlists (paperless, immich,
+# hindsight, headlamp, monitoring, network, cert-manager, registry, buildkit)
+# restricted sibling-to-sibling traffic as a side effect of enumerating their
+# cross-namespace edges; this file restores the default for them, and is a
+# no-op for the namespace-scoped policies that already allowed it inline.
+#
+# Deliberately EXCLUDED: `hermes-sandbox` — the Kata-isolated tenant space where
+# untrusted agent code runs. Peer-to-peer networking between sandboxes was never
+# a feature there (the gateway reaches a sandbox through the Router, and each
+# sandbox carries a scoped Ed25519 claim token), so allowing it would widen the
+# one boundary the sandbox design is built on. Say the word and this is a
+# one-line addition.
+#
+# Also excluded: the Kubernetes/Cilium-owned namespaces (kube-*, cilium-secrets),
+# plus `default`, `reach-test` and `aigateway`, which host no workloads.
+#
+# NOTE: this is a namespace CiliumNetworkPolicy list, NOT a
+# CiliumClusterwideNetworkPolicy — a cluster-wide policy is enforced inside the
+# Gateway's Envoy and breaks every route (see the rollback note in
+# kustomization.yaml next to this file).
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-sandbox-system-intra-namespace-allow
+  namespace: agent-sandbox-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agentgateway-intra-namespace-allow
+  namespace: agentgateway
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: authentik-intra-namespace-allow
+  namespace: authentik
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: buildkit-intra-namespace-allow
+  namespace: buildkit
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: buildkit
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: buildkit
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-intra-namespace-allow
+  namespace: cert-manager
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cert-manager
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cert-manager
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: clickhouse-operator-intra-namespace-allow
+  namespace: clickhouse-operator
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: clickhouse-operator
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: clickhouse-operator
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnpg-system-intra-namespace-allow
+  namespace: cnpg-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: crowdsec-intra-namespace-allow
+  namespace: crowdsec
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: crowdsec
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: crowdsec
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flux-system-intra-namespace-allow
+  namespace: flux-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flux-system
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flux-system
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: headlamp-intra-namespace-allow
+  namespace: headlamp
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: headlamp
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: headlamp
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-intra-namespace-allow
+  namespace: hermes
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-intra-namespace-allow
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hindsight
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hindsight
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-intra-namespace-allow
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: immich
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: immich
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kyverno-intra-namespace-allow
+  namespace: kyverno
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kyverno
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kyverno
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: langfuse-intra-namespace-allow
+  namespace: langfuse
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llmkube-system-intra-namespace-allow
+  namespace: llmkube-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llmkube-system
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llmkube-system
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: media-intra-namespace-allow
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: media
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: media
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: monitoring-intra-namespace-allow
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: network-intra-namespace-allow
+  namespace: network
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: network
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: network
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: nvidia-device-plugin-intra-namespace-allow
+  namespace: nvidia-device-plugin
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: nvidia-device-plugin
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: nvidia-device-plugin
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-intra-namespace-allow
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: paperless
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: paperless
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: registry-intra-namespace-allow
+  namespace: registry
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: registry
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: registry
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: seaweedfs-operator-intra-namespace-allow
+  namespace: seaweedfs-operator
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: seaweedfs-operator
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: seaweedfs-operator
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: talos-backup-intra-namespace-allow
+  namespace: talos-backup
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: talos-backup
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: talos-backup
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tetragon-intra-namespace-allow
+  namespace: tetragon
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tetragon
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tetragon
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: truenas-csi-intra-namespace-allow
+  namespace: truenas-csi
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: truenas-csi
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: truenas-csi
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: unpoller-intra-namespace-allow
+  namespace: unpoller
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: unpoller
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: unpoller
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: valkey-operator-system-intra-namespace-allow
+  namespace: valkey-operator-system
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: valkey-operator-system
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: valkey-operator-system
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}

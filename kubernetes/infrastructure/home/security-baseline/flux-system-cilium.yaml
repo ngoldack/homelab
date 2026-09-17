@@ -1,10 +1,16 @@
 # Flux's namespace: default-deny plus the flows the controllers actually need.
 #
 # Flux is the one workload whose egress *is* the delivery mechanism: it pulls
-# the Git repository this cluster is reconciled from (over SSH: the
-# GitRepository source is ssh://git@github.com/ngoldack/homelab) and fetches
-# Helm charts over HTTPS. Everything else — the in-cluster API it reconciles
-# against, DNS, and admission webhooks calling back in — is listed explicitly.
+# the Git repository this cluster is reconciled from (over SSH — the
+# GitRepository source is ssh://git@github.com/ngoldack/homelab, port 22) and
+# fetches Helm charts over HTTPS. Everything else is listed explicitly:
+#   ingress  — same-namespace traffic, kubelet probes (`health`), and the
+#              monitoring scrape of :8080 (all ports from that namespace, since
+#              vmagent scrapes several ports on these pods)
+#   egress   — DNS, same-namespace traffic, the API server (entity, the
+#              10.30.0.10/32 control-plane VIP, and the in-cluster Service
+#              CIDR), and the internet on 22/443 for Git and charts
+# There is no admission-webhook ingress rule: nothing calls *into* Flux.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

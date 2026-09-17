@@ -18,6 +18,14 @@
 #
 # Note process_exec events (every execve, with arguments) are emitted by
 # Tetragon's base sensor already — no policy is needed for exec auditing.
+#
+# A `sa-token-read-monitor` policy for hermes-sandbox was removed on
+# 2026-09-17 after the review showed it could never fire: Kata sandbox pods run
+# with `automountServiceAccountToken: false`, so
+# /var/run/secrets/kubernetes.io/serviceaccount/ does not exist inside them and
+# the fd_install selector has nothing to match (0 events in the retained
+# window). The real control there is the absent token, not a tracing policy.
+# Re-add it if sandboxes ever gain automounted tokens.
 ---
 # Host-sensitive file writes, cluster-wide. /etc, /etc/shadow and the root
 # SSH keys are the classic persistence targets; on an immutable Talos host any
@@ -47,28 +55,3 @@ spec:
           matchActions:
             - action: Post
 ---
-# Service-account token reads inside the agent sandbox, monitor-only (see the
-# header). This is the namespace where a leaked token would matter most, so
-# the events are worth having even though nothing is blocked yet.
-apiVersion: cilium.io/v1alpha1
-kind: TracingPolicyNamespaced
-metadata:
-  name: sa-token-read-monitor
-  namespace: hermes-sandbox
-spec:
-  kprobes:
-    - call: "fd_install"
-      syscall: false
-      args:
-        - index: 0
-          type: "int"
-        - index: 1
-          type: "file"
-      selectors:
-        - matchArgs:
-            - index: 1
-              operator: "Prefix"
-              values:
-                - "/var/run/secrets/kubernetes.io/serviceaccount/token"
-          matchActions:
-            - action: Post

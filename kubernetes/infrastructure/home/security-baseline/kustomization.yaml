@@ -4,6 +4,8 @@ resources:
   # Flux's own namespace: the reconciliation plane gets an allowlist like any
   # other workload namespace.
   - flux-system-cilium.yaml
+  # Intra-namespace communication allowed by default (operator requirement).
+  - intra-namespace-allow.yaml
 
 # There is deliberately NO CiliumClusterwideNetworkPolicy here.
 #

@@ -1,7 +1,8 @@
-# CNPG backup- and WAL-archiving health alerts for the home cluster's four
+# CNPG backup- and WAL-archiving health alerts for the home cluster's five
 # CloudNativePG clusters. These guard the S3 Barman-Cloud-plugin backups and
 # PITR guarantees the per-cluster objectstore/scheduled-backup manifests rely
-# on (authentik, langfuse, immich, hindsight).
+# on (authentik, langfuse, immich, hindsight — and paperless, whose cluster was
+# previously missing from the scrape file entirely).
 #
 # Metric names verified against plugin-barman-cloud v0.15.0 (the plugin
 # supersedes the deprecated cnpg_collector_* backup metrics):
@@ -14,9 +15,18 @@
 #       stalled)
 #
 # Every CNPG series carries a "cluster" label injected by the relabelings on
-# the five CNPG VMPodScrapes (pod label cnpg.io/cluster -> metric label
-# cluster), so {cluster!=""} selects exactly the five live clusters — and
-# matches nothing on any other exporter (these metric names are CNPG-only).
+# the five CNPG VMPodScrapes in the sibling scrapes.yaml (one per live cluster:
+# authentik, immich, hindsight, langfuse and paperless — the fifth scrape is
+# new here, and before it existed no series carried cluster="paperless-*" at
+# all). The relabeling maps the pod label cnpg.io/cluster onto the metric label
+# cluster verbatim, so the label VALUE is the full cluster name
+# (cluster="authentik-database", cluster="immich-database", …), not the bare
+# namespace. {cluster!=""} therefore selects exactly those five live clusters —
+# and matches nothing on any other exporter (these metric names are CNPG-only).
+# That label is also why the absence rule below is written once per cluster
+# instead of once globally: absent() over {cluster!=""} goes silent as soon as
+# ANY cluster reports, so one healthy cluster used to mask another cluster
+# whose metrics had vanished.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
@@ -57,15 +67,32 @@ spec:
               PITR RPO is degraded. An age of ~56 years (timestamp 0) means
               the cluster has never had a successful backup.
         - alert: BackupMetricsAbsent
-          expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=""})
+          # One absent() per cluster, or-joined, matched on the FULL cluster
+          # name — the relabeling copies the pod label cnpg.io/cluster
+          # verbatim, so the series carry cluster="authentik-database" etc.,
+          # never the bare namespace. absent() over the old global selector
+          # {cluster!=""} returned empty as soon as ANY cluster had a series,
+          # so a single healthy cluster hid another cluster whose metrics had
+          # disappeared; per-cluster selectors make each cluster's silence
+          # fire on its own. absent() copies the equality matcher's label, so
+          # $labels.cluster names the missing cluster.
+          expr: >-
+            absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster="authentik-database"})
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster="immich-database"})
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster="hindsight-database"})
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster="langfuse-database"})
+            or absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster="paperless-database"})
           for: 30m
           labels:
             severity: critical
           annotations:
-            summary: "CNPG backup metrics absent"
+            summary: "CNPG backup metrics absent for {{ $labels.cluster }}"
             description: >-
               No barman_cloud_cloudnative_pg_io backup-age series is being
-              scraped from any CNPG cluster for over 30m — the plugin sidecar
-              is down, the operator is not reconciling, or the scrape pipeline
-              broke. While absent, the BackupTooOld alert is blind, so treat
-              backup coverage as unverifiable until this resolves.
+              scraped for cluster {{ $labels.cluster }} for over 30m — the
+              plugin sidecar is down, the operator is not reconciling, or that
+              cluster's VMPodScrape/relabeling broke. This is evaluated per
+              cluster, so it fires even while the other four clusters report
+              normally. While absent, BackupTooOld is blind for
+              {{ $labels.cluster }}, so treat backup coverage as unverifiable
+              until this resolves.

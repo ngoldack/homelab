@@ -62,6 +62,12 @@ spec:
       # datasources over the pod-log directory are unambiguous and carry the
       # label the parser filters on.
       hostVarLog: true
+      # The review found the agent DaemonSet could not schedule on the node
+      # hosting half the authentik pods: that node carries the Kata sandbox's
+      # `dedicated:NoSchedule` taint. A node-log reader belongs on every node,
+      # same as node-exporter/vlagent, so it tolerates everything.
+      tolerations:
+        - operator: Exists
       additionalAcquisition:
         - source: file
           filenames:

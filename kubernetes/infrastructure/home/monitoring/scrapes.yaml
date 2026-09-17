@@ -39,7 +39,12 @@ spec:
     matchLabels:
       app.kubernetes.io/name: zot
   endpoints:
-    - port: "5000"
+    # Port NAME, not number: service-scrape discovery keeps targets on
+    # __meta_kubernetes_endpoint_port_name (vmagent renders
+    # `keep __meta_kubernetes_endpoint_port_name regex: "5000"`, which can
+    # never match the name "zot"), so the numeric form discovers zero targets
+    # — job registry/zot had no up series before this change.
+    - port: zot
 ---
 # ---- CloudNativePG. Each instance pod ALWAYS serves Prometheus metrics on
 # :9187 (container port name "metrics"); the operator's deprecated
@@ -118,6 +123,30 @@ spec:
         - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
           targetLabel: cluster
 ---
+# ---- paperless is the FIFTH CNPG cluster (authentik, immich, hindsight and
+# langfuse above; ../paperless/postgres.yaml + objectstore.yaml +
+# scheduled-backup.yaml). Without its own scrape no series carries
+# cluster="paperless-database" (the relabeled value is the CNPG cluster name),
+# so an absent series — not a zero — makes every data-protection alert in
+# ../monitoring/rules.yaml blind for it: the rules match on {cluster!=""} (or
+# per-cluster equality) and simply have nothing to evaluate.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: paperless-database
+  namespace: paperless
+spec:
+  namespaceSelector:
+    matchNames: [paperless]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: paperless-database
+  podMetricsEndpoints:
+    - port: metrics
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
+---
 # ---- external-dns (both the LAN and edge instances share the
 # app.kubernetes.io/name=external-dns service label, so one scrape covers
 # both) on the metrics port 7979.
@@ -133,7 +162,12 @@ spec:
     matchLabels:
       app.kubernetes.io/name: external-dns
   endpoints:
-    - port: "7979"
+    # Both Services (external-dns and external-dns-edge) name their 7979
+    # metrics port "http" — the second port is http-webhook:8080 — so the
+    # endpoint must use the name: the numeric form renders
+    # `keep __meta_kubernetes_endpoint_port_name regex: "7979"` and matches
+    # nothing, which is why job network/external-dns had no up series.
+    - port: http
 ---
 # ---- cert-manager controller only (the task scopes to the controller; the
 # cainjector/webhook emit on 9402/10250 but their Services are not prometheus
@@ -150,7 +184,12 @@ spec:
     matchLabels:
       app.kubernetes.io/component: controller
   endpoints:
-    - port: "9402"
+    # The controller Service exposes 9402 under the NAME
+    # tcp-prometheus-servicemonitor (the pod's container port is http-metrics,
+    # but the Service port name is what discovery sees). vmagent keeps targets
+    # on __meta_kubernetes_endpoint_port_name, so the numeric form never
+    # resolves — job cert-manager/cert-manager had no up series.
+    - port: tcp-prometheus-servicemonitor
 ---
 # ---- Flux controllers: source/kustomize/helm/notification controllers all
 # label their pods app.kubernetes.io/part-of=flux and serve :8080 (container
@@ -167,7 +206,10 @@ spec:
     matchLabels:
       app.kubernetes.io/part-of: flux
   podMetricsEndpoints:
-    - port: "8080"
+    # Discovery matches the container port NAME
+    # (__meta_kubernetes_pod_container_port_name): the numeric "8080" matched
+    # no port name and discovered zero targets.
+    - port: http-prom
 ---
 # ---- authentik server pods serve django-prometheus metrics on :9300 (the
 # container port "metrics"); the chart does not create a metrics Service, so
@@ -185,7 +227,10 @@ spec:
       app.kubernetes.io/part-of: authentik
       app.kubernetes.io/component: server
   podMetricsEndpoints:
-    - port: "9300"
+    # Discovery matches the container port NAME
+    # (__meta_kubernetes_pod_container_port_name): the numeric "9300" matched
+    # no port name and discovered zero targets.
+    - port: metrics
 ---
 # ---- llmkube llama.cpp qwen3-27b: the llama-server runs with --metrics on
 # :8080 (the InferenceService Service of the same name exposes it).
@@ -201,7 +246,12 @@ spec:
     matchLabels:
       app: qwen3-27b
   endpoints:
-    - port: "8080"
+    # The InferenceService Service names its 8080 port "http", so the numeric
+    # form discovered nothing (job serviceScrape/llmkube-system/qwen3-27b has
+    # no up series; the Service also has no ready endpoints right now because
+    # no model pod is scheduled, so the name is the only form that can
+    # resolve once one is).
+    - port: http
 ---
 # ---- cilium agent (9962, default prometheus-serve-addr) and operator
 # (9963, container port name "prometheus"). Both live in kube-system and have
@@ -218,7 +268,10 @@ spec:
     matchLabels:
       k8s-app: cilium
   podMetricsEndpoints:
-    - port: "9962"
+    # Discovery matches the container port NAME
+    # (__meta_kubernetes_pod_container_port_name): the numeric "9962" matched
+    # no port name and discovered zero targets.
+    - port: prometheus
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
@@ -232,7 +285,10 @@ spec:
     matchLabels:
       io.cilium/app: operator
   podMetricsEndpoints:
-    - port: "9963"
+    # Discovery matches the container port NAME
+    # (__meta_kubernetes_pod_container_port_name): the numeric "9963" matched
+    # no port name and discovered zero targets.
+    - port: prometheus
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
@@ -263,4 +319,7 @@ spec:
     matchLabels:
       app.kubernetes.io/component: valkey-node
   podMetricsEndpoints:
-    - port: "9121"
+    # Discovery matches the container port NAME
+    # (__meta_kubernetes_pod_container_port_name): the numeric "9121" matched
+    # no port name and discovered zero targets.
+    - port: metrics

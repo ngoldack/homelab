@@ -18,13 +18,30 @@ spec:
     - fromEntities:
         - ingress
         - health
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: monitoring
-    # This namespace's SSO-gated UIs are reached through the authentik proxy outpost.
+    # The monitoring rule is gone: no VMPodScrape (or any scrape object) exists
+    # for media, so it only opened every port to the monitoring namespace for
+    # nothing — re-add the rule together with the scrape object if one appears.
+    # This namespace's SSO-gated UIs are reached through the authentik proxy
+    # outpost, which only fronts the six backends httproutes.yaml sends to
+    # authentik-proxy: jellyseerr:5055, sabnzbd:8080, sonarr:8989,
+    # radarr:7878, prowlarr:9696, bazarr:6767 (jellyfin stays direct on 8096).
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "5055"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+            - port: "8989"
+              protocol: TCP
+            - port: "7878"
+              protocol: TCP
+            - port: "9696"
+              protocol: TCP
+            - port: "6767"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
@@ -41,6 +58,7 @@ spec:
             k8s:io.kubernetes.pod.namespace: media
     # Internet egress for indexers/Usenet/torrent traffic — arbitrary remote
     # ports, so this rule is port-open by design (the download path's VPN leg
-    # rides a macvlan interface outside Cilium's datapath anyway).
+    # rides a macvlan interface outside Cilium's datapath anyway). Deliberate
+    # exception to the port-scoping rule, reviewed 2026-09-17.
     - toEntities:
         - world

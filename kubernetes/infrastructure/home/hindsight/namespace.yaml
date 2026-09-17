@@ -3,6 +3,14 @@ kind: Namespace
 metadata:
   name: hindsight
   labels:
+    # Pod Security Admission: audit+warn at `restricted`, enforcement left to
+    # Talos' cluster default (`baseline`). Restricted-level drift becomes
+    # visible in the API audit log, in kubectl warnings and in Kyverno's
+    # PolicyReports without being able to reject a pod; the flip to
+    # `enforce: restricted` is a per-namespace decision once those reports are
+    # clean.
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
     # Split surface by design:
     # - edge-ingress: the control-plane UI is served by the edge Gateway
     #   behind the authentik outpost (hindsight-ui-edge.yaml) — identity-gated

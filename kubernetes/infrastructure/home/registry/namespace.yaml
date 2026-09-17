@@ -11,6 +11,14 @@ kind: Namespace
 metadata:
   name: registry
   labels:
+    # Pod Security Admission: audit+warn at `restricted`, enforcement left to
+    # Talos' cluster default (`baseline`). Restricted-level drift becomes
+    # visible in the API audit log, in kubectl warnings and in Kyverno's
+    # PolicyReports without being able to reject a pod; the flip to
+    # `enforce: restricted` is a per-namespace decision once those reports are
+    # clean.
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
     # Lets registry.${CLUSTER_DOMAIN}'s HTTPRoute attach to the public Gateway
     # in ../network/. The Gateway's allowedRoutes selector requires this exact
     # label; without it the route is silently rejected with NotAllowedByListeners

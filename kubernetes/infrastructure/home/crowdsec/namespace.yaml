@@ -1,15 +1,23 @@
-# CrowdSec's namespace. Detection-only deployment: LAPI + node agents.
+# CrowdSec's namespace.
 #
-# There is deliberately no bouncer here. CrowdSec publishes bouncers for
-# nginx/Traefik/HAProxy and for host firewalls; this cluster's ingress is
-# Cilium Gateway (Envoy), for which the official project ships no remediation
-# component, and the one community Cilium bouncer would require cluster-wide
-# CiliumNetworkPolicy write access from a single-maintainer project — not a
-# trade worth making for automatic bans in a homelab. Decisions therefore
-# surface as alerts/metrics for a human (or a future reviewed bouncer) to act
-# on, which is exactly what the previous edge-enforcement attempt was rolled
-# back for lacking.
+# Detection-only deployment: LAPI + node agents, no bouncer. CrowdSec publishes
+# bouncers for nginx/Traefik/HAProxy and for host firewalls; this cluster's
+# ingress is Cilium Gateway (Envoy), for which the official project ships no
+# remediation component, and the one community Cilium bouncer would require
+# cluster-wide CiliumNetworkPolicy write access from a single-maintainer
+# project — not a trade worth making for automatic bans in a homelab. Decisions
+# therefore surface as alerts/metrics for a human to act on, which is exactly
+# what the earlier edge-enforcement attempt was rolled back for lacking.
+#
+# PSA: privileged, because the agent mounts the host's /var/log to parse
+# container logs (hostPath volumes are rejected from `baseline`, which Talos
+# applies by default). The compensating control is the namespace's network
+# policy: DNS and the CAPI blocklist service, nothing else.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: crowdsec
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

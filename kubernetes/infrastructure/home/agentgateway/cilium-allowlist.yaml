@@ -18,7 +18,7 @@ spec:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: monitoring
     # In-cluster OTLP senders (every app exporting traces/metrics).
-    - toEntities:
+    - fromEntities:
         - cluster
       toPorts:
         - ports:

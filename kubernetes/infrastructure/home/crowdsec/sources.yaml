@@ -6,4 +6,4 @@ metadata:
   namespace: flux-system
 spec:
   interval: 2h
-  url: https://crowdsec.github.io/helm-charts/
+  url: https://crowdsecurity.github.io/helm-charts

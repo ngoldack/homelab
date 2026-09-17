@@ -1,9 +1,20 @@
-# Build the Hermes gateway image (hermes-agent-sandbox-plugin) pinned to the
-# plugin commit 5874063. The Dockerfile at that commit derives from the pinned
-# Hermes base image (nousresearch/hermes-agent:v2026.9.7), installs the
-# agent-sandbox SDK + plugin into a plain venv, and registers the plugin via
-# the hermes_agent.plugins entry point. Pushed digest (pinned in the
-# StatefulSet): sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c.
+# Build the Hermes gateway image (hermes-agent-sandbox-plugin).
+#
+# --opt=context pins the plugin commit
+# 035bc51a1a7345c2f0e811e69dbd67e0f03cea67. NOTE: that SHA predates the
+# 2026-09-17 pinning change (base index digest + interpreter wiring), so bump
+# --opt=context to the commit that carries it before rebuilding; the pins then
+# live in the Dockerfile at that commit. It derives from the Hermes base image
+# (nousresearch/hermes-agent:v2026.9.7, index-digest-pinned in the Dockerfile
+# itself), installs the agent-sandbox SDK + plugin into a plain venv, and
+# registers the plugin via the hermes_agent.plugins entry point.
+#
+# OUTPUT: this Job records the digest of the image it BUILT (the base image's
+# digest lives in the Dockerfile). Last built digest — the one
+# hermes/statefulset.yaml pins today — is
+#   sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
+# A rebuild from the changed Dockerfile yields a NEW digest: re-record it here
+# and re-pin the StatefulSet.
 #
 # RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
 # tag. Flux sees a new Job (Jobs are immutable), prunes the old one.

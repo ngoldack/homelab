@@ -323,3 +323,60 @@ spec:
     # (__meta_kubernetes_pod_container_port_name): the numeric "9121" matched
     # no port name and discovered zero targets.
     - port: metrics
+---
+# ---- agent-sandbox Router (ns agent-sandbox-system): the Go router exposes
+# Prometheus metrics ONLY on its dedicated --metrics-bind-address=:9090
+# (container port name "metrics"); the Service sandbox-router-svc publishes
+# just the 8080 proxy port, so this must be a pod scrape. The probe port 8081
+# ("healthz") is NOT a Prometheus endpoint (GET :8081/metrics -> 404;
+# /healthz and /readyz return plain "ok" JSON/text — verified live
+# 2026-09-17) and is therefore deliberately not an endpoint here.
+# The monitoring egress allowlist must carry 9090 or Cilium drops the scrape
+# (monitoring/cilium-allowlist.yaml, monitoring-scrapers-allowlist).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: sandbox-router
+  namespace: agent-sandbox-system
+spec:
+  namespaceSelector:
+    matchNames: [agent-sandbox-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-router
+      app.kubernetes.io/component: sandbox-router
+  podMetricsEndpoints:
+    - port: "9090"
+---
+# ---- agent-sandbox controller (ns agent-sandbox-system): metrics on :8080
+# (container port name "metrics", Service agent-sandbox-controller port 8080,
+# container args `--leader-elect=true --extensions`). Exposes the
+# agent_sandboxes gauge (per namespace / owned_by / sandbox_template /
+# ready_condition) — the only warm-pool state signal in the cluster, see the
+# hermes-sandbox VMRule group in rules.yaml — plus controller-runtime
+# reconcile counters and process metrics. There are NO SandboxClaim/
+# SandboxWarmPool custom-resource metrics: this stack's kube-state-metrics
+# runs without a custom-resource-state config, so kube_customresource_*
+# returns nothing (verified live 2026-09-17).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: agent-sandbox-controller
+  namespace: agent-sandbox-system
+spec:
+  namespaceSelector:
+    matchNames: [agent-sandbox-system]
+  selector:
+    matchLabels:
+      app: agent-sandbox-controller
+  endpoints:
+    - port: "8080"
+---
+# ---- hermes: deliberately NO scrape object. The gateway exposes no
+# Prometheus endpoint: GET 127.0.0.1:8642/metrics returns 404 and
+# GET 127.0.0.1:9119/metrics returns 302 to /login?next=%2Fmetrics (uvicorn
+# session-auth dashboard — not a scrapeable exposition). Probed live
+# 2026-09-17 via kubectl exec into hermes-0; do not repeat the probe blind.
+# If Hermes ever ships /metrics, add the scrape here AND a monitoring ingress
+# allow for that port in ../hermes/cilium-policy.yaml — the hermes namespace
+# default-denies all ingress, so the scrape would silently fail otherwise.

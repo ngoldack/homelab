@@ -282,10 +282,12 @@ spec:
     # Second, availability: the fetch is a Helm hook, so a reconcile with no
     # egress to GitHub fails the whole HelmRelease rather than degrading.
     #
-    # Rules will instead be vendored into this repo as VMRule objects at a
-    # known revision. Until that lands there is NO alerting — metrics are
-    # collected and queryable, but nothing pages. That is a deliberate,
-    # visible gap rather than a silent dependency on a branch tip.
+    # Rules are vendored into this repo as VMRule objects at a known
+    # revision: rules.yaml carries `data-protection` (CNPG backup/WAL health)
+    # and the `hermes-sandbox` group (Hermes/Kata warm pool, gateway,
+    # sandbox eviction and shared-node pressure alerts), with their targets
+    # defined in scrapes.yaml. Alerting therefore no longer depends on this
+    # chart's network-fetching defaultRules, which stay off.
     defaultRules:
       enabled: false
 

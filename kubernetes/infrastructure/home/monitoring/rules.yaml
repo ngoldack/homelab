@@ -96,3 +96,170 @@ spec:
               normally. While absent, BackupTooOld is blind for
               {{ $labels.cluster }}, so treat backup coverage as unverifiable
               until this resolves.
+    # ---- Hermes agent + Kata sandbox stack (namespaces hermes,
+    # hermes-sandbox, agent-sandbox-system). Metric sources, all probed live
+    # on 2026-09-17:
+    #   * agent_sandboxes — the agent-sandbox controller's point-in-time
+    #     sandbox gauge (scraped via the agent-sandbox-controller
+    #     VMServiceScrape in scrapes.yaml), labelled namespace / owned_by /
+    #     sandbox_template / ready_condition. This is the ONLY warm-pool state
+    #     signal available: there is no kube_customresource_* metric anywhere
+    #     (kube-state-metrics runs without custom-resource-state config) and
+    #     the controller exports no SandboxClaim metrics at all.
+    #   * kube_statefulset_status_replicas_ready / kube_statefulset_replicas
+    #     for the gateway rollout.
+    #   * kube_pod_status_phase, kube_pod_status_ready,
+    #     kube_pod_container_status_restarts_total,
+    #     kube_pod_container_status_last_terminated_reason and
+    #     kube_pod_status_reason for sandbox pod health and eviction.
+    #   * kube_node_status_condition{node=...} and node_memory_*{instance=...}
+    #     for the shared performance/P100 node the warm pool is pinned to.
+    #     The node name and node-exporter instance are written out because
+    #     this stack's kube-state-metrics has no label allowlist: node labels
+    #     (workload.hermes.io/sandbox) are not queryable from any metric, so
+    #     the pin cannot be joined dynamically. Keep both in sync with the
+    #     live node (`kubectl get nodes -L workload.hermes.io/sandbox`).
+    - name: hermes-sandbox
+      rules:
+        - alert: HermesSandboxWarmPoolNotReady
+          # The pool is declared replicas: 1 (hermes-sandbox/sandbox-warm-pool.yaml)
+          # and SandboxWarmPool.spec.replicas is not exported by the
+          # controller, so for this pool "not fully ready" == "no ready
+          # sandbox reported". A raised replicas would need a new signal.
+          expr: >-
+            absent(agent_sandboxes{namespace="hermes-sandbox",
+            owned_by="SandboxWarmPool", ready_condition="true"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Hermes warm pool reports no ready sandbox"
+            description: >-
+              For over 10 minutes the controller has reported zero ready
+              sandboxes for SandboxWarmPool hermes-go, so every new session
+              blocks until SandboxCreateTimeout. This also fires when the
+              controller scrape itself is down, so check both:
+              `kubectl -n hermes-sandbox get sandboxwarmpool hermes-go -o yaml`
+              (status.readyReplicas) and that the agent-sandbox-system scrape
+              targets are up in VictoriaMetrics.
+        - alert: HermesSandboxClaimStuck
+          # SandboxClaims have no CR-level metric (see group comment), so a
+          # claim that cannot be served is detected through its pod: Pending
+          # (unschedulable on the shared node, or no pool sandbox) or not
+          # Ready. A claim stuck Terminating whose pod is still Ready is not
+          # observable from metrics and is not covered.
+          expr: >-
+            kube_pod_status_ready{namespace="hermes-sandbox",
+            condition=~"false|unknown"} == 1
+            or
+            kube_pod_status_phase{namespace="hermes-sandbox",
+            phase="Pending"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sandbox pod not serving: {{ $labels.pod }}"
+            description: >-
+              Pod {{ $labels.pod }} in hermes-sandbox has been Pending or
+              not-Ready for over 10 minutes. A SandboxClaim either stays
+              Pending with no pod at all (empty pool — see
+              HermesSandboxWarmPoolNotReady) or leaves its adopted sandbox pod
+              unready. Inspect with
+              `kubectl -n hermes-sandbox get sandboxclaims,sandboxes,pods`.
+        - alert: HermesGatewayNotReady
+          expr: >-
+            kube_statefulset_status_replicas_ready{namespace="hermes",
+            statefulset="hermes"}
+            <
+            kube_statefulset_replicas{namespace="hermes", statefulset="hermes"}
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Hermes gateway StatefulSet not fully ready"
+            description: >-
+              hermes-0 has reported fewer ready replicas than the StatefulSet
+              requests for over 10 minutes, so the API on :8642 and the
+              dashboard on :9119 are unavailable to clients. Check
+              `kubectl -n hermes get sts hermes -o wide` and the pod events.
+        - alert: HermesGatewayRestarting
+          expr: >-
+            increase(kube_pod_container_status_restarts_total{namespace="hermes"}[30m])
+            > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Hermes gateway container restarting"
+            description: >-
+              The hermes-0 gateway container restarted within the last 30
+              minutes. A single restart can be a deliberate rollout; repeated
+              ones mean a crash loop. Check `kubectl -n hermes describe pod
+              hermes-0` (last state, exit code) and the gateway logs.
+        - alert: HermesSandboxPodOOMKilled
+          # Reason alone would latch for the pod's whole lifetime, so the
+          # restart increase bounds it to a recent OOM.
+          expr: >-
+            (kube_pod_container_status_last_terminated_reason{namespace="hermes-sandbox",
+            reason="OOMKilled"} == 1)
+            and on(namespace, pod, container)
+            (increase(kube_pod_container_status_restarts_total{namespace="hermes-sandbox"}[1h]) > 0)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sandbox container OOM-killed: {{ $labels.pod }}"
+            description: >-
+              A container in hermes-sandbox whose most recent termination was
+              OOMKilled has restarted within the last hour. The sandbox node
+              also runs the P100 inference workloads and the image builders
+              (accepted co-tenancy), so memory pressure and OOMs run in both
+              directions there. Check the container's memory limit against
+              what the task actually used.
+        - alert: HermesSandboxPodEvicted
+          expr: >-
+            kube_pod_status_reason{namespace="hermes-sandbox", reason="Evicted"}
+            == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sandbox pod evicted: {{ $labels.pod }}"
+            description: >-
+              Pod {{ $labels.pod }} in hermes-sandbox has carried
+              status.reason=Evicted for over 10 minutes: the kubelet evicted
+              it under node pressure while the shared node was oversubscribed.
+              Check the pod's status.message and the node alerts
+              (HermesSandboxNodeMemoryPressure / HermesSandboxNodeMemoryLow).
+        - alert: HermesSandboxNodeMemoryPressure
+          expr: >-
+            kube_node_status_condition{node="talos-919-w9u",
+            condition="MemoryPressure", status="true"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sandbox node {{ $labels.node }} under memory pressure"
+            description: >-
+              The performance/P100 node that hosts the Kata warm pool (pinned
+              by label workload.hermes.io/sandbox=true) has reported
+              MemoryPressure=true for over 10 minutes. Pressure on this shared
+              node precedes both sandbox evictions and inference-workload
+              failures. The node name is pinned in the expression — update it
+              with the live label selector if the node is renamed.
+        - alert: HermesSandboxNodeMemoryLow
+          expr: >-
+            (1 - node_memory_MemAvailable_bytes{instance="10.30.0.22:9100"}
+            / node_memory_MemTotal_bytes{instance="10.30.0.22:9100"}) > 0.92
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sandbox node memory nearly exhausted"
+            description: >-
+              Over 92% of memory is in use on the sandbox node (talos-919-w9u,
+              node-exporter instance 10.30.0.22:9100) for more than 15 minutes.
+              This is the early warning before kubelet evictions or inference
+              OOMs: the node's baseline use is ~19%, so a 92% reading is a real
+              excursion. The instance is pinned because node labels are not
+              queryable from metrics here; update it with the live node.

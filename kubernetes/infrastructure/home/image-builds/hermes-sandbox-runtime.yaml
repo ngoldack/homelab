@@ -1,18 +1,33 @@
-# Build the Hermes sandbox runtime image (sandboxd + Go toolchain) pinned to
-# agent-sandbox v1.0.2 and our repo commit c1376ef (which carries the
-# Dockerfile at kubernetes/infrastructure/home/image-builds/hermes-sandbox-
-# runtime/Dockerfile — see that file for the content WHEREFORE).
+# Build the Hermes sandbox runtime image (sandboxd + Go toolchain).
 #
-# Context is this same repo pinned by full commit SHA: the Dockerfile at that
-# commit fetches kubernetes-sigs/agent-sandbox v1.0.2 itself (git clone in the
-# build stage), so the whole image is reproducible from two pinned SHAs.
+# INPUT PINS (resolved and recorded in the Dockerfile):
+#   * agent-sandbox v1.0.2 = commit 9a85153590e54cb980f3241f9e7a9228449412c9
+#     (peeled refs/tags/v1.0.2 — the Dockerfile fetches that tag's objects but
+#     checks out that SHA, never the tag);
+#   * golang:1.26.5-bookworm and debian:bookworm-slim pinned by their
+#     multi-arch index digests.
 #
-# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and
-# image tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
+# Context is this same repo pinned by full commit SHA
+# 2be5991f7fab0656c4ee270d2322b397b278b5ce. NOTE: that SHA predates the
+# 2026-09-17 pinning change (base/commit digests, version stamping, unified
+# cache ref), so bump --opt=context to the commit carrying it before
+# rebuilding; the pins then live in the Dockerfile at that commit.
+#
+# OUTPUT: registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991 (tag =
+# upstream version + this context's SHA fragment, so the tag moves with the
+# context). The image deployed today is the older tag 1.0.3; its manifest
+# digest — the one pinned in hermes-sandbox/sandbox-template.yaml — is
+#   sha256:8317b00f8aa3801b9dc5746f18178a0f4ec3df1e1b51a24e8468b1a3352117f1
+# After this Job completes, read its pushed digest from the Job log and re-pin
+# sandbox-template.yaml in the same change (tag and digest move together).
+#
+# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image tag;
+# use a `-rN` suffix after the context SHA when only the build parameters
+# change. Flux sees a new Job (Jobs are immutable) and prunes the old one.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-sandbox-runtime-2be5991
+  name: build-hermes-sandbox-runtime-2be5991-r2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -38,9 +53,13 @@ spec:
             - --frontend=dockerfile.v0
             - --opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3,push=true
-            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v2-v2,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v2
+            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991,push=true
+            # Cache: --export-cache and --import-cache MUST name the SAME ref —
+            # they used to differ, so nothing was ever reused. Bump the ref in
+            # BOTH lines together (buildcache-v3 -> v4) to abandon a poisoned
+            # or incompatible cache.
+            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3
             - --progress=plain
           env:
             - name: DOCKER_CONFIG

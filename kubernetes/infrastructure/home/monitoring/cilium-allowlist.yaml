@@ -206,6 +206,8 @@ spec:
     #                   internal data path: vmagent writes, vmalert and grafana
     #                   query, vmauth fronts them)
     #   9093       alertmanager (vmalert -> vmalertmanager)
+    #   9090       sandbox-router metrics (VMPodScrape sandbox-router;
+    #              the router's :8081 probe port is not a scrape target)
     - toEntities:
         - cluster
       toPorts:
@@ -223,6 +225,7 @@ spec:
             - {port: "8435", protocol: TCP}
             - {port: "8888", protocol: TCP}
             - {port: "8889", protocol: TCP}
+            - {port: "9090", protocol: TCP}
             - {port: "9093", protocol: TCP}
             - {port: "9100", protocol: TCP}
             - {port: "9121", protocol: TCP}

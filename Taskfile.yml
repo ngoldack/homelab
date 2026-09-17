@@ -284,6 +284,10 @@ tasks:
         sandbox_node=$(kubectl --kubeconfig kubeconfig-home.yaml get nodes \
           -l workload.hermes.io/sandbox=true \
           -o jsonpath='{.items[0].metadata.name}')
+        [ -n "$sandbox_node" ] || {
+          echo "FAIL: no node carries workload.hermes.io/sandbox=true — the sandbox pin is missing" >&2
+          exit 1
+        }
         echo "sandbox_node=$sandbox_node scheduled_on=$node"
         [ "$node" = "$sandbox_node" ] || { echo "FAIL: not scheduled on sandbox node" >&2; exit 1; }
         rc=$(kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox \
@@ -305,6 +309,30 @@ tasks:
           || echo "WARN: /dev/kvm not visible in guest (may be fine — Kata qemu only needs host KVM)"
         echo "KATA SMOKE OK"
         kubectl --kubeconfig kubeconfig-home.yaml -n hermes-sandbox delete pod kata-smoke-test --wait=false
+
+  hermes:e2e:
+    desc: Run the Hermes acceptance gate (API auth, Kata-sandboxed Go task, claim/pool cleanup, backend identity)
+    cmds:
+      - hack/hermes-e2e.sh
+
+  hermes:repin:
+    desc: Print the digest pushed by the newest Hermes gateway build Job (re-pin it in hermes/statefulset.yaml)
+    cmds:
+      - |
+        set -eu
+        [ -f kubeconfig-home.yaml ] || {
+          echo "kubeconfig-home.yaml missing — run task kubeconfig:home:export" >&2
+          exit 1
+        }
+        job=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit get jobs -o name \
+          --sort-by=.metadata.creationTimestamp | grep 'build-hermes-agent-sandbox-plugin' | tail -1)
+        [ -n "$job" ] || {
+          echo "no gateway build Job found in the buildkit namespace" >&2
+          exit 1
+        }
+        echo "job: $job"
+        kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" \
+          | grep -oE 'sha256:[0-9a-f]{64}' | tail -1
 
   tofu:run:
     internal: true
@@ -419,10 +447,59 @@ tasks:
           kustomize build "$(dirname "$k")" >/dev/null
         done
 
+  lint:orphans:
+    desc: Fail when a manifest under kubernetes/ is referenced by no kustomization
+    cmds:
+      - |
+        set -eu
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        # Files that are deliberately not kustomize resources:
+        #   */upstream/*          vendored upstream trees, applied selectively
+        #   sops-age.sops.yaml    consumed by Flux's decryption provider, applied at bootstrap
+        #   hermes .../plugin.yaml  Hermes plugin metadata (PluginManifest), not a k8s object
+        # Known pre-existing orphans from other work streams (2026-09-17) — listed so this
+        # check can gate NEW orphans without a red tree for someone else's in-flight work;
+        # they are reported, not adopted, here.
+        exceptions='^(kubernetes/infrastructure/home/agentgateway/(api-keys\.sops|chat-chain|httproute-key|policy-apikey)\.yaml|kubernetes/infrastructure/home/kyverno/policies\.yaml)$'
+        git ls-files 'kubernetes/**/*.yaml' \
+          | grep -v '/kustomization\.yaml$' \
+          | grep -v '/upstream/' \
+          | grep -v '^kubernetes/clusters/home/sops-age\.sops\.yaml$' \
+          | grep -v '^kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/plugin\.yaml$' \
+          | grep -vE "$exceptions" > "$tmp/candidates"
+        : > "$tmp/refs"
+        for k in $(git ls-files 'kubernetes/**/kustomization.yaml'); do
+          d="$(dirname "$k")"
+          # Any *.yaml token in a kustomization counts as a reference (resources,
+          # generators, patches — and, harmlessly, prose). realpath is called WITHOUT
+          # -m (GNU-only): every genuine reference points at an existing path, and the
+          # BSD/macOS form accepts exactly those, so failures are simply skipped.
+          grep -oE '[A-Za-z0-9._/-]+\.ya?ml' "$k" | while read -r e; do
+            realpath "$d/$e" >> "$tmp/refs" 2>/dev/null || true
+          done
+        done
+        sort -u "$tmp/refs" > "$tmp/refs.sorted"
+        : > "$tmp/missing"
+        while read -r f; do
+          [ -f "$f" ] || continue
+          abs="$(realpath "$f" 2>/dev/null || true)"
+          [ -n "$abs" ] || continue
+          grep -qxF "$abs" "$tmp/refs.sorted" || echo "  $f" >> "$tmp/missing"
+        done < "$tmp/candidates"
+        if [ -s "$tmp/missing" ]; then
+          echo "FAIL: manifests no kustomization references:" >&2
+          cat "$tmp/missing" >&2
+          echo "Wire them into a kustomization's resources, or extend the exception list in lint:orphans." >&2
+          exit 1
+        fi
+        echo "OK: every manifest under kubernetes/ is referenced by a kustomization"
+
   check:
-    desc: Run all local validations (yamllint, tofu fmt, kustomize builds, sops decrypt)
+    desc: Run all local validations (yamllint, tofu fmt, kustomize builds, orphan check, sops decrypt)
     cmds:
       - task: lint:yaml
       - task: lint:tofu
       - task: lint:kustomize
+      - task: lint:orphans
       - task: sops:check:all

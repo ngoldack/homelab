@@ -41,9 +41,6 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: hermes
   egress:
     - toEndpoints:
         - matchLabels:

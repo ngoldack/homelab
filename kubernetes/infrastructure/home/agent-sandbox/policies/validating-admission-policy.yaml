@@ -1,16 +1,24 @@
 # secure-hermes-sandbox — admission gate for sandbox Pods.
 #
 # Binds to (and only to) the hermes-sandbox namespace and blocks any Pod that
-# violates the sandbox isolation contract: Kata-only runtime, no ServiceAccount
-# token, no privileged container, no hostNetwork/hostPID/hostIPC, no
-# hostPath/secret/SA-token-projected volumes, no privilege escalation, no added
-# capabilities, no root runAsUser/runAsGroup, mandatory cpu+memory resource
-# limits, a nodeSelector pinning the sandbox node, and runAsNonRoot: true.
+# violates the sandbox isolation contract: Kata-only runtime,
+# automountServiceAccountToken explicitly false, no privileged container
+# (regular or init), no hostNetwork/hostPID/hostIPC, no hostPath/secret/
+# serviceAccountToken-projected volumes, no privilege escalation, no added
+# capabilities, no root runAsUser/runAsGroup at pod or container level,
+# mandatory cpu+memory limits on every container, a nodeSelector pinning the
+# sandbox node, and runAsNonRoot true wherever it is declared (pod or
+# container level; an absent value is not treated as a violation here).
 #
 # Expressions are written against core PodSchema (k8s v1.36) and guarded with
 # has() so an absent field is treated as a violation rather than a runtime
-# error. All validation reasons are MUST_FAIL because this policy exists to
-# DENY; the Binding enforces it with validationActions: [Deny].
+# error. Every validation carries reason Invalid; the Binding denies with
+# validationActions: [Deny] and failurePolicy is Fail, so a CEL evaluation
+# error rejects the Pod as well.
+#
+# The container-level checks iterate spec.containers + spec.initContainers;
+# the pod-level checks also run for pods/ephemeralcontainers UPDATEs, so an
+# injected ephemeral container still has to satisfy every pod-level rule here.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -23,6 +31,12 @@ spec:
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["pods"]
+      # kubectl debug-style container injection; the object is the Pod, so every
+      # pod-level validation below still applies to the UPDATE.
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["pods/ephemeralcontainers"]
   variables:
     # Every container the Pod runs — init (kata) plus regular containers.
     - name: allContainers
@@ -37,9 +51,10 @@ spec:
       message: "hermes-sandbox requires automountServiceAccountToken explicitly false"
       reason: Invalid
     - expression: >-
-        !has(object.spec.securityContext) ||
-        !has(object.spec.securityContext.privileged) ||
-        object.spec.securityContext.privileged == false
+        variables.allContainers.all(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.privileged) ||
+          c.securityContext.privileged == false)
       message: "hermes-sandbox requires no privileged securityContext"
       reason: Invalid
     - expression: "!has(object.spec.hostNetwork) || object.spec.hostNetwork == false"
@@ -58,7 +73,9 @@ spec:
         !has(object.spec.volumes) ||
         !object.spec.volumes.exists(v,
           has(v.secret) ||
-          (has(v.projected) && has(v.projected.source) && v.projected.source == 'ServiceAccountToken'))
+          (has(v.projected) &&
+           has(v.projected.sources) &&
+           v.projected.sources.exists(s, has(s.serviceAccountToken))))
       message: "hermes-sandbox requires no secret or serviceAccountToken-projected volumes"
       reason: Invalid
     - expression: >-
@@ -101,11 +118,19 @@ spec:
       message: "hermes-sandbox requires nodeSelector workload.hermes.io/sandbox == 'true'"
       reason: Invalid
     - expression: >-
-        (!has(object.spec.runAsUser) || object.spec.runAsUser != 0) &&
-        (!has(object.spec.runAsGroup) || object.spec.runAsGroup != 0) &&
+        (!has(object.spec.securityContext) ||
+         !has(object.spec.securityContext.runAsUser) ||
+         object.spec.securityContext.runAsUser != 0) &&
+        (!has(object.spec.securityContext) ||
+         !has(object.spec.securityContext.runAsGroup) ||
+         object.spec.securityContext.runAsGroup != 0) &&
         variables.allContainers.all(c,
-          (!has(c.runAsUser) || c.runAsUser != 0) &&
-          (!has(c.runAsGroup) || c.runAsGroup != 0))
+          (!has(c.securityContext) ||
+           !has(c.securityContext.runAsUser) ||
+           c.securityContext.runAsUser != 0) &&
+          (!has(c.securityContext) ||
+           !has(c.securityContext.runAsGroup) ||
+           c.securityContext.runAsGroup != 0))
       message: "hermes-sandbox requires no container runAsUser/runAsGroup of 0"
       reason: Invalid
 ---

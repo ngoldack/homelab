@@ -1,5 +1,9 @@
 # hermes — ClusterIP service for the private OpenAI-compatible API server
-# (port 8642, bearer API_SERVER_KEY). No public route in v1.
+# (port 8642, bearer API_SERVER_KEY) and the Hermes Desktop dashboard
+# (port 9119, basic auth via HERMES_DASHBOARD_BASIC_AUTH_*). No public route
+# in v1: the API is reached with kubectl exec and the dashboard with
+# kubectl port-forward; the namespace's default-deny allows no ingress
+# except the monitoring scrape.
 apiVersion: v1
 kind: Service
 metadata:

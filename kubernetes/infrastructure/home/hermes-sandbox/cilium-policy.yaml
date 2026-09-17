@@ -42,8 +42,8 @@ spec:
             - 172.20.0.0/16
             - 172.21.0.0/16
     # openrouter.ai / api.openrouter.ai MUST stay unreachable. The installed
-    # cilium.io/v2 CRD has no toFQDNs under egressDeny (verified `kubectl
-    # explain ciliumnetworkpolicy.spec.egressDeny`), so a named FQDN deny
+    # cilium.io/v2 CRD has no FQDN-scoped field under egressDeny (verified
+    # `kubectl explain ciliumnetworkpolicy.spec.egressDeny`), so a named deny
     # cannot be expressed; they are instead STRICTLY absent from the egress
     # allowlist, which lands every attempt on default-deny. Allowing these
     # FQDNs therefore requires a deliberate, reviewable edit.
@@ -56,15 +56,14 @@ metadata:
   namespace: hermes-sandbox
 spec:
   description: >-
-    The ONLY egress sandboxes get: cluster DNS, plus exactly three approved
-    Go/Git endpoints on 443/TCP. This doc selects every pod in
-    hermes-sandbox (empty matchLabels {} is a wildcard): the namespace has no
-    other allow CNP to subdivide the endpoints with.
+    The ONLY egress sandboxes get: cluster DNS. This doc selects every pod
+    in hermes-sandbox (empty matchLabels {} is a wildcard): the namespace
+    has no other allow CNP to subdivide the endpoints with.
   endpointSelector:
     matchLabels: {}
   egress:
-    # Cluster DNS first: every other rule (including FQDN resolution) depends
-    # on it. Keyed on the k8s-app label Cilium recognizes for kube-dns.
+    # Cluster DNS is the sandbox's entire allowed egress. Keyed on the
+    # k8s-app label Cilium recognizes for kube-dns.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -75,18 +74,14 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Deliberately EXACT three FQDNs on 443/TCP — NOT *.github.com: git
-    # archive/object subdomains (codeload, objects) stay denied until an
-    # internal mirror replaces this list, at which point this rule shrinks
-    # to the mirror.
-    - toFQDNs:
-        - matchName: github.com
-        - matchName: proxy.golang.org
-        - matchName: sum.golang.org
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
+    # DNS-only by design — an FQDN-scoped rule cannot work here: the Cilium DNS
+    # proxy is not in transparent mode (tofu/home/cilium.tf), so no policy
+    # engine sees the resolved IPs and an FQDN allow would never learn the
+    # identity it is meant to permit (the github.com / proxy.golang.org /
+    # sum.golang.org rule this replaces was inert while looking permissive).
+    # Guest-side package/module fetches therefore need either an internal
+    # mirror selected with toEndpoints, or a deliberate CIDR allow added
+    # here. The plugin's injected sandbox facts tell the model the same.
 ---
 # hermes-sandbox ingress allowlist — the only callers of sandbox APIs.
 apiVersion: cilium.io/v2
@@ -97,32 +92,36 @@ metadata:
 spec:
   description: >-
     The only ingress a sandbox accepts: the sandbox-router reaching the
-    runtime REST ports and the Hermes gateway reaching the runtime gRPC
-    ProcessService (exec). Cilium v2 has no namespaceSelector —
-    cross-namespace matching uses the k8s:io.kubernetes.pod.namespace virtual
-    label (repo pattern from agent-sandbox/cilium-router.yaml).
+    runtime REST port (8080) and the Hermes gateway reaching the runtime
+    gRPC ProcessService (9090, exec). Cilium v2 has no namespaceSelector —
+    cross-namespace matching uses the k8s:io.kubernetes.pod.namespace
+    virtual label combined with the peer's real pod labels (repo pattern
+    from agent-sandbox/cilium-router.yaml).
   endpointSelector:
     matchLabels: {}
   ingress:
-    # Any pod in agent-sandbox-system is the Router by construction: that
-    # namespace's PSA-restricted admission admits only the vendored
-    # controller and Router identities, so no third party exists that could
-    # spoof the namespace label.
+    # Identity match on the Router itself, not on its namespace: the labels
+    # below are the vendored Deployment's own selector and pod-template
+    # labels (agent-sandbox/upstream/sandbox-router/deployment.yaml).
+    # Matching the namespace alone would admit every pod in it —
+    # agent-sandbox-system enforces PSA baseline, and PSA constrains HOW a
+    # pod runs, never WHICH workloads exist, so the namespace label does not
+    # narrow the peer set. 8080 is the Router's REST proxy port and the only
+    # runtime API it may reach.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+            app.kubernetes.io/name: sandbox-router
+            app.kubernetes.io/component: sandbox-router
       toPorts:
         - ports:
             - port: "8080"
               protocol: TCP
-            - port: "8888"
-              protocol: TCP
-            - port: "9090"
-              protocol: TCP
     # Direct gRPC exec (user-approved fallback: sandboxd v1.0.2 has no HTTP
     # exec route and the Go router cannot proxy gRPC). The Hermes gateway is
     # the only pod that mounts the router token and owns claims, so only its
-    # namespace is admitted, and only on the ProcessService port.
+    # namespace is admitted, and only on the ProcessService port: only the
+    # gateway may exec into a sandbox.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: hermes

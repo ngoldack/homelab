@@ -12,4 +12,8 @@ resources:
   - sandbox-warm-pool.yaml
   # Cilium last: the default-deny baseline locks the namespace's traffic and
   # references nothing, so it can never apply ahead of its dependencies.
+  # Deviation from the repo's cilium-default-deny.yaml + cilium-allowlist.yaml
+  # pair: default-deny, egress and ingress live in one cilium-policy.yaml (three
+  # documents) because they share the same endpointSelector and the sandbox's
+  # entire reachable set fits in one readable file.
   - cilium-policy.yaml

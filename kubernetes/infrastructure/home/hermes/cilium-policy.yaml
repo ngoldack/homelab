@@ -1,8 +1,10 @@
-# hermes Cilium policies — default-deny in + out; the gateway's ONLY egress
-# is cluster DNS, the sandbox Router (files, agent-sandbox-system), the
-# adopted sandbox pods (gRPC exec, hermes-sandbox:9090) and the model API.
-# No ingress is needed in v1: the API server is reached via kubectl exec /
-# in-pod loops and nothing in-cluster calls the gateway.
+# hermes Cilium policies — default-deny inbound + outbound. The gateway's
+# only egress is the explicit allowlist in the second document below:
+# cluster DNS, the sandbox Router :8080, adopted sandbox pods :9090, the
+# Kubernetes API 443/6443 (SandboxClaim lifecycle only), agentgateway :80,
+# and two public-internet rules on 443 (PyPI + GitHub fetches). No ingress
+# is needed in v1: the API server is reached via kubectl exec / in-pod
+# loops and nothing in-cluster calls the gateway.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -19,10 +21,19 @@ spec:
   egress:
     - {}
 ---
-# hermes egress allowlist — DNS, Router (files), sandbox pods (gRPC exec),
-# and the model API only. Deliberately NOT the Kubernetes API, Talos, Proxmox
-# or any management plane: the gateway cannot create pods, exec, port-forward
-# or read secrets even if network access were granted.
+# hermes egress allowlist — the complete grant set, one rule per destination:
+#   * kube-dns (kube-system)   UDP/TCP 53 — cluster DNS
+#   * sandbox-router           8080       — Router REST file transfer
+#   * hermes-sandbox pods      9090       — gRPC exec into adopted sandboxes
+#   * kube-apiserver           443/6443   — SandboxClaim lifecycle only:
+#     network reach to the API server exists, but its use is the in-cluster
+#     SDK's claim CRUD (RBAC is scoped to that), not a management plane
+#   * agentgateway             80         — in-cluster model API
+#   * PyPI / Fastly anycast    443        — Hermes lazy dep installs
+#   * GitHub raw content       443        — dashboard model catalogue +
+#     update-banner fetches
+# The PyPI and GitHub rules are the widest grants in this set: plain CIDR
+# sets on 443, not FQDN-scoped.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -70,11 +81,12 @@ spec:
               protocol: TCP
             - port: "6443"
               protocol: TCP
-    # kube-apiserver is served on the k8s Service CIDR; entity resolution may
-    # race, so allow the service subnet explicitly (same pattern as the
-    # router's own allowlist).
+    # Explicit ClusterIP of svc/kubernetes alongside toEntities:
+    # kube-apiserver: entity resolution can race on apiserver endpoint
+    # churn, and the /32 pins the API's virtual IP instead of the whole
+    # service CIDR.
     - toCIDRSet:
-        - cidr: 172.21.0.0/16
+        - cidr: 172.21.0.1/32
       toPorts:
         - ports:
             - port: "443"
@@ -92,7 +104,9 @@ spec:
         - ports:
             - port: "80"
               protocol: TCP
-    # PyPI for Hermes lazy-dep installs (faster-whisper, edge-tts, …).
+    # PyPI for Hermes lazy-dep installs (faster-whisper, edge-tts, …) —
+    # widest grant in this set: three Fastly anycast /16s on 443, not
+    # FQDN-scoped.
     - toCIDRSet:
         - cidr: 151.101.0.0/16  # Fastly anycast (pypi.org simple index)
         - cidr: 146.75.0.0/16   # Fastly anycast (files.pythonhosted.org)
@@ -101,8 +115,9 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
-    # Model catalog + app update fetches (advisory; keeps the dashboard's
-    # model list and update banner working). GitHub raw content ranges.
+    # Model catalogue + app update fetches (advisory; keeps the dashboard's
+    # model list and update banner working) — four GitHub raw-content /22s
+    # on 443, not FQDN-scoped.
     - toCIDRSet:
         - cidr: 185.199.108.0/22
         - cidr: 185.199.109.0/22

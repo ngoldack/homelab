@@ -33,10 +33,6 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
-    # Hermes/Hindsight validate tokens against the OIDC provider.
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: hermes
     # Hindsight's control-plane UI is published through this namespace's proxy outpost.
     - fromEndpoints:
         - matchLabels:

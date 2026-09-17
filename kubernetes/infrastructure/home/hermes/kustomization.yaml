@@ -7,4 +7,8 @@ resources:
   - secret.sops.yaml
   - statefulset.yaml
   - service.yaml
+  # Deviation from the repo's cilium-default-deny.yaml + cilium-allowlist.yaml
+  # pair: this namespace keeps both in one cilium-policy.yaml (two documents)
+  # because the gateway has no ingress rules at all, so the whole reachability
+  # of the credential-holding pod reads in one file.
   - cilium-policy.yaml

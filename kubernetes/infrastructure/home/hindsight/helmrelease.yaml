@@ -153,6 +153,37 @@ spec:
         limits:
           cpu: 1000m
           memory: 9Gi
+      # Probes widened from the chart default (3x10s liveness) to 12x10s.
+      # Evidence from the 2026-09-18 kill of worker-0 mid-retain:
+      #   20:28:25  claimed the 24.6M-token batch_retain
+      #   20:28:32  split into ~10k sub-batches
+      #   20:29:19  "Processing sub-batch 1" — 47s after the claim
+      #   20:29:20  every extraction call: HTTP 429 from api.synthetic.new
+      #   20:29:23  "waiting for 1 in-flight tasks" (graceful SIGTERM)
+      # So the stall is the synchronous planning/encoding pass (47s, well past
+      # the 30s default) compounded by upstream 429 backoff on a document that
+      # fans into thousands of sub-calls. The SIGTERM then requeued the
+      # operation onto the other replica, which repeated it. 2 minutes covers
+      # a whole pass, so a slow-but-progressing retain is no longer killed.
+      # The durable fixes are producer-side (submit whole documents, not the
+      # 100MB above) and upstream (the 429s come from the model provider, not
+      # this cluster's gateway).
+      livenessProbe:
+        httpGet:
+          path: /health/live
+          port: 8889
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 12
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8889
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 12
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact
@@ -197,6 +228,11 @@ spec:
         # (memory_budget.py), which is a separate pool.
         HINDSIGHT_API_WORKER_MAX_SLOTS: "4"
         HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
+        # RETAIN_BATCH_TOKENS stays at the 10k default on purpose: it keeps
+        # each extraction prompt far inside gpt-oss-120b's context window. The
+        # 24,645,631-token document behind the 2026-09-18 incident (bank
+        # unikraft submitted ~100MB of text in one retain) is a producer defect
+        # to fix at the source, not something to widen batches for.
         # Audit logging enabled for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"

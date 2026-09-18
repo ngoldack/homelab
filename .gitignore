@@ -24,6 +24,11 @@ tofu/*/terraform.tfstate.*.backup
 # Dated local-state snapshots kept outside tofu/ across a full teardown/
 # rebuild — same encrypted-state risk as the backups above.
 .state-archive/
+# The offline escrow passphrase for the archived cloud state. Today it is kept
+# inside .state-archive/ (covered above), but the file class must never be
+# committable from any other path either — a bare copy at the repo root was
+# NOT ignored before this rule (found by the 2026-09-18 key-hygiene audit).
+cloud-state-passphrase-*.txt
 # The provider lock file IS committed so CI validates against pinned versions.
 !tofu/*/.terraform.lock.hcl
 

@@ -286,6 +286,47 @@ the backup CronJob encrypts snapshots with; only its public key lives in
 the cluster (pinned in the CronJob manifest), so a stolen cluster cannot
 decrypt its own backups.
 
+### Offline escrow and never-commit checklist
+
+Everything listed below is ignored by Git. The durable copies of key material
+belong in offline escrow — a physically separate location, not this repo, not
+a CI secret, not the cluster.
+
+| Material | Lives at (ignored) | Offline escrow |
+| --- | --- | --- |
+| `age.key` — primary SOPS identity, the key that decrypts `tofu/` | repo root (`.gitignore:2`) | required |
+| `home-flux.age.key` — identity carried by the in-cluster `sops-age` Secret | repo root (`.gitignore:3`) | required |
+| the second recipient of `.sops.yaml` (the backup identity, `age1eqnl3y…`) | no private key in the repo, by design | required — it is the recovery path if `age.key` is lost |
+| `cloud-state-passphrase-*.txt` — passphrase of the archived cloud state | `.state-archive/` (`.gitignore:26`) | required |
+| `kubeconfig-home.yaml`, `talosconfig-home.yaml` | repo root (`.gitignore:49-50`) | regenerate on demand; escrow optional |
+| `*.tfstate*`, `tofu/**/.terraform/`, `*.tfplan` | local only | no — stale copies; the live state is in Object Storage |
+
+Never commit, at any path: age private keys (`age.key`, `*.age.key`), decrypted
+SOPS output (`*.local.yaml`, `*.local.yml`), `cloud-state-passphrase-*.txt`,
+OpenTofu state or plan files, `kubeconfig*`/`talosconfig*`, `.env`.
+
+Verify the ignore rules still cover the material before any commit that touches
+secrets. Each argument must print one `source:line:pattern <TAB> path` line;
+`NOT IGNORED` means the file could be committed:
+
+```bash
+for p in age.key home-flux.age.key kubeconfig-home.yaml talosconfig-home.yaml \
+         .state-archive/cloud-state-passphrase-example.txt app.local.yaml \
+         tofu/home/terraform.tfstate; do
+  printf '%s => ' "$p"
+  git check-ignore -v "$p" || echo "NOT IGNORED"
+done
+
+# Expect no output: untracked-and-not-ignored files that look like secret material.
+git ls-files --others --exclude-standard \
+  | grep -E 'age\.key|passphrase|kubeconfig|talosconfig|\.local\.ya?ml|tfstate' \
+  || true
+```
+
+`cloud-state-passphrase-*.txt` is ignored at ANY path (`.gitignore`), not only
+inside `.state-archive/` — the 2026-09-18 audit found a bare root-level copy
+matched no rule. Keep such files inside `.state-archive/` anyway and move them
+to escrow once the archive is taken.
 
 ## OpenTofu flow
 

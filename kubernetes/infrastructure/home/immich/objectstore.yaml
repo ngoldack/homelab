@@ -16,7 +16,14 @@ spec:
   # spec.backup.retentionPolicy — is where plugin retention lives.
   retentionPolicy: "30d"
   configuration:
-    destinationPath: s3://home-cnpg-backups-7cd4e906/immich/
+    # v2: the cluster was re-initialized (system identifier …217627 vs the
+    # DONE backups under .../immich/immich-database/base/ 20260914-16, whose
+    # systemid is …848279). WALs from that previous incarnation make barman's
+    # empty-archive check fail ("Expected empty archive", retried every
+    # second), which blocked WAL archiving even though base backups still
+    # completed. Fresh destination is the sanctioned fix; the old prefix is
+    # untouched and remains the restore path for that incarnation.
+    destinationPath: s3://home-cnpg-backups-7cd4e906/immich-v2/
     endpointURL: https://fsn1.your-objectstorage.com
     s3Credentials:
       accessKeyId:

@@ -17,7 +17,14 @@ spec:
   # spec.backup.retentionPolicy — is where plugin retention lives.
   retentionPolicy: "30d"
   configuration:
-    destinationPath: s3://home-cnpg-backups-7cd4e906/paperless/
+    # v2: the cluster was re-initialized (system identifier …0881881 vs the
+    # DONE backup under .../paperless/paperless-database/base/20260916T022900,
+    # whose systemid is …198425). The previous incarnation's WALs under
+    # .../paperless/ make barman refuse to continue the archive ("Expected
+    # empty archive" every second), so WAL archiving never started and the
+    # daily base backups for this incarnation stayed FAILED/STARTED. Fresh
+    # destination is the sanctioned fix; the old prefix is left intact.
+    destinationPath: s3://home-cnpg-backups-7cd4e906/paperless-v2/
     endpointURL: https://fsn1.your-objectstorage.com
     s3Credentials:
       accessKeyId:

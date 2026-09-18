@@ -18,6 +18,17 @@ spec:
     - fromEntities:
         - ingress
         - health
+    # OIDC metadata fetches from the NODE, not from a pod: the kube-apiserver
+    # runs the JWT authenticator in-process and therefore fetches the issuer's
+    # discovery document + JWKS from its node's host network. Those requests
+    # carry the host/remote-node identity (not a pod identity), and the
+    # authentik edge route's backend is this namespace's portal-bridge — so
+    # without these entities the fetch dies as an envoy
+    # "upstream connect error" (503, observed live on the control-plane node)
+    # and the API rejects every OIDC token with a JWT-authenticator failure.
+    - fromEntities:
+        - host
+        - remote-node
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: monitoring

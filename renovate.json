@@ -1,0 +1,94 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate config for the homelab GitOps repo. Replaces the onboarding default from the Renovate App.",
+    "Scheduling: Renovate rejects the later.js phrase 'before 6am on the first Sunday of the month' (validated:",
+    "`Invalid schedule: Failed to parse`), so the equivalent cron form is used: `* 0-5 * * 0#1` = every minute of",
+    "hours 00:00-05:59 local time on the first Sunday of the month (croner supports the `#` nth-weekday field;",
+    "verified next runs land on 2026-10-04 00:00-05:59 Europe/Berlin). Renovate's cron matcher only needs the",
+    "next run to fall in the current hour/day/month, so the window is deliberately 6h wide to guarantee the",
+    "monthly run is caught even if the Renovate App checks in late.",
+    "Pinning: `:pinDigests` adds digests to tags; the top-level `digest` block keeps digest-only updates enabled so",
+    "pinned refs are still bumped (must not fight the repo's digest-pinning convention).",
+    "No auto-merge anywhere: humans review every PR. Major updates stay ungrouped (all groups are restricted to",
+    "minor/patch), so each major gets its own PR.",
+    "Rule order matters: Renovate merges matching packageRules in order and the later rule's `groupName` wins, so",
+    "broad groups (container-images/github-actions) come first and the more specific ecosystem groups",
+    "(talos/kubernetes/flux/helm-charts) override them."
+  ],
+  "extends": ["config:recommended", ":pinDigests"],
+  "timezone": "Europe/Berlin",
+  "schedule": ["* 0-5 * * 0#1"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 0-5 * * 0#1"]
+  },
+  "digest": {
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "All container images not claimed by a more specific rule below (docker datasource only).",
+      "groupName": "container-images",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "GitHub Actions used by .github/workflows (github-actions manager).",
+      "groupName": "github-actions",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": [
+        "Talos ecosystem: Sidero Labs GitHub releases (talos, talos-backup, extensions), `ghcr.io/siderolabs/*`",
+        "images (installer, kubelet, talos-backup) and the siderolabs terraform provider/module datasources."
+      ],
+      "groupName": "talos",
+      "matchPackageNames": ["siderolabs/*", "ghcr.io/siderolabs/*"],
+      "matchDatasources": [
+        "docker",
+        "github-releases",
+        "github-tags",
+        "terraform-provider",
+        "terraform-module"
+      ],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": [
+        "Kubernetes core: kubernetes/kubernetes releases, k8s.io/* Go modules and registry.k8s.io/* images."
+      ],
+      "groupName": "kubernetes",
+      "matchPackageNames": ["kubernetes/kubernetes", "k8s.io/*", "registry.k8s.io/*"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "Flux ecosystem packages (flux2 CLI/releases, fluxcd/* controller images).",
+      "groupName": "flux",
+      "matchPackageNames": ["fluxcd/*", "ghcr.io/fluxcd/*"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "Flux manifest field updates (flux manager: HelmRelease/OCIRepository/GitRepository refs).",
+      "groupName": "flux",
+      "matchManagers": ["flux"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": [
+        "Helm charts resolved through a chart repository (bjw-s app-template, crowdsecurity, ...). Kept after the",
+        "flux rule so HelmRelease chart bumps read as chart updates rather than flux field updates."
+      ],
+      "groupName": "helm-charts",
+      "matchDatasources": ["helm"],
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "Chart.yaml/Chart.lock dependencies (helmv3 manager, e.g. tofu/home/charts/gateway-api-crds).",
+      "groupName": "helm-charts",
+      "matchManagers": ["helmv3"],
+      "matchUpdateTypes": ["minor", "patch"]
+    }
+  ]
+}

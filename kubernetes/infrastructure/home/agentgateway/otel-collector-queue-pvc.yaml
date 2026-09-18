@@ -1,0 +1,19 @@
+# Persistent queue storage for the agentgateway OpenTelemetry Collector
+# (otel-collector.yaml). The collector's otlphttp exporter writes its
+# sending_queue to a filestorage extension backed by this claim, so spans
+# survive a collector restart or a Langfuse outage instead of being dropped.
+#
+# ReadWriteOnce + a single Recreate replica: the exporter's bbolt queue file has
+# exactly one writer, so a rolling update must never run two collectors against
+# the same directory.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: otel-collector-queue
+  namespace: agentgateway
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: truenas-fast-nfs
+  resources:
+    requests:
+      storage: 5Gi

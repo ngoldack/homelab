@@ -97,7 +97,8 @@ spec:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  # /bin/sh is dash in the clickhouse image: no `set -o pipefail`.
+                  set -eu
                   stamp=$(date -u +%Y%m%dT%H%M%SZ)
                   dest="https://fsn1.your-objectstorage.com/home-cnpg-backups-7cd4e906/langfuse/clickhouse/$${stamp}"
                   echo "backing up events_full to $${dest}"

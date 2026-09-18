@@ -46,7 +46,44 @@ HINDSIGHT_SECRET="kubernetes/infrastructure/home/hindsight/secret.sops.yaml"
 HERMES_ROLLOUT_TARGET="statefulset.apps/hermes"
 HINDSIGHT_ROLLOUT_TARGETS="deployment.apps/hindsight-api statefulset.apps/hindsight-worker"
 
+
+# ---- launchd (macOS) -------------------------------------------------------
+# `hack/rotate-aigateway-jwt.sh install` installs a LaunchAgent running this
+# script every 14 days at 03:00. Must come before the rotation flow so that
+# `install` exits without running a rotation.
+# `hack/rotate-aigateway-jwt.sh install` installs a LaunchAgent running this
+# script every 14 days at 03:00 and kicks off the first run.
+install_agent() {
+  local label="de.ngoldack.rotate-aigateway-jwt"
+  local plist="$HOME/Library/LaunchAgents/$label.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>$PWD/$(basename "$0")</string>
+  </array>
+  <key>StartCalendarInterval</key><dict>
+    <key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StartInterval</key><integer>$((14*24*3600))</integer>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/$label.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/$label.log</string>
+</dict></plist>
+PLIST
+  launchctl unload "$plist" 2>/dev/null || true
+  launchctl load "$plist"
+  echo "installed $plist (every 14 days at 03:00)"
+}
+
+case "${1:-}" in
+  install) install_agent; exit 0 ;;
+esac
+
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
 
 # ---- 1. Client secret ------------------------------------------------------
 # Source of truth is the in-cluster secret the seed created — decrypting the
@@ -95,7 +132,6 @@ log "gateway verification passed (HTTP 200)"
 log "writing token into $HERMES_SECRET and $HINDSIGHT_SECRET"
 sops set "$HERMES_SECRET" '["stringData"]["OPENAI_API_KEY"]' "\"$JWT\""
 sops set "$HINDSIGHT_SECRET" '["stringData"]["HINDSIGHT_API_LLM_API_KEY"]' "\"$JWT\""
-
 # ---- 5. Commit and push (push = deploy) ------------------------------------
 # Only the two secret files — the worktree may carry unrelated changes.
 git add "$HERMES_SECRET" "$HINDSIGHT_SECRET"

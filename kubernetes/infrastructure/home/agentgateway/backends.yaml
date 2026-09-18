@@ -173,3 +173,25 @@ spec:
                   name: synthetic-key
               tls:
                 sni: api.synthetic.new
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: synthetic-hf-openai-gpt-oss-120b
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-hf-openai-gpt-oss-120b
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:openai/gpt-oss-120b
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new

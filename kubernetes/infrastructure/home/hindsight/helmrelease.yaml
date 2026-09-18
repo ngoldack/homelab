@@ -86,8 +86,8 @@ spec:
         # agentgateway backend named synthetic (api.synthetic.new), verified on
         # 2026-09-16. The base URL stays OpenAI-compatible (/v1/...), the model
         # name matches the backend's openai.model stanza.
-        HINDSIGHT_API_LLM_BASE_URL: https://api.synthetic.new/v1
-        HINDSIGHT_API_LLM_MODEL: hf/openai/gpt-oss-120b
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
         # Reasoning LOW + STRICT_SCHEMA so extraction is fast and JSON-only.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
@@ -96,6 +96,8 @@ spec:
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
         # Audit logging enabled so ingest paths are visible.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
+        HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"
+        HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT: "medium"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation
       # LLM chains are long and must not starve recall latency on the API pod.
@@ -140,8 +142,8 @@ spec:
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
         # agentgateway synthetic OVER (2026-09-18): same model as the api.
-        HINDSIGHT_API_LLM_BASE_URL: https://api.synthetic.new/v1
-        HINDSIGHT_API_LLM_MODEL: hf/openai/gpt-oss-120b
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"
@@ -150,6 +152,8 @@ spec:
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
         # Audit logging enabled for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
+        HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"
+        HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT: "medium"
     controlPlane:
       enabled: true
     nodeSelector:

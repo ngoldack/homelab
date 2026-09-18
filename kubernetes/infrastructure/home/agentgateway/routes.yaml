@@ -70,6 +70,14 @@ spec:
     - matches:
         - path:
             type: PathPrefix
+            value: /v1/synthetic-gpt-oss
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-hf-openai-gpt-oss-120b
+    - matches:
+        - path:
+            type: PathPrefix
             value: /v1/chat
       backendRefs:
         - group: agentgateway.dev

@@ -125,9 +125,11 @@ metadata:
   namespace: hermes-egress
 spec:
   description: >-
-    Egress allowlist: proxy -> world 80/443 (the tunnel), authorizer ->
-    reaper 8080 (events), reaper -> kube-apiserver 443 + 6443 (claim lookup
-    by session-hash label + the quarantine ledger) and cluster DNS 53.
+    Egress allowlist for every pod in this namespace: the proxy to world on
+    80/443 (the tunnel), the authorizer to the reaper on 8080 (signed
+    violation events), and cluster DNS. The Kubernetes API is NOT granted
+    here — it is scoped to the reaper pod in the hermes-egress-apiserver-reaper
+    document, because the authorizer makes no API call at all.
   endpointSelector:
     matchLabels: {}
   egress:

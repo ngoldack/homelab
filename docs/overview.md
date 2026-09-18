@@ -5,6 +5,13 @@ how it is provisioned and reconciled, how secrets and storage are handled,
 and what the known gaps are. [`README.md`](../README.md) carries only the
 summary and the index of these documents.
 
+This file is the **operational** counterpart to
+[`architecture.md`](architecture.md): where the two both describe the design —
+the network tables, the topology and the ingress path — `architecture.md` is
+authoritative, and the sections here are kept because they also carry the
+operational detail (how to reach a node, where a config value lives) that the
+architecture view does not.
+
 ---
 
 ## Repository layout
@@ -298,7 +305,7 @@ a CI secret, not the cluster.
 | `home-flux.age.key` — identity carried by the in-cluster `sops-age` Secret | repo root (`.gitignore:3`) | required |
 | the second recipient of `.sops.yaml` (the backup identity, `age1eqnl3y…`) | no private key in the repo, by design | required — it is the recovery path if `age.key` is lost |
 | `cloud-state-passphrase-*.txt` — passphrase of the archived cloud state | `.state-archive/` (`.gitignore:26`) | required |
-| `kubeconfig-home.yaml`, `talosconfig-home.yaml` | repo root (`.gitignore:49-50`) | regenerate on demand; escrow optional |
+| `kubeconfig-home.yaml`, `talosconfig-home.yaml` | repo root (`.gitignore:54-55`) | regenerate on demand; escrow optional |
 | `*.tfstate*`, `tofu/**/.terraform/`, `*.tfplan` | local only | no — stale copies; the live state is in Object Storage |
 
 Never commit, at any path: age private keys (`age.key`, `*.age.key`), decrypted
@@ -1040,6 +1047,7 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
 - [`architecture.md`](architecture.md) — topology, trust boundaries, failure domains
 - [`service-catalog.md`](service-catalog.md) — per-service exposure, state, backup, dependencies
 - [`data-protection.md`](data-protection.md) — backup layers and restore evidence
+- [`disaster-recovery.md`](disaster-recovery.md) — tested vs designed recovery, and the drill procedure
 - [`hermes-agent-sandbox.md`](hermes-agent-sandbox.md) — the Kata-isolated agent execution boundary
 - [`llm-gateway-evaluation.md`](llm-gateway-evaluation.md) — the LLM routing options considered
 - [`policy-exceptions.md`](policy-exceptions.md) — every deliberate admission-policy exception

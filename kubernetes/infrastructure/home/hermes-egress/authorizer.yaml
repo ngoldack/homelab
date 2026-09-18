@@ -4,9 +4,10 @@
 # signed event POST to the reaper, and NO Kubernetes API call at all (identity
 # is the HMAC token only), so the egress its Cilium allowlist admits for this
 # namespace is consumed by: this pod -> reaper:8080 (events) + cluster DNS.
-# The namespace-wide kube-apiserver rule in cilium-policy.yaml exists for the
-# REAPER (claim list/delete + quarantine ConfigMap); the authorizer is granted
-# no API RBAC and mounts no ServiceAccount token.
+# The kube-apiserver egress rule in cilium-policy.yaml is NOT namespace-wide:
+# it lives in the hermes-egress-apiserver-reaper document, whose
+# endpointSelector matches the reaper pod only. So the authorizer has no API
+# path at all — matching its grants: no API RBAC, no ServiceAccount token.
 #
 # Image: ONE guard image, TWO services selected by the module path passed as
 # argv (egress_guard/__init__.py). Tag + PENDING-digest comment:

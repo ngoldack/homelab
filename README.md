@@ -41,6 +41,7 @@ The root README is deliberately an index; the detail lives in `docs/`.
 | [`docs/architecture.md`](docs/architecture.md) | Physical and logical topology, trust boundaries, failure domains, the Kata observability blind spot |
 | [`docs/service-catalog.md`](docs/service-catalog.md) | Every service: owner, exposure, state, backup, RPO/RTO, dependencies |
 | [`docs/data-protection.md`](docs/data-protection.md) | Backup layers, retention, and what restore evidence exists |
+| [`docs/disaster-recovery.md`](docs/disaster-recovery.md) | What has actually been restored, what is only designed, and the drill procedure |
 | [`docs/hermes-agent-sandbox.md`](docs/hermes-agent-sandbox.md) | The Kata-isolated agent execution boundary and its capability model |
 | [`docs/llm-gateway-evaluation.md`](docs/llm-gateway-evaluation.md) | The LLM gateway options that were evaluated and why one was picked |
 | [`docs/policy-exceptions.md`](docs/policy-exceptions.md) | Every deliberate Kyverno/admission-policy exception, with owner and review date |

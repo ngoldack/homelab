@@ -4,22 +4,29 @@
 # fails the *reconcile* of whatever manifest it catches, not a human's
 # `kubectl apply`. Flipping one to Enforce (`validationFailureAction: Enforce`)
 # is a deliberate per-namespace decision — and clean PolicyReports are NOT the
-# gate for it. The four Pod-shape policies below only cover latest tags, host
-# namespaces, hostPath volumes and privileged/escalation, whereas `restricted`
-# PSA also
-# requires runAsNonRoot, a seccompProfile and all capabilities dropped — none of
-# which any policy here checks. (A read-only root filesystem is good practice but
-# is not one of this cluster's PSA `restricted` controls, so it is not part of
-# that gap.) A namespace
-# can therefore report clean and still be rejected the moment enforce=restricted
-# lands, and because enforcement only evaluates new pods the breakage arrives
-# late and looks unrelated. A live census on 2026-09-17 found 40 of 52 in-scope
-# pods failing at least one restricted control, so those securityContexts have
-# to be added per workload first. Pod Security Admission labels carry the actual
-# pod-hardening enforcement in the meantime.
+# gate for it.
 #
-# The fifth policy (hermes-sandbox-profile-allowlist, appended at the end) is a
-# different animal and is NOT part of the hardening census above: it audits
+# What this file covers. The original Pod-shape policies handle latest tags,
+# host namespaces, hostPath volumes and privileged/escalation. Seven more,
+# appended in Audit mode, close the rest of the PSA `restricted` checklist:
+# require-pod-non-root, require-seccomp-runtimedefault,
+# require-drop-all-capabilities, require-resource-requests,
+# disallow-default-serviceaccount, restrict-image-registries and
+# require-cilium-default-deny-floor. The census paragraph below is the record
+# of why audit had to come first — it is not a description of what is missing
+# today. (A read-only root filesystem is good practice but is not one of this
+# cluster's PSA `restricted` controls, so it is not part of the gap.)
+#
+# The reason the flip is not mechanical: a namespace can report clean and still
+# be rejected the moment enforce=restricted lands, and because enforcement only
+# evaluates new pods the breakage arrives late and looks unrelated. A live
+# census on 2026-09-17 found 40 of 52 in-scope pods failing at least one
+# restricted control, so those securityContexts have to be added per workload
+# first. Pod Security Admission labels carry the actual pod-hardening
+# enforcement in the meantime.
+#
+# hermes-sandbox-profile-allowlist is a different animal and is NOT part of the
+# hardening census above: it audits
 # Agent Sandbox custom resources (Sandbox/SandboxClaim/SandboxTemplate/
 # SandboxWarmPool), not Pods, and it is the one policy here whose scope is
 # exactly the namespace every Pod policy above excludes (hermes-sandbox
@@ -1308,9 +1315,13 @@ spec:
 #      RE2 engine (used by Kyverno) does not support.
 #
 # AUDIT -> ENFORCE: rule 1 is enforceable once a fresh report is clean (it already
-# is); rule 2 waits for Unit 4.1's digest pass to clear
-# registry.ngoldack.de/llama-p100:0.4.0-p100 in llmkube-system, which was still
-# tag-pinned at census time.
+# is); rule 2 waited on Unit 4.1's digest pass, which has since landed — the
+# llmkube-models manifests now pin
+# registry.ngoldack.de/llama-p100@sha256:f5839c86e75d832fa538bd8b59715a8ea64dd20d356e2d1e9485b43d3a26aa6d
+# (commit 4ac06c9). The only tag-pinned first-party references still visible are
+# the two llmkube-system pods running the pre-change ReplicaSets, which the next
+# Flux reconcile replaces; enforce rule 2 once an audit report taken AFTER that
+# reconcile is clean.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:

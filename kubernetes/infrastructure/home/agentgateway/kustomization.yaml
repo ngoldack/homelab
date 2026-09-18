@@ -36,5 +36,7 @@ resources:
   - openrouter-key.sops.yaml
   - synthetic-key.sops.yaml
   - httproute-edge.yaml
+  - jwt-rotator.yaml
+  - jwt-rotator-rbac.yaml
   - otel-collector.yaml
   - otel-collector-queue-pvc.yaml

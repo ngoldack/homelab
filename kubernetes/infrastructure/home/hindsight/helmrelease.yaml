@@ -109,17 +109,17 @@ spec:
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
       replicaCount: 2
-      # Conservative per-worker resources so 2 replicas (2000m limits / 400m
-      # requests total) fit on the shared home node without starving it. The
-      # default 2000m limit x2 is already near the node's ceiling - keep the
-      # burst capped at 1000m.
+      # Memory raised 2026-09-18: the worker OOM-killed (exit 137) during
+      # sentence_transformers model load under the old 2Gi limit when both
+      # replicas restarted simultaneously. 3Gi covers the load spike.
+      # covers the load spike; cpu burst stays capped at 1000m.
       resources:
         requests:
           cpu: 200m
           memory: 512Mi
         limits:
           cpu: 1000m
-          memory: 2Gi
+          memory: 3Gi
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact

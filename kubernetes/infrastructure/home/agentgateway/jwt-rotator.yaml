@@ -15,11 +15,17 @@
 #
 # Flow (python script, run on the 1st and 15th at 03:00 — 2x slack vs the
 # 30-day TTL, so one missed run is not an outage):
-#   1. Read client_id/secret from authentik's in-cluster secret
-#      (authentik-oidc-aigateway, written by the blueprint seed).
-#   2. Mint: client_credentials grant against the SHARED token endpoint
-#      /application/o/token/ (per-provider issuer mode keeps one global
-#      token path; the per-app path 404s).
+#   1. Read the client secret from authentik's in-cluster secret
+#      (authentik-oidc-aigateway, written by the blueprint seed; the secret
+#      carries ONLY client_secret — client_id is the static aigateway-oidc
+#      from seed.yaml).
+#   2. Mint: client_credentials grant against authentik's in-cluster
+#      Service with a Host header override. Per-provider issuer mode keeps
+#      the token endpoint on the SHARED path (/application/o/token/), and
+#      authentik derives iss from the request Host — so the mint MUST send
+#      Host: authentik.ngoldack.de or the gateway's JWT policy rejects the
+#      token (verified live: the public edge URL 403s from in-cluster
+#      CrowdSec egress rules; the Service path does not).
 #   3. Verify BEFORE writing: JWT shape, aud=aigateway-oidc claim, then a
 #      real completion POST through the gateway. A bad mint never replaces
 #      a working credential — the old token stays valid until its own exp.
@@ -31,10 +37,11 @@
 # No kubectl in the image: the script talks to the API server directly via
 # urllib + the pod's service-account token/CA (k8sclient.py in this
 # ConfigMap). Runs in the agentgateway namespace: same-namespace gateway
-# ingress, egress to authentik (JWT JWKS fetch rule, ports 9000/9443) and
-# world 443 already exist — the mint's HTTPS call and the gateway probe
-# need no new Cilium policy. RBAC: one Role scoped to get/patch the two
-# secrets plus rollout on the three controllers (rbac.yaml).
+# ingress, egress to authentik (JWT JWKS fetch rule, ports 9000/9443 — the
+# mint rides the same post-DNAT backend) and kube-apiserver via the
+# 172.21.0.0/16:443 rule already exist; no new Cilium policy. RBAC: one
+# Role scoped to get/patch the two secrets plus rollout on the three
+# controllers (rbac.yaml).
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -72,8 +79,6 @@ spec:
               imagePullPolicy: IfNotPresent
               command: ["python3", "/rotator/rotate.py"]
               env:
-                - name: TOKEN_URL
-                  value: https://authentik.ngoldack.de/application/o/token/
                 - name: GATEWAY_BASE
                   value: http://agentgateway.agentgateway.svc.cluster.local
                 - name: HERMES_SECRET
@@ -114,6 +119,7 @@ data:
     #!/usr/bin/env python3
     """In-cluster rotation of the shared aigateway-oidc JWT. See cronjob.yaml."""
     import sys
+
     from k8sclient import K8s
     from rotatecore import main
 
@@ -125,7 +131,7 @@ data:
             sys.exit(1)
   k8sclient.py: |
     """Minimal Kubernetes API client: urllib + the pod's SA token/CA."""
-    import base64, json, os, ssl, urllib.request, urllib.error
+    import base64, json, os, ssl, time, urllib.request, urllib.error
 
     HOST = os.environ.get("KUBERNETES_SERVICE_HOST")
     PORT = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
@@ -173,6 +179,8 @@ data:
         def rollout_status(self, kind, ns, name, timeout_s=300):
             # Poll observedGeneration vs generation + replica readiness —
             # the simplest reliable check without subresource watchers.
+            # Deployments require updatedReplicas >= want too: readyReplicas
+            # alone can pass while the OLD pods are still the ready ones.
             plural = {"deployment": "deployments", "statefulset": "statefulsets"}[kind]
             path = f"/apis/apps/v1/namespaces/{ns}/{plural}/{name}"
             deadline = time.time() + timeout_s
@@ -181,18 +189,15 @@ data:
                 status = obj.get("status", {})
                 gen = obj.get("metadata", {}).get("generation", 0)
                 observed = status.get("observedGeneration", 0)
+                want = obj.get("spec", {}).get("replicas", 1)
                 if gen == observed:
-                    if kind == "deployment":
-                        ready = status.get("readyReplicas", 0)
-                        want = obj.get("spec", {}).get("replicas", 1)
-                        if ready >= want:
-                            return
-                    else:  # statefulset
-                        ready = status.get("readyReplicas", 0)
+                    ready = status.get("readyReplicas", 0)
+                    updated = status.get("updatedReplicas", 0)
+                    if kind == "deployment" and ready >= want and updated >= want:
+                        return
+                    if kind == "statefulset":
                         current = status.get("currentReplicas", 0)
-                        updated = status.get("updatedReplicas", 0)
-                        want = obj.get("spec", {}).get("replicas", 1)
-                        if ready >= want and current >= want and updated >= want:
+                        if ready >= want and updated >= want and current >= want:
                             return
                 time.sleep(5)
             raise RuntimeError(f"rollout of {kind}/{ns}/{name} did not complete in {timeout_s}s")
@@ -202,10 +207,18 @@ data:
 
     from k8sclient import K8s
 
-    TOKEN_URL = os.environ["TOKEN_URL"]
     GATEWAY_BASE = os.environ["GATEWAY_BASE"]
     HERMES_SECRET = os.environ["HERMES_SECRET"].strip()   # ns/name/key
     HINDSIGHT_SECRET = os.environ["HINDSIGHT_SECRET"].strip()
+    # client_id is static (seed.yaml); the credential secret carries only
+    # client_secret.
+    CLIENT_ID = "aigateway-oidc"
+    # Mint through the in-cluster Service with a Host override: the public
+    # edge URL is 403-blocked for in-cluster egress (CrowdSec), and
+    # authentik derives iss from the request Host — without the override
+    # the gateway's JWT policy would reject every minted token.
+    MINT_URL = "http://authentik-server.authentik.svc.cluster.local/application/o/token/"
+    MINT_HOST = "authentik.ngoldack.de"
 
     def log(msg):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
@@ -217,7 +230,8 @@ data:
             "client_secret": client_secret,
             "scope": "openid",
         }).encode()
-        req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
+        req = urllib.request.Request(MINT_URL, data=data, method="POST")
+        req.add_header("Host", MINT_HOST)
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r)["access_token"]
 
@@ -255,14 +269,14 @@ data:
 
     def main():
         k8s = K8s()
-        # 1. Client credentials from the in-cluster secret the seed wrote.
+        # 1. Client secret from the in-cluster secret the seed wrote.
+        #    (client_id is static — see CLIENT_ID above.)
         creds = k8s.get_secret("authentik", "authentik-oidc-aigateway")
-        client_id = creds["client_id"]
         client_secret = creds["client_secret"]
-        log("client credentials read from authentik-oidc-aigateway")
+        log("client secret read from authentik-oidc-aigateway")
 
         # 2. Mint + structural verification.
-        token = mint(client_id, client_secret)
+        token = mint(CLIENT_ID, client_secret)
         if token.count(".") != 2 or not token.startswith("eyJ"):
             raise RuntimeError("minted token is not a JWT")
         payload = jwt_payload(token)

@@ -489,22 +489,23 @@ never backed up.
   `toEndpoints`, or a deliberate CIDR allow added there. The plugin injects
   the same facts into every session prompt.
 - **`write_file`/`read_file` on sandbox paths** — the host-side write root
-  stays `/opt/data` (the data PVC; the container rootfs is read-only); the
-  plugin implements the fetch half (`GET /v1/files` through the Router with
-  v2 scoped tokens) but not the write half of the environment protocol. The
-  fix is a plugin-side PUT/upload path through the Router — not widening the
-  host-side write root, which would keep model bytes in the gateway
-  container instead of the guest.
-  **Observed consequence (2026-09-17):** the deployed local model reaches for
-  `write_file` rather than the terminal, gets `Write denied: …` (root
-  `/opt/data`), and the turn then produces no sandbox claim at all — the
-  acceptance gate fails on exactly that (it requires a claim observed during
-  the turn plus in-guest evidence). So a green `task hermes:e2e` currently
-  depends on the model choosing the terminal for file creation; prompt or
-  route accordingly, or implement the plugin's write path. The terminal path
-  itself is verified independently of the model: a claim → adopt → gRPC exec
-  → teardown run inside the gateway pod returns the guest kernel, uid 10001
-  and `/workspace`.
+  stays `/opt/data` (the data PVC; the container rootfs is read-only), and the
+  plugin implements BOTH halves of the Router file path: `fetch_file`
+  (`GET /v1/files`, v2 scoped tokens) and, since the Phase-2 capability layer,
+  `write_file`/`read_file`/`list_dir` over `PUT`/`GET /v1/files`
+  (`hermes-agent-sandbox-plugin/files.py`, `transport.SandboxTransport.put_file`;
+  sandboxd v1.0.2 serves `PUT` with atomic temp+rename and auto-created
+  parents). The plugin's own surface is therefore complete for guest-side file
+  I/O; the host-side write root was deliberately NOT widened.
+  **Status of the observed consequence (2026-09-17):** the deployed local model
+  reached for `write_file` rather than the terminal, got `Write denied: …`
+  (root `/opt/data`), and the turn produced no sandbox claim at all. The plugin
+  write path now exists, but whether Hermes' `write_file` tool routes through it
+  or through the host-side root is a **live re-check item** (the plugin's
+  methods are additive to the `execute()` contract Hermes' tools use). The
+  terminal path itself is verified independently of the model: a claim → adopt
+  → gRPC exec → teardown run inside the gateway pod returns the guest kernel,
+  uid 10001 and `/workspace`.
 - **Monitoring does not scrape the gateway, by design** — hermes exposes no
   Prometheus endpoint (`:8642/metrics` → 404, `:9119/metrics` → 302 to
   `/login?next=%2Fmetrics`); do not re-probe. A scrape (plus a monitoring

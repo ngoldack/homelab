@@ -1,11 +1,15 @@
 README.md
 pyproject.toml
 src/hermes_agent_sandbox/__init__.py
+src/hermes_agent_sandbox/artifacts.py
 src/hermes_agent_sandbox/client.py
 src/hermes_agent_sandbox/config.py
 src/hermes_agent_sandbox/environment.py
 src/hermes_agent_sandbox/errors.py
+src/hermes_agent_sandbox/files.py
+src/hermes_agent_sandbox/processes.py
 src/hermes_agent_sandbox/provider.py
+src/hermes_agent_sandbox/queue.py
 src/hermes_agent_sandbox/redaction.py
 src/hermes_agent_sandbox/transport.py
 src/hermes_agent_sandbox.egg-info/PKG-INFO

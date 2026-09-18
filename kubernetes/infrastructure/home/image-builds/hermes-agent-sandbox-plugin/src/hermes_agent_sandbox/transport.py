@@ -10,13 +10,14 @@ Two layers, both deliberately thin:
   from EXACTLY the callsites in :mod:`k8s_agent_sandbox.k8s_helper` that this
   class invokes.
 
-* :class:`SandboxTransport` — the request path to an adopted sandbox through
-  the Router. Exec/file requests go over the python SDK's HTTP contract
-  (``POST /execute``, ``POST /upload``, ``GET /download/...``) against the
-  Router at ``AGENT_SANDBOX_ROUTER_URL`` with ``Authorization: Bearer <v2>``
-  plus the ``X-Sandbox-*`` identity headers the Router's proxy/authorizer
-  require. v2 tokens are minted locally (the python SDK has no mint API) and
-  always bind the sandbox UID so the router can resolve the warm-pool Pod.
+* :class:`SandboxTransport` — the request path to an adopted sandbox. Commands,
+  stdin and background processes go over the python SDK's gRPC ProcessService
+  (``Execute`` unary, ``Start`` server-streaming + ``WriteStdin`` /
+  ``SendSignal``); file bytes go over the Router's authenticated REST
+  FilesystemService (``GET``/``PUT``/``DELETE /v1/files``) with Ed25519 v2
+  scoped tokens. Commands dial the POD IP directly (the SDK ships no HTTP exec
+  route and the Go Router does not proxy gRPC); files keep the Router path so
+  every transfer is scoped-token authorized.
 """
 
 from __future__ import annotations
@@ -24,23 +25,28 @@ from __future__ import annotations
 import logging
 import posixpath
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, NoReturn, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 from .client import mint_scoped_token_v2
 from .config import AgentSandboxConfig, CLAIM_SUFFIX_BYTES, MAX_CLAIM_NAME_LEN
 from .errors import (
+    AgentSandboxError,
     SandboxCommandError,
     SandboxCreateError,
     SandboxCreateTimeoutError,
+    SandboxProcessError,
     SandboxTimeoutError,
     SandboxTransportError,
+    SandboxUnsupportedError,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, grpc is imported lazily
     import grpc
+    from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +65,20 @@ _SANDBOX_PLURAL = "sandboxes"
 # every file request with 403. Verified live via /proc/net/tcp in a deployed
 # sandbox (vendored v1.0.2 sandboxd default, sources/router sandboxd-server.go).
 _SANDBOX_REST_PORT = 8080
+
+# File transfers (REST) get their own default budget: a scoped-token PUT/GET of a
+# multi-megabyte artifact legitimately takes longer than a command, and the
+# session queue — not this timeout — is what bounds concurrency.
+FILE_TRANSFER_TIMEOUT_SECONDS = 300
+
+# stdin frames are chunked because one WriteStdin = one unary gRPC message:
+# 64 KiB keeps each frame far below the 4 MiB default message ceiling while
+# keeping the frame count (and therefore RPC count) sane for a 4 MiB payload.
+STDIN_CHUNK_BYTES = 64 * 1024
+
+# Ceiling for waiting on a single stream event (e.g. the InitEvent of a
+# background process) before treating the stream as wedged.
+STREAM_EVENT_TIMEOUT_SLACK_SECONDS = 1.0
 
 # label key we stamp on owned claims so orphan reconciliation can identify the
 # owning gateway without reading arbitrary annotations.
@@ -426,8 +446,97 @@ class SandboxTransport:
             raise SandboxTransportError("transport not attached to a sandbox")
         try:
             return self._connector.fetch_file(self._target, remote_path, timeout)
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
         except Exception as exc:  # noqa: BLE001
             raise SandboxTransportError(f"file fetch failed at transport: {exc}") from exc
+
+    def put_file(
+        self, remote_path: str, data: bytes, timeout: Optional[int] = None
+    ) -> None:
+        """Write *data* to *remote_path* through the Router (PUT, v2 scoped token).
+
+        The scoped token binds method+path, so the PUT must be signed for the
+        exact path the Router will re-derive (no query string: the Router's
+        authorization target is the upstream path, query excluded).
+        """
+        if self._target is None or self._connector is None:
+            raise SandboxTransportError("transport not attached to a sandbox")
+        try:
+            self._connector.put_file(
+                self._target, remote_path, data, self._file_timeout(timeout)
+            )
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxTransportError(f"file write failed at transport: {exc}") from exc
+
+    def delete_file(
+        self, remote_path: str, recursive: bool = False, timeout: Optional[int] = None
+    ) -> None:
+        """Delete *remote_path* through the Router (DELETE, v2 scoped token)."""
+        if self._target is None or self._connector is None:
+            raise SandboxTransportError("transport not attached to a sandbox")
+        try:
+            self._connector.delete_file(
+                self._target, remote_path, recursive, self._file_timeout(timeout)
+            )
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxTransportError(f"file delete failed at transport: {exc}") from exc
+
+    def _file_timeout(self, timeout: Optional[int]) -> int:
+        """File transfers get their own generous budget (large PUT/GET bodies)."""
+        return int(timeout) if timeout else FILE_TRANSFER_TIMEOUT_SECONDS
+
+    # ---- process service: stdin + streaming (capability layer) ----
+    def run_with_stdin(
+        self, command: str, payload: bytes, timeout: int
+    ) -> Tuple[str, str, int]:
+        """Run *command* feeding *payload* to its stdin; returns (out, err, code)."""
+        if self._target is None or self._connector is None:
+            raise SandboxTransportError("transport not attached to a sandbox")
+        try:
+            return self._connector.run_with_stdin(command, payload, timeout)
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxTransportError(f"stdin command failed at transport: {exc}") from exc
+
+    def start_process(self, command: str, start_timeout: int) -> "StartedProcess":
+        """Open a long-lived ``Start`` stream; returns the live process handle."""
+        if self._target is None or self._connector is None:
+            raise SandboxTransportError("transport not attached to a sandbox")
+        try:
+            return self._connector.start_process(command, start_timeout)
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxTransportError(f"process start failed at transport: {exc}") from exc
+
+    def signal_process(self, process_id: int, signal_name: str, timeout: int = 30) -> None:
+        """Deliver INT/TERM/KILL to the remote process group."""
+        if self._target is None or self._connector is None:
+            raise SandboxTransportError("transport not attached to a sandbox")
+        try:
+            self._connector.signal_process(process_id, signal_name, timeout)
+        except AgentSandboxError:
+            # Already classified (path confinement, unsupported RPC, process
+            # lifecycle, command taxonomy): never re-wrap as a transport error.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxTransportError(f"process signal failed at transport: {exc}") from exc
 
     def close(self) -> None:
         if self._connector is not None:
@@ -447,10 +556,18 @@ def _translate_rpc_error(exc: "grpc.RpcError", timeout: int) -> NoReturn:
     DEADLINE_EXCEEDED is the only status that proves the command outran its
     deadline; every other status (UNAVAILABLE, INTERNAL, ...) is reported as a
     command failure carrying the status and details instead of a raw traceback.
+    UNIMPLEMENTED is separated out because it means the pinned sandboxd build
+    lacks the RPC entirely (not that the request failed), which is the only
+    condition the stdin auto-fallback is allowed to react to.
     """
     code = exc.code()
-    if getattr(code, "name", "") == "DEADLINE_EXCEEDED":
+    name = getattr(code, "name", "")
+    if name == "DEADLINE_EXCEEDED":
         raise SandboxTimeoutError(f"command exceeded {timeout}s") from exc
+    if name == "UNIMPLEMENTED":
+        raise SandboxUnsupportedError(
+            f"sandboxd does not implement this RPC ({code}: {exc.details()})"
+        ) from exc
     raise SandboxCommandError(f"command failed: {code} ({exc.details()})") from exc
 
 
@@ -529,9 +646,188 @@ class SdkCommandConnector:
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 raise SandboxTransportError(f"{remote_path!r} not found in the sandbox")
+            if exc.code == 403:
+                # sandboxd's pathutil refused the resolved target (path escapes
+                # /workspace). Typed so callers can distinguish confinement from
+                # an infrastructure failure; see SandboxPathError.
+                from .errors import SandboxPathError
+
+                raise SandboxPathError(
+                    f"{remote_path!r} was refused by the sandbox filesystem (HTTP 403: "
+                    "resolves outside the sandbox root)"
+                ) from exc
             raise SandboxTransportError(f"file fetch returned HTTP {exc.code}")
         except urllib.error.URLError as exc:
             raise SandboxTransportError(f"file fetch failed: {exc}")
+
+    def put_file(
+        self, target: SandboxTarget, remote_path: str, data: bytes, timeout: int
+    ) -> None:
+        """PUT raw bytes to sandboxd's FilesystemService through the Router.
+
+        Content-Type is pinned to application/octet-stream so sandboxd's
+        `requestFileBody` takes the raw-body branch: it switches to multipart
+        parsing when the header says multipart/form-data, and urllib's default
+        (application/x-www-form-urlencoded) would otherwise be sent for a bytes
+        body. 204 is the only success status sandboxd emits for PUT.
+        """
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        escaped = urllib.parse.quote(remote_path, safe="/")
+        path = f"/v1/files{escaped}"
+        headers = dict(target.headers("PUT", path))
+        headers["Content-Type"] = "application/octet-stream"
+        req = urllib.request.Request(
+            f"{self.config.router_url.rstrip('/')}{path}",
+            data=data,
+            headers=headers,
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status not in (200, 204):
+                    raise SandboxTransportError(
+                        f"file write to {remote_path!r} returned HTTP {resp.status}"
+                    )
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403:
+                # sandboxd's pathutil refused the resolved target: the path
+                # escapes /workspace (symlink-aware). Map it to the plugin's own
+                # path error so callers see a typed confinement failure.
+                from .errors import SandboxPathError
+
+                raise SandboxPathError(
+                    f"{remote_path!r} was refused by the sandbox filesystem (HTTP 403: "
+                    "resolves outside the sandbox root)"
+                ) from exc
+            raise SandboxTransportError(f"file write returned HTTP {exc.code}")
+        except urllib.error.URLError as exc:
+            raise SandboxTransportError(f"file write failed: {exc}")
+
+    def delete_file(
+        self,
+        target: SandboxTarget,
+        remote_path: str,
+        recursive: bool,
+        timeout: int,
+    ) -> None:
+        """DELETE a file (or directory) from sandboxd through the Router."""
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        escaped = urllib.parse.quote(remote_path, safe="/")
+        path = f"/v1/files{escaped}" + ("?recursive=true" if recursive else "")
+        # The scoped token binds the PATH, not the query (router README:
+        # "Query parameters and request bodies are not signed"), so the token is
+        # minted for the bare path while the URL carries the recursive flag.
+        signed_path = f"/v1/files{escaped}"
+        req = urllib.request.Request(
+            f"{self.config.router_url.rstrip('/')}{path}",
+            headers=target.headers("DELETE", signed_path),
+            method="DELETE",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status not in (200, 204):
+                    raise SandboxTransportError(
+                        f"delete of {remote_path!r} returned HTTP {resp.status}"
+                    )
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise SandboxTransportError(f"{remote_path!r} not found in the sandbox")
+            raise SandboxTransportError(f"file delete returned HTTP {exc.code}")
+        except urllib.error.URLError as exc:
+            raise SandboxTransportError(f"file delete failed: {exc}")
+
+    def run_with_stdin(
+        self, command: str, payload: bytes, timeout: int
+    ) -> Tuple[str, str, int]:
+        """Execute *command* with *payload* on stdin via Start + WriteStdin.
+
+        Why the streaming RPC instead of the unary Execute: sandboxd's Execute
+        has no stdin field at all (process.proto ExecuteRequest = {config}), and
+        WriteStdin addresses a process_id that only ``Start`` creates
+        (packages/sandboxd/pkg/server/process.go: Execute runs the command and
+        buffers output, Start registers the process and creates the stdin pipe).
+        """
+        import grpc
+        from google.protobuf import empty_pb2
+        from k8s_agent_sandbox.commands._process_stubs import process_pb2
+
+        stub = self._ensure_grpc()
+        try:
+            return drive_start_with_stdin(
+                stub, process_pb2, empty_pb2, command, payload, timeout
+            )
+        except grpc.RpcError as exc:
+            _translate_rpc_error(exc, timeout)
+
+    def start_process(self, command: str, start_timeout: int) -> "StartedProcess":
+        """Open a background ``Start`` stream and wait for its InitEvent."""
+        import grpc
+        from k8s_agent_sandbox.commands._process_stubs import process_pb2
+
+        stub = self._ensure_grpc()
+        request = process_pb2.StartRequest(
+            config=process_pb2.ProcessConfig(command=["/bin/sh", "-c", command])
+        )
+        try:
+            # No deadline: a background process is long-lived by definition. The
+            # InitEvent wait below is what bounds a wedged start.
+            stream = stub.Start(request)
+        except grpc.RpcError as exc:
+            _translate_rpc_error(exc, start_timeout)
+        events = iter_start_events(stream)
+        try:
+            kind, value = next_stream_event(events, start_timeout)
+        except SandboxTimeoutError as exc:
+            _cancel_stream(stream)
+            raise SandboxProcessError(
+                f"background process did not start within {start_timeout}s: {exc}"
+            ) from exc
+        except grpc.RpcError as exc:
+            _translate_rpc_error(exc, start_timeout)
+        if kind != START_EVENT_INIT:
+            _cancel_stream(stream)
+            raise SandboxProcessError(
+                f"background process stream started with a {kind!r} event, "
+                "expected an InitEvent"
+            )
+        return StartedProcess(int(value), events, stream)
+
+    def signal_process(self, process_id: int, signal_name: str, timeout: int) -> None:
+        """Deliver a signal to the remote process group (INT/TERM/KILL)."""
+        import grpc
+        from k8s_agent_sandbox.commands._process_stubs import process_pb2
+
+        key = (signal_name or "").strip().upper()
+        if key.startswith("SIG"):
+            key = key[3:]
+        constant = _SIGNAL_CONSTANTS.get(key)
+        if constant is None:
+            raise SandboxCommandError(
+                f"unsupported signal {signal_name!r}; use INT, TERM or KILL"
+            )
+        stub = self._ensure_grpc()
+        try:
+            stub.SendSignal(
+                process_pb2.SendSignalRequest(
+                    process_id=process_id, signal=getattr(process_pb2, constant)
+                ),
+                timeout=timeout,
+            )
+        except grpc.RpcError as exc:
+            code = getattr(exc.code(), "name", "")
+            if code == "NOT_FOUND":
+                # The process exited between the registry read and the signal:
+                # a normal race for short-lived background commands.
+                raise SandboxProcessError(
+                    f"process {process_id} is no longer running"
+                ) from exc
+            _translate_rpc_error(exc, timeout)
 
     def _drop_grpc(self) -> None:
         if self._channel is not None:
@@ -546,3 +842,235 @@ class SdkCommandConnector:
         self._drop_grpc()
         self._sandbox_name = None
         self._pod_ip = None
+
+
+# ---------------- ProcessService.Start stream helpers ----------------
+# Event kind tags yielded by :func:`iter_start_events`. They mirror the
+# `StartResponse` oneof field names in sandboxd's process.proto (`init`,
+# `stdout`, `stderr`, `exit`), verified against the generated stubs shipped by
+# k8s-agent-sandbox 1.0.2 (process_pb2.StartResponse.oneofs_by_name == ["event"]),
+# so a wire change shows up here as an explicit mismatch instead of a silent drop.
+START_EVENT_INIT = "init"
+START_EVENT_STDOUT = "stdout"
+START_EVENT_STDERR = "stderr"
+START_EVENT_EXIT = "exit"
+
+# Signal name -> module-level protobuf constant (process_pb2.SIGNAL_SIGTERM, ...).
+_SIGNAL_CONSTANTS = {
+    "INT": "SIGNAL_SIGINT",
+    "TERM": "SIGNAL_SIGTERM",
+    "KILL": "SIGNAL_SIGKILL",
+}
+
+
+def iter_start_events(stream: Any) -> Iterator[Tuple[str, Any]]:
+    """Decode a ``ProcessService.Start`` stream into ``(kind, value)`` tuples.
+
+    Yields ``(init, process_id)``, ``(stdout, bytes)``, ``(stderr, bytes)`` and
+    finally ``(exit, exit_code)``, then stops. Iteration raises the underlying
+    ``grpc.RpcError`` if the stream fails (including DEADLINE_EXCEEDED).
+    """
+    for event in stream:
+        kind = event.WhichOneof("event")
+        if kind == START_EVENT_INIT:
+            yield START_EVENT_INIT, int(event.init.process_id)
+        elif kind == START_EVENT_STDOUT:
+            yield START_EVENT_STDOUT, bytes(event.stdout)
+        elif kind == START_EVENT_STDERR:
+            yield START_EVENT_STDERR, bytes(event.stderr)
+        elif kind == START_EVENT_EXIT:
+            yield START_EVENT_EXIT, int(event.exit.exit_code)
+            return
+        else:
+            log.debug("ignoring unknown StartResponse event %r", kind)
+
+
+def next_stream_event(
+    events: Iterator[Tuple[str, Any]], timeout: float
+) -> Tuple[str, Any]:
+    """Read one stream event with a deadline.
+
+    gRPC python has no per-``next()`` timeout, so the read runs on a throwaway
+    daemon thread and the caller stops waiting after *timeout*. On timeout that
+    thread is still blocked in ``next()``; the caller cancels the stream, which
+    unblocks it with an RpcError the worker discards — so nothing leaks past the
+    cancel.
+    """
+    box: Dict[str, Any] = {}
+
+    def worker() -> None:
+        try:
+            box["event"] = next(events)
+        except StopIteration:
+            box["empty"] = True
+        except BaseException as exc:  # noqa: BLE001 - handed back to the caller
+            box["error"] = exc
+
+    thread = threading.Thread(target=worker, name="agent-sandbox-stream", daemon=True)
+    thread.start()
+    if not thread.join(timeout + STREAM_EVENT_TIMEOUT_SLACK_SECONDS):
+        raise SandboxTimeoutError(f"no stream event within {timeout}s")
+    if "error" in box:
+        raise box["error"]
+    if box.get("empty"):
+        raise SandboxProcessError("the process stream ended before any event")
+    return box["event"]
+
+
+def _cancel_stream(stream: Any) -> None:
+    """Best-effort stream cancel; never masks the original failure."""
+    try:
+        stream.cancel()
+    except Exception as exc:  # noqa: BLE001 - cancel is advisory
+        log.debug("stream cancel failed: %s", exc)
+
+
+class StartedProcess:
+    """A live sandboxd process started with the streaming ``Start`` RPC.
+
+    ``events()`` returns the still-open event iterator with the InitEvent
+    already consumed by the transport; a consumer draining it sees stdout/stderr
+    chunks and finally the exit event. Draining is mandatory: sandboxd sends
+    stream events synchronously, so a client that stops reading eventually
+    stalls the remote process on a full pipe.
+    """
+
+    def __init__(self, process_id: int, events: Iterator[Tuple[str, Any]], stream: Any):
+        self.process_id = process_id
+        self._events = events
+        self._stream = stream
+
+    def events(self) -> Iterator[Tuple[str, Any]]:
+        return self._events
+
+    def cancel(self) -> None:
+        """Cancel the RPC; sandboxd kills the child when the stream context ends."""
+        _cancel_stream(self._stream)
+
+
+def drive_start_with_stdin(
+    stub: Any,
+    pb2: Any,
+    empty: Any,
+    command: str,
+    payload: bytes,
+    timeout: int,
+    *,
+    chunk_bytes: int = STDIN_CHUNK_BYTES,
+    clock: Any = time.monotonic,
+) -> Tuple[str, str, int]:
+    """Run *command* with *payload* on stdin; return (stdout, stderr, exit_code).
+
+    stdin is written from a helper thread: the server only drains the child's
+    stdin pipe while it streams stdout/stderr, so a synchronous writer would
+    deadlock against a process that writes output before consuming all input
+    (``cat`` with a large payload is exactly that shape).
+
+    A stdin write failure is NOT fatal on its own — the process may have exited
+    before reading (``true``, a command that ignores stdin) and the command's
+    observable result is still the exit event. Write errors are recorded and
+    surfaced only when the stream never produced an exit code.
+    """
+    request = pb2.StartRequest(
+        config=pb2.ProcessConfig(command=["/bin/sh", "-c", command])
+    )
+    stream = stub.Start(request, timeout=timeout)
+    deadline = clock() + timeout
+    stdout = bytearray()
+    stderr = bytearray()
+    exit_code: Optional[int] = None
+    write_errors: List[BaseException] = []
+    writer: Optional[threading.Thread] = None
+    try:
+        for event in stream:
+            kind = event.WhichOneof("event")
+            if kind == START_EVENT_INIT:
+                writer = threading.Thread(
+                    target=_write_stdin_payload,
+                    args=(
+                        stub,
+                        pb2,
+                        empty,
+                        int(event.init.process_id),
+                        payload,
+                        deadline,
+                        chunk_bytes,
+                        write_errors,
+                        clock,
+                    ),
+                    name="agent-sandbox-stdin",
+                    daemon=True,
+                )
+                writer.start()
+            elif kind == START_EVENT_STDOUT:
+                stdout += event.stdout
+            elif kind == START_EVENT_STDERR:
+                stderr += event.stderr
+            elif kind == START_EVENT_EXIT:
+                exit_code = int(event.exit.exit_code)
+                break
+    finally:
+        if writer is not None:
+            # Bounded join: a writer still blocked on a full pipe for a process
+            # that already exited must not delay the result.
+            writer.join(timeout=STREAM_EVENT_TIMEOUT_SLACK_SECONDS)
+    if exit_code is None:
+        detail = f"; first stdin write error: {write_errors[0]}" if write_errors else ""
+        raise SandboxCommandError(
+            f"stdin command stream ended without an exit event{detail}"
+        )
+    if write_errors:
+        log.debug("stdin write errors (process likely exited early): %s", write_errors[0])
+    return (
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+        exit_code,
+    )
+
+
+def _write_stdin_payload(
+    stub: Any,
+    pb2: Any,
+    empty: Any,
+    process_id: int,
+    payload: bytes,
+    deadline: float,
+    chunk_bytes: int,
+    errors: List[BaseException],
+    clock: Any,
+) -> None:
+    """Write *payload* in chunked WriteStdin frames, then one EOF frame."""
+    try:
+        for offset in range(0, len(payload), chunk_bytes):
+            _write_stdin_frame(
+                stub,
+                pb2,
+                empty,
+                process_id,
+                payload[offset : offset + chunk_bytes],
+                deadline,
+                clock,
+            )
+        # EOF closes the pipe: without it a `cat`-style reader blocks until the
+        # command deadline instead of returning its output.
+        _write_stdin_frame(stub, pb2, empty, process_id, None, deadline, clock)
+    except BaseException as exc:  # noqa: BLE001 - reported back through `errors`
+        errors.append(exc)
+
+
+def _write_stdin_frame(
+    stub: Any,
+    pb2: Any,
+    empty: Any,
+    process_id: int,
+    chunk: Optional[bytes],
+    deadline: float,
+    clock: Any,
+) -> None:
+    """Send one stdin frame (or the EOF marker) with the remaining budget."""
+    remaining = max(1.0, deadline - clock())
+    if chunk is None:
+        request = pb2.WriteStdinRequest(process_id=process_id, eof=empty.Empty())
+    else:
+        request = pb2.WriteStdinRequest(process_id=process_id, input=chunk)
+    stub.WriteStdin(request, timeout=remaining)

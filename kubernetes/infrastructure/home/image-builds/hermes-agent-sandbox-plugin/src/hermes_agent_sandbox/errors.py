@@ -46,3 +46,51 @@ class SandboxTimeoutError(SandboxCommandError):
 
 class CwdNotAllowedError(AgentSandboxError, ValueError):
     """The requested cwd does not resolve inside /workspace."""
+
+
+class SandboxUnsupportedError(SandboxCommandError):
+    """The pinned sandbox runtime does not implement the requested capability.
+
+    Raised from a gRPC ``UNIMPLEMENTED`` (or an HTTP 501) so the caller can
+    fall back to a slower path (e.g. stdin via a workspace temp file when
+    ``ProcessService.Start``/``WriteStdin`` are missing from the sandboxd
+    build). Auto-fallback happens ONLY for this type: a transport outage must
+    never be silently retried over a different channel.
+    """
+
+
+class SandboxPathError(AgentSandboxError, ValueError):
+    """A path violates the /workspace confinement contract.
+
+    A ValueError subclass like :class:`CwdNotAllowedError`: a bad path is a
+    caller error, not an infrastructure failure, and Hermes' tool layer is
+    expected to surface it to the model instead of recycling the sandbox.
+    """
+
+
+class SandboxFileSizeError(SandboxPathError):
+    """A file or artifact exceeds the configured byte cap."""
+
+
+class SandboxQueueFullError(SandboxCommandError):
+    """The session command queue is at capacity (max_queued waiters)."""
+
+
+class SandboxQueueTimeoutError(SandboxCommandError):
+    """A queued command waited longer than the queue timeout for a slot."""
+
+
+class SandboxProcessError(SandboxCommandError):
+    """A background-process operation (start/logs/stop) failed."""
+
+
+class SandboxArtifactError(AgentSandboxError):
+    """Artifact export, import, or store maintenance failed."""
+
+
+class SandboxArtifactTooLargeError(SandboxArtifactError, SandboxFileSizeError):
+    """An artifact exceeds the configured byte cap."""
+
+
+class SandboxArtifactExpiredError(SandboxArtifactError):
+    """The artifact id is unknown or its TTL has passed."""

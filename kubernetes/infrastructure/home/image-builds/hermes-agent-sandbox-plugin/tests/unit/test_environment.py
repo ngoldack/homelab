@@ -317,12 +317,34 @@ def test_unexpected_transport_failure_is_command_error(tmp_path):
         env.execute("any", timeout=30)
 
 
-def test_stdin_unsupported(tmp_path):
+def test_stdin_is_delivered_through_the_transport(tmp_path):
+    """Unit 2.2 replaced the old unconditional rejection with real stdin.
+
+    The rejection this test used to pin ("stdin_data is not supported") is gone
+    by design: stdin is now delivered natively (Start + WriteStdin) with a
+    workspace-file fallback. The detailed matrix lives in test_stdin.py; this
+    keeps the environment-level contract honest — the payload goes through the
+    stdin transport and the plain exec path is NOT used.
+    """
+
+    class StdinTransport(FakeTransport):
+        def __init__(self, script=None):
+            super().__init__(script)
+            self.stdin_calls = []
+
+        def run_with_stdin(self, command, payload, timeout):
+            self.stdin_calls.append((command, payload, timeout))
+            return "pong", "", 0
+
+    transport = StdinTransport()
     env = AgentSandboxEnvironment(
-        make_env(tmp_path), claims=FakeClaims(), transport=FakeTransport()
+        make_env(tmp_path), claims=FakeClaims(), transport=transport
     )
-    with pytest.raises(SandboxCommandError):
-        env.execute("read x", stdin_data="data")
+    result = env.execute("read x", stdin_data="ping")
+
+    assert result["returncode"] == 0 and result["output"] == "pong"
+    assert transport.stdin_calls == [("cd /workspace && read x", b"ping", 300)]
+    assert transport.runs == []  # never fell back for a supported transport
 
 
 def test_unknown_kwargs_tolerated(tmp_path):

@@ -11,6 +11,24 @@ module). The contract we honor is the one Hermes actually calls:
   base class's own implementation so Hermes file tools keep working.
 
 Every command runs as one remote ``/bin/sh -c`` in the sandbox's /workspace.
+
+CAPABILITY LAYER (Phase 2) adds first-class sandbox operations on top of that
+contract; Hermes' own tools keep going through ``execute``, while these give
+native file writes/reads, real stdin, artifacts/checkpoints, a bounded session
+queue and background processes:
+
+* ``write_file`` / ``read_file`` / ``list_dir`` — Router REST (PUT/GET) with
+  scoped tokens, /workspace-confined (see ``files.py`` for the transport
+  evidence and the path contract).
+* ``execute(..., stdin_data=...)`` — native ``Start`` + ``WriteStdin`` frames,
+  with a workspace-temp-file fallback for a runtime that lacks them.
+* ``export_artifact`` / ``import_artifact`` / ``checkpoint`` /
+  ``restore_checkpoint`` — tarballs produced in the guest and stored on the
+  gateway's PVC with an opaque id and a TTL (``artifacts.py``).
+* ``start_process`` / ``process_logs`` / ``stop_process`` — native streaming
+  background exec with bounded log rings (``processes.py``).
+* every command submission passes through a bounded session FIFO
+  (``queue.py``), so one session cannot stack unbounded work on its sandbox.
 """
 
 from __future__ import annotations
@@ -18,27 +36,39 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import secrets
 import shlex
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from .config import AgentSandboxConfig
+from . import artifacts as artifacts_mod
+from . import files as files_mod
+from .config import (
+    STDIN_AUTO,
+    STDIN_NATIVE,
+    WORKSPACE,
+    AgentSandboxConfig,
+)
 from .errors import (
     CwdNotAllowedError,
     SandboxCommandError,
     SandboxCreateError,
     SandboxCreateTimeoutError,
+    SandboxFileSizeError,
     SandboxTimeoutError,
     SandboxTransportError,
+    SandboxUnsupportedError,
 )
+from .processes import ProcessRegistry
+from .queue import SessionCommandQueue
 from .transport import KubeClaimsClient, SandboxTransport, sanitize_claim_name
 
 log = logging.getLogger(__name__)
 
 TRUNCATION_SUFFIX = "\n... [output truncated]"
-_WORKSPACE = "/workspace"
+_WORKSPACE = WORKSPACE
 
 # The warm pool exposes ONE sandbox slot on this node and one gateway process
 # serves every Hermes session, so this semaphore is the process-wide capacity
@@ -82,6 +112,18 @@ class AgentSandboxEnvironment:
         # _ensure_ready()/_cleanup() call _teardown_sandbox() inside it.
         self._lock = threading.RLock()
         self._capacity_held = False
+        # Session-scoped admission gate for every command submission (one
+        # environment == one Hermes session == one sandbox).
+        self._queue = SessionCommandQueue(
+            max_concurrent=config.queue_max_concurrent,
+            max_queued=config.queue_max_queued,
+            wait_timeout=config.queue_timeout_seconds,
+            name=f"sandbox:{task_id}",
+        )
+        # Built lazily: both hold the transport, which for a provider-created
+        # environment does not exist until the first _ensure_ready().
+        self._artifact_store: Optional[artifacts_mod.ArtifactStore] = None
+        self._process_registry: Optional[ProcessRegistry] = None
 
     # ---------------- lifecycle ----------------
     def _ensure_ready(self) -> None:
@@ -171,6 +213,15 @@ class AgentSandboxEnvironment:
     def _recycle(self) -> None:
         """Idle timeout hit: release this claim and force a fresh one next use."""
         log.info("Sandbox idle >%ss; recycling claim", self.config.idle_timeout_seconds)
+        self._fresh_claim()
+
+    def _fresh_claim(self) -> None:
+        """Drop the current claim and adopt a brand-new one (blocking).
+
+        Used by the idle recycle and by ``restore_checkpoint(fresh=True)``: a
+        checkpoint restore must land in a sandbox that has no leftover state, so
+        the old guest (and everything running in it) is destroyed first.
+        """
         self._teardown_sandbox()
         self._last_use = time.monotonic()
         self._ensure_ready()  # re-create immediately
@@ -247,6 +298,16 @@ class AgentSandboxEnvironment:
             if self._closed:
                 return
             self._closed = True
+            # Order matters: stop background processes (so their streams end
+            # deliberately and their final output is recorded) BEFORE the claim
+            # delete kills the guest, then release waiters so no thread sits in
+            # the queue while the environment is going away.
+            if self._process_registry is not None and self._transport is not None:
+                try:
+                    self._process_registry.stop_all()
+                except Exception as exc:  # noqa: BLE001 - teardown must not raise
+                    log.warning("stopping background processes failed: %s", exc)
+            self._queue.close()
             self._delete_claim()
             if self._transport is not None:
                 self._transport.close()
@@ -275,19 +336,19 @@ class AgentSandboxEnvironment:
         cwd: str = "",
         *,
         timeout: Optional[int] = None,
-        stdin_data: Optional[str] = None,
+        stdin_data: Optional[Any] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Run one command; unknown kwargs are accepted and ignored (the Hermes
         factory may pass extra keys in future releases — never break for that).
+
+        ``stdin_data`` (str or bytes) is delivered as real stdin. The pinned
+        runtime supports it natively (ProcessService Start + WriteStdin, see
+        transport.drive_start_with_stdin), and ``AGENT_SANDBOX_STDIN_MODE=auto``
+        falls back to a workspace temp file + `exec 0< file` only when the
+        sandboxd build answers UNIMPLEMENTED.
         """
         del kwargs  # forward-compat: accept-and-ignore unknown keyword args
-        if stdin_data is not None:
-            # The python-router HTTP contract has no stdin channel; honest
-            # failure beats silently dropping input Hermes expected delivered.
-            raise SandboxCommandError(
-                "stdin_data is not supported by the agent_sandbox HTTP transport"
-            )
         target_cwd = self._normalize_cwd(cwd) if cwd else self.cwd
         self._ensure_ready()
         self._last_use = time.monotonic()
@@ -299,7 +360,13 @@ class AgentSandboxEnvironment:
         # propagate so Hermes logs it — swallowing it as 124 with empty
         # output (and tearing the claim down via _cancel_remote) would hide
         # it and destroy a live sandbox mid-task.
-        stdout, stderr, code = self._do_run(full, effective_timeout)
+        if stdin_data is None:
+            stdout, stderr, code = self._run_queued(
+                lambda: self._do_run(full, effective_timeout)
+            )
+        else:
+            payload = self._stdin_payload(stdin_data)
+            stdout, stderr, code = self._run_with_stdin(full, payload, effective_timeout)
         output = stdout + stderr if stderr and stdout else (stdout or stderr)
         result = {
             "output": self._truncate(output),
@@ -307,6 +374,95 @@ class AgentSandboxEnvironment:
             "cwd": target_cwd,
         }
         return result
+
+    def _run_queued(self, fn: Any) -> Any:
+        """Run *fn* under the session's bounded FIFO admission gate."""
+        return self._queue.submit(fn, wait_timeout=self.config.queue_timeout_seconds)
+
+    def _stdin_payload(self, stdin_data: Any) -> bytes:
+        """Normalize and size-check a stdin payload (str -> utf-8 bytes)."""
+        if isinstance(stdin_data, bytes):
+            payload = stdin_data
+        elif isinstance(stdin_data, bytearray):
+            payload = bytes(stdin_data)
+        elif isinstance(stdin_data, str):
+            payload = stdin_data.encode("utf-8")
+        else:
+            raise SandboxCommandError(
+                f"stdin_data must be str or bytes, got {type(stdin_data).__name__}"
+            )
+        limit = self.config.stdin_max_bytes
+        if len(payload) > limit:
+            raise SandboxFileSizeError(
+                f"stdin payload is {len(payload)} bytes, over the {limit} byte limit "
+                "(AGENT_SANDBOX_STDIN_MAX_BYTES); write it to a file instead"
+            )
+        return payload
+
+    def _run_with_stdin(self, full: str, payload: bytes, timeout: int):
+        """Deliver *payload* on stdin, native first when the mode allows it."""
+        mode = self.config.stdin_mode
+        if mode in (STDIN_NATIVE, STDIN_AUTO):
+            try:
+                return self._run_queued(
+                    lambda: self._do_run_stdin(full, payload, timeout)
+                )
+            except SandboxUnsupportedError as exc:
+                if mode == STDIN_NATIVE:
+                    raise
+                # Only an UNIMPLEMENTED RPC reaches this branch (see
+                # _translate_rpc_error): the runtime, not the request, is
+                # missing the capability — so the file fallback is safe. Any
+                # other stdin failure propagates untouched.
+                log.warning(
+                    "native stdin unavailable in this sandboxd build (%s); "
+                    "falling back to a workspace temp file",
+                    exc,
+                )
+        return self._run_queued(
+            lambda: self._run_stdin_via_file(full, payload, timeout)
+        )
+
+    def _do_run_stdin(self, full: str, payload: bytes, timeout: int):
+        """Native stdin path, with the same timeout/124 contract as _do_run."""
+        try:
+            return self._transport.run_with_stdin(full, payload, timeout)
+        except SandboxTimeoutError:
+            self._cancel_remote()
+            return (
+                "",
+                f"command exceeded {timeout}s and was cancelled; the sandbox "
+                "was recycled, so /workspace state is gone — re-run setup if needed",
+                124,
+            )
+        except SandboxCommandError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - unexpected transport failure
+            raise SandboxCommandError(f"sandbox transport error: {exc}") from exc
+
+    def _run_stdin_via_file(self, full: str, payload: bytes, timeout: int):
+        """Fallback stdin: write the payload into the workspace, redirect, delete.
+
+        The temp file lives in the plugin scratch namespace (never /tmp, which
+        the REST API cannot reach) and is removed in a ``finally`` so a failed
+        command cannot leave a payload behind. The command is wrapped in a brace
+        group — ``{ exec 0< file; <command>; }`` — because a bare ``< file``
+        would redirect only the LAST statement of a multi-statement command, and
+        ``exec`` on the group's shell is what makes the redirection apply to all
+        of them.
+        """
+        tmp = files_mod.scratch_file_path(
+            "stdin", f"{secrets.token_hex(8)}"
+        )
+        files_mod.write_scratch_file(self._transport, self.config, tmp, payload)
+        wrapped = f"{{ exec 0< {shlex.quote(tmp)}; {full}; }}"
+        try:
+            return self._do_run(wrapped, timeout)
+        finally:
+            try:
+                self._transport.delete_file(tmp)
+            except Exception as exc:  # noqa: BLE001 - cleanup must not mask the result
+                log.warning("could not remove stdin scratch file %s: %s", tmp, exc)
 
     def _clamp_timeout(self, requested: Optional[int]) -> int:
         """Commands are capped at min(hermes timeout, config command timeout)."""
@@ -382,3 +538,230 @@ class AgentSandboxEnvironment:
 
     def get_temp_dir(self) -> str:
         return "/tmp"
+
+    # ---------------- capability layer properties ----------------
+    @property
+    def artifacts(self) -> artifacts_mod.ArtifactStore:
+        """Gateway-side artifact store (created on first use)."""
+        if self._artifact_store is None:
+            self._artifact_store = artifacts_mod.ArtifactStore(self.config.artifact_root)
+        return self._artifact_store
+
+    @property
+    def _processes(self) -> ProcessRegistry:
+        """Session-scoped background-process registry (created on first use).
+
+        Holds ``self._transport`` by reference: the transport OBJECT is stable
+        across recycles (attach() rebuilds its connector), so a registry built
+        once keeps working.
+        """
+        if self._process_registry is None:
+            self._process_registry = ProcessRegistry(
+                self._transport,
+                max_processes=self.config.process_max_concurrent,
+                log_buffer_bytes=self.config.process_log_buffer_bytes,
+                log_tail_bytes=self.config.process_log_tail_bytes,
+                stop_grace_seconds=self.config.process_stop_grace_seconds,
+            )
+        return self._process_registry
+
+    def queue_stats(self) -> Dict[str, Any]:
+        """Admission-gate counters for one session (diagnostics)."""
+        return self._queue.stats()
+
+    # ---------------- file operations (Unit 2.1) ----------------
+    def write_file(
+        self,
+        path: str,
+        content: Any,
+        *,
+        create_parents: bool = False,
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Write *content* (str|bytes) to a /workspace path.
+
+        Content-oriented signature per the capability-layer contract: the model
+        supplies BYTES and a guest path, and the plugin owns the transport
+        (Router PUT). Hermes' own read/write/patch tools are unaffected — they
+        reach the sandbox through ``execute()`` (see the module docstring), so
+        this name does not intercept the environment protocol's host-side file
+        handling.
+        """
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        return files_mod.write_file(
+            self._transport,
+            self.config,
+            path,
+            content,
+            create_parents=create_parents,
+            timeout=timeout,
+        )
+
+    def read_file(
+        self,
+        path: str,
+        *,
+        max_bytes: Optional[int] = None,
+        encoding: str = "utf-8",
+        timeout: Optional[int] = None,
+    ) -> str:
+        """Read a regular file from the sandbox as text (size-capped)."""
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        result = files_mod.read_file(
+            self._transport,
+            self.config,
+            path,
+            max_bytes=max_bytes,
+            encoding=encoding,
+            timeout=timeout,
+        )
+        return result["content"]
+
+    def list_dir(
+        self,
+        path: str = WORKSPACE,
+        *,
+        max_entries: Optional[int] = None,
+        timeout: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """List a workspace directory (sandboxd DirectoryListing)."""
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        kwargs = {"timeout": timeout}
+        if max_entries is not None:
+            kwargs["max_entries"] = int(max_entries)
+        result = files_mod.list_dir(self._transport, self.config, path, **kwargs)
+        return result["entries"]
+
+    # ---------------- artifacts + checkpoints (Units 2.3 + 2.6) ----------------
+    def export_artifact(
+        self,
+        paths: Any,
+        *,
+        ttl_hours: Optional[float] = None,
+        max_bytes: Optional[int] = None,
+        exclude: Any = (),
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Tar *paths* inside the sandbox and store the tarball with a TTL."""
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        ref = self.artifacts.export(
+            self._transport,
+            self.config,
+            list(paths) if not isinstance(paths, str) else [paths],
+            exclude=list(exclude),
+            ttl_hours=ttl_hours,
+            max_bytes=max_bytes,
+            session=self.task_id,
+            timeout=timeout,
+        )
+        return ref.as_dict()
+
+    def import_artifact(
+        self,
+        artifact_id: str,
+        *,
+        fresh: bool = False,
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Restore a stored artifact's tree into this sandbox's /workspace.
+
+        ``fresh=True`` destroys the current guest first and adopts a new claim,
+        so the restored tree cannot be mixed with leftovers of the previous
+        session (the point of ``restore_checkpoint``'s default).
+        """
+        if fresh:
+            self._fresh_claim()
+        else:
+            self._ensure_ready()
+        self._last_use = time.monotonic()
+        ref = self.artifacts.import_artifact(
+            self._transport, self.config, artifact_id, timeout=timeout
+        )
+        return ref.as_dict()
+
+    def list_artifacts(self) -> List[Dict[str, Any]]:
+        """Every unexpired artifact this gateway holds (newest first)."""
+        return [ref.as_dict() for ref in self.artifacts.list_artifacts()]
+
+    def checkpoint(
+        self,
+        *,
+        ttl_hours: Optional[float] = None,
+        max_bytes: Optional[int] = None,
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Snapshot /workspace (minus internal scratch) as a checkpoint artifact.
+
+        The plain workspace stays disposable: it lives on an emptyDir and dies
+        with the claim, so a session that needs its files after a recycle or a
+        claim expiry must checkpoint first.
+        """
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        ref = artifacts_mod.checkpoint(
+            self.artifacts,
+            self._transport,
+            self.config,
+            session=self.task_id,
+            ttl_hours=ttl_hours,
+            max_bytes=max_bytes,
+            timeout=timeout,
+        )
+        return ref.as_dict()
+
+    def restore_checkpoint(
+        self, artifact_id: str, *, fresh: bool = True, timeout: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Import a checkpoint into a FRESH claim (default) or the current one.
+
+        ``fresh=True`` destroys the current guest first, so the restored tree
+        cannot be mixed with leftovers of the previous session — the point of a
+        checkpoint is a known workspace, and a merge would silently keep stale
+        files that the snapshot no longer contains.
+        """
+        ref = self.import_artifact(artifact_id, fresh=fresh, timeout=timeout)
+        if ref["kind"] != "checkpoint":
+            log.warning(
+                "restore_checkpoint restored artifact %s of kind %r",
+                artifact_id,
+                ref["kind"],
+            )
+        return ref
+
+    # ---------------- background processes (Unit 2.5) ----------------
+    def start_process(self, command: str, *, cwd: str = "") -> Dict[str, Any]:
+        """Start *command* in the background; returns the process handle.
+
+        The command is a single ``/bin/sh -c`` string, like ``execute``; state
+        is NOT carried over from a previous command (no `cd` persistence), so
+        the caller must quote a cwd explicitly when it matters.
+        """
+        self._ensure_ready()
+        self._last_use = time.monotonic()
+        target_cwd = self._normalize_cwd(cwd) if cwd else self.cwd
+        full = f"cd {shlex.quote(target_cwd)} && {command}"
+        handle = self._processes.start(
+            full, start_timeout=self.config.process_start_timeout_seconds
+        )
+        return handle.as_dict()
+
+    def process_logs(
+        self, process_id: str, *, tail_bytes: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Return a process' current state plus the tail of its output."""
+        tail = int(tail_bytes) if tail_bytes else self.config.process_log_tail_bytes
+        return self._processes.get(process_id).logs(tail)
+
+    def stop_process(self, process_id: str) -> Dict[str, Any]:
+        """Stop a background process (TERM -> grace -> KILL -> stream cancel)."""
+        return self._processes.stop(process_id)
+
+    def list_processes(self) -> List[Dict[str, Any]]:
+        """Every background process this session has started."""
+        if self._process_registry is None:
+            return []
+        return self._process_registry.list()

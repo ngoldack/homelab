@@ -16,13 +16,20 @@ Proxmox host (pmx-main)                 Hetzner Cloud
             ──── one Kubernetes cluster ────
 ```
 
-- Proxmox hosts declared as a map (`proxmox_nodes`), Talos VMs as map entries
-- Talos provisioned by hand-rolled OpenTofu (no registry module), Kubernetes
-  bootstrapped with Cilium, CRDs owned by tofu
-- Secrets in Git via SOPS + age; OpenTofu state encrypted in S3
-- Flux reconciles everything except the CNI — merging to `main` is deploying
+- Proxmox hosts declared as a map (`proxmox_nodes`)
+- Talos cluster provisioned via OpenTofu (hand-rolled, including the
+  Hetzner ingress worker — no registry module)
+- Kubernetes bootstrapped with Cilium, owned by tofu
+- Secrets stored with SOPS + age
+- Flux used as the GitOps layer for everything except the CNI
+- Talos VMs declared as individual `nodes` map entries (name, host, cores,
+  affinity pin, memory, disk, role)
 - Cilium default-deny per namespace, authentik at the edge, Kata microVMs for
   Hermes agent workloads, VictoriaMetrics for monitoring
+
+There used to be a second, independent Hetzner Cloud edge cluster acting
+as the sole public ingress point. It was destroyed (commit `bf444f7`);
+its former ingress role is now the LAN VIP described above.
 
 ## Documentation
 

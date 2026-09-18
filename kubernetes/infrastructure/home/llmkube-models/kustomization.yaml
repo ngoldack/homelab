@@ -4,3 +4,5 @@ resources:
   - qwen3.yaml
   - qwen36.yaml
   - nomic-embed-v15.yaml
+  - kv-cache-pvc.yaml
+  - kv-broker.yaml

@@ -145,7 +145,7 @@ selected purely by path/model id:
 
 | Alias (`model`) | Gateway path | Upstream model | Live latency |
 |---|---|---|---|
-| `local` (default) | `/v1` → `local-p100` | `qwen36-35b` on the P100 | ~125 s/call |
+| `local` (default) | `/v1` → `local-p100` → `llama-kv-broker` | `qwen36-35b` on the P100 | ~125 s/call |
 | `syn-small` | `/v1/synthetic-small` | `zai-org/GLM-4.7-Flash` | ~2.6 s |
 | `syn-large` | `/v1/synthetic-large` | `zai-org/GLM-5.3-Flash` | ~4.0 s |
 | `syn-deepseek` | `/v1/synthetic-deepseek` | `deepseek-ai/DeepSeek-V4.1-Flash` | ~9.6 s |

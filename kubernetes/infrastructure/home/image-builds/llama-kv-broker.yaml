@@ -1,0 +1,78 @@
+# Build the llama-kv-broker image (stdlib-only Go reverse proxy that owns the
+# per-session KV slot files in front of the qwen36-35b llama-server).
+#
+# BUILD SHAPE — the build context is THIS REPO at the pinned commit and the
+# Dockerfile is fetched from that tree by path, exactly like
+# hermes-agent-sandbox-plugin.yaml: `--opt=context=<repo>#<sha>` plus
+# `--opt=filename=<repo-relative Dockerfile>`, and the Dockerfile's COPY sources
+# are repo-relative. The pin is the commit whose tree carries the broker sources
+# and this Dockerfile; bump it (with the Job name and tag) whenever either moves.
+# A ConfigMap-as-context was tried for this build and dropped: this builder only
+# resolves single-file COPY sources from a mounted directory, and the broker has
+# three of them.
+#
+# OUTPUT: registry.ngoldack.de/llama-kv-broker:2 — the digest printed by buildctl
+# is pinned in kubernetes/infrastructure/home/llmkube-models/kv-broker.yaml.
+#
+# RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag and
+# the context SHA together; Flux prunes the old Job. The registry cache keeps a
+# source-only change to a few seconds of recompile.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-llama-kv-broker-2
+  namespace: buildkit
+spec:
+  backoffLimit: 2
+  # One static Go build over two cached bases; generous.
+  activeDeadlineSeconds: 1800
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: buildctl
+          # Same version as the daemon (chart 1.8.0 -> appVersion v0.31.0).
+          image: moby/buildkit:v0.31.0
+          command:
+            - buildctl
+          args:
+            - --addr=tcp://buildkitd:1234
+            - --tlscacert=/certs/ca.crt
+            - --tlscert=/certs/tls.crt
+            - --tlskey=/certs/tls.key
+            - build
+            - --frontend=dockerfile.v0
+            # The repo commit whose tree carries the broker sources + Dockerfile.
+            - --opt=context=https://github.com/ngoldack/homelab.git#d32a80eee33460ea10ab8b8f018bdc0776aeebb9
+            # The Dockerfile within that tree (lowercase, like the other in-repo
+            # Dockerfiles under image-builds/).
+            - --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile
+            # Pushes to the cluster's own Zot (../registry/), same TLS setup as
+            # the other images in this directory.
+            - --output=type=image,name=registry.ngoldack.de/llama-kv-broker:2,push=true
+            # export and import MUST name the same ref, or nothing is reused.
+            - --export-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache
+            - --progress=plain
+          env:
+            - name: DOCKER_CONFIG
+              value: /docker
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: docker
+              mountPath: /docker
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: buildctl-client-tls
+        - name: docker
+          secret:
+            secretName: registry-credentials
+            items:
+              - key: .dockerconfigjson
+                path: config.json

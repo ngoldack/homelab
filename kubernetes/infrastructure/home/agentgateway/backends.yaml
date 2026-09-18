@@ -12,11 +12,13 @@
 #   backend so a client can PIN a tier instead of walking the chain. Exposed
 #   as /v1/synthetic-{small,large,deepseek} in routes.yaml; the stanzas are
 #   verbatim copies, so edit chat-chain.yaml and here together.
-# - local P100 inference     -> `local-p100` (llmkube InferenceService,
-#   reached over the in-cluster DNS name; custom-provider backendRef is
-#   namespace-LOCAL per the CRD, so the cross-namespace Service is declared
-#   as an FQDN host instead — CRD validation: "custom providers must specify
-#   exactly one of backendRef or host and port").
+# - local P100 inference     -> `local-p100` (the P100's llmkube
+#   InferenceService is reached through the in-cluster `llama-kv-broker`
+#   Service, which owns the per-session slot restore/save choreography and
+#   proxies every /v1 request; custom-provider backendRef is namespace-LOCAL
+#   per the CRD, so the cross-namespace Service is declared as an FQDN host
+#   instead — CRD validation: "custom providers must specify exactly one of
+#   backendRef or host and port").
 #
 # Auth: policies.auth.secretRef resolves the Authorization header from the
 # named Secret ("Credential source for the authorization value, defaulting
@@ -44,7 +46,7 @@ spec:
                   path: /v1/chat/completions
               # Cost-catalog/telemetry identity: this is a llama.cpp backend.
               providerOverride: llama.cpp
-            host: qwen36-35b.llmkube-system.svc.cluster.local
+            host: llama-kv-broker.llmkube-system.svc.cluster.local
             port: 8080
             policies:
               ai:

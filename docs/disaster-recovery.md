@@ -41,6 +41,53 @@ namespace is suffixed `-drill` with a distinct Cluster name (so a drill can
 never address a production volume), and the drill StorageClasses are
 `reclaimPolicy: Delete` (so a finished drill leaves no dataset on the NAS).
 
+## Credential rotation (compromise response)
+
+The procedure below is for the case where cluster credentials have been
+exposed — a machine config, a kubeconfig, a CA key or the service-account
+signing key. It exists because the first instinct ("rebuild the cluster") is
+not the only option: Talos can rotate the CAs in place, and the rebuild
+framing only holds if the rotation below is judged unsafe on a single
+control-plane cluster.
+
+**Order matters, and so does the prerequisite.** Take a fresh etcd snapshot
+first (`talos-backup`) and confirm a recent CNPG base backup exists — every
+step below is recoverable only from those. Plan a maintenance window: the
+control plane restarts as certificates change.
+
+1. **Rotate the CAs.** `talosctl rotate-ca` rotates both the Talos CA and the
+   Kubernetes API issuing CA (each selectable). Its `--dry-run` defaults to
+   **true**, so applying requires `--dry-run=false`, and `-o <file>` writes
+   the new admin talosconfig — keep that file, the old credentials stop
+   working. Read the synopsis: for Kubernetes it rotates only the API-server
+   issuing CA.
+2. **Rotate the Kubernetes PKI the command does not cover** by applying
+   machine-config changes to the control-plane node: the aggregator CA, the
+   etcd CA, the front-proxy certificates, and **`cluster.serviceAccount.key`**
+   (the key that mints every service-account token). The apiserver restarts;
+   kubelet re-issues projected tokens automatically, but long-lived
+   `kubernetes.io/service-account-token` Secrets must be recreated.
+3. **Re-issue client credentials**: node certificates, admin kubeconfigs and
+   talosconfigs. Verify every node is Ready and that Flux reconciles before
+   moving on.
+4. **Rotate the etcd encryption key** (`cluster.secretboxEncryptionSecret`)
+   with the two-key sequence: the new key becomes the primary provider while
+   the OLD key stays configured as a reader, every Secret is rewritten
+   (`kubectl get secrets -A -o json | kubectl replace -f -`), and only then
+   is the old key dropped. Talos *generates* the apiserver
+   `EncryptionConfiguration` from the machine config, so confirm the generated
+   file lists both keys before and after the change — a straight value swap
+   makes every existing Secret undecryptable.
+5. **Rotate the remaining bearer material**: the Talos bootstrap token, and
+   any capability token that lives in a SOPS file (for example the external
+   alerting topic URLs — a known dead-man topic can be used to forge
+   heartbeats and mask a dead pipeline). Re-encrypt those files when the
+   values change.
+
+Verification after each step: apiserver healthy, all nodes Ready, a pod
+restart succeeds, a fresh etcd snapshot decrypts, and alert delivery still
+arrives at the external destination.
+
 ## Open items
 
 - The first live drill run, and its measured duration, must be recorded here —

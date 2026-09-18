@@ -31,13 +31,18 @@ data:
     events {}
     http {
       resolver 172.21.0.10 valid=10s ipv6=off;
+      # Short alias for the long service FQDN, so the proxy_pass lines below
+      # stay inside the repo's 120-character limit (yamllint). An upstream
+      # group is resolved at config load, which is the same behaviour the
+      # literal name had.
+      upstream authentik-core { server authentik-server.authentik.svc.cluster.local:80; }
       server {
         listen 8080;
 
         # The discovery document: authentik's own, with the public Host so its
         # `issuer` matches the tokens, and jwks_uri pointed back here.
         location = /application/o/headlamp/.well-known/openid-configuration {
-          proxy_pass http://authentik-server.authentik.svc.cluster.local/application/o/headlamp/.well-known/openid-configuration;
+          proxy_pass http://authentik-core/application/o/headlamp/.well-known/openid-configuration;
           proxy_set_header Host authentik.ngoldack.de;
           proxy_set_header Accept-Encoding "";
           sub_filter '"jwks_uri": "https://authentik.ngoldack.de/application/o/headlamp/jwks/"'
@@ -48,7 +53,7 @@ data:
 
         # The keys, straight from authentik in-cluster.
         location = /jwks/headlamp {
-          proxy_pass http://authentik-server.authentik.svc.cluster.local/application/o/headlamp/jwks/;
+          proxy_pass http://authentik-core/application/o/headlamp/jwks/;
           proxy_set_header Host authentik.ngoldack.de;
         }
 

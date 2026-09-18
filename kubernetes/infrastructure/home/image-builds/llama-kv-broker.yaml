@@ -11,7 +11,7 @@
 # resolves single-file COPY sources from a mounted directory, and the broker has
 # three of them.
 #
-# OUTPUT: registry.ngoldack.de/llama-kv-broker:2 — the digest printed by buildctl
+# OUTPUT: registry.ngoldack.de/llama-kv-broker:3 — the digest printed by buildctl
 # is pinned in kubernetes/infrastructure/home/llmkube-models/kv-broker.yaml.
 #
 # RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag and
@@ -20,7 +20,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-llama-kv-broker-2
+  name: build-llama-kv-broker-3
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -45,13 +45,13 @@ spec:
             - build
             - --frontend=dockerfile.v0
             # The repo commit whose tree carries the broker sources + Dockerfile.
-            - --opt=context=https://github.com/ngoldack/homelab.git#d32a80eee33460ea10ab8b8f018bdc0776aeebb9
+            - --opt=context=https://github.com/ngoldack/homelab.git#2c26ba790e2f8696a9fc34adb87227c51748f5d0
             # The Dockerfile within that tree (lowercase, like the other in-repo
             # Dockerfiles under image-builds/).
             - --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile
             # Pushes to the cluster's own Zot (../registry/), same TLS setup as
             # the other images in this directory.
-            - --output=type=image,name=registry.ngoldack.de/llama-kv-broker:2,push=true
+            - --output=type=image,name=registry.ngoldack.de/llama-kv-broker:3,push=true
             # export and import MUST name the same ref, or nothing is reused.
             - --export-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache,mode=max
             - --import-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache

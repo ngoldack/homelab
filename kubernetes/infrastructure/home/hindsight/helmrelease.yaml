@@ -30,7 +30,12 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  timeout: 10m
+  # 20m, not 10m: a worker boots in 2-5 min (sentence_transformers model
+  # download), and two simultaneous worker restarts under the 10m budget
+  # marked the install/upgrade stalled — the remediation then DELETED the
+  # sts before the workers ever finished, and every retry churned the same
+  # way (2026-09-18 outage: repeated install-fail/delete cycles from 17:00).
+  timeout: 20m
   chart:
     spec:
       chart: hindsight

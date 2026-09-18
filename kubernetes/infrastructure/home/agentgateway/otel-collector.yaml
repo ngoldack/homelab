@@ -8,8 +8,9 @@
 # Its otlphttp sending_queue is backed by the filestorage extension on the
 # otel-collector-queue PVC (otel-collector-queue-pvc.yaml), so a Langfuse
 # outage or a collector restart spools spans on disk instead of dropping them.
-# That single-writer bbolt queue is why the release is pinned to one Recreate
-# replica.
+# That single-writer bbolt queue is why the release is pinned to one replica
+# with maxSurge: 0 — a rollout must never run two collectors on the same
+# ReadWriteOnce queue directory.
 # LANGFUSE_AUTH is base64("<public key>:<secret key>"), the Basic credential
 # for Langfuse's OTLP intake; the pair lives in langfuse-otel.sops.yaml
 # (stringData.PUBLIC_KEY / SECRET_KEY / AUTH), never in cleartext here.
@@ -53,12 +54,18 @@ spec:
       interval: 1h
   values:
     mode: deployment
-    # One replica, Recreate: the exporter's filestorage queue (bbolt) has exactly
-    # one writer, so a rollout must never overlap two collectors on the same
-    # ReadWriteOnce queue directory.
+    # One replica, and a rollout that never overlaps two collectors: the
+    # exporter's filestorage queue (bbolt) has exactly one writer, and the queue
+    # volume is ReadWriteOnce. maxSurge: 0 means the old pod is gone before the
+    # new one starts (plain `strategy: Recreate` cannot be used here: the live
+    # Deployment was created with a rollingUpdate block, which server-side apply
+    # would leave in place next to type: Recreate -> Forbidden).
     replicaCount: 1
     rollout:
-      strategy: Recreate
+      strategy: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
     image:
       repository: otel/opentelemetry-collector-contrib
     command:

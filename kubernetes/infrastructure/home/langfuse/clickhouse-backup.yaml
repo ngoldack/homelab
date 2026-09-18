@@ -167,7 +167,10 @@ spec:
               command: ["python3", "/scripts/prune.py"]
               env:
                 - name: BACKUP_PREFIX
-                  value: langfuse/clickhouse/
+                  # bucket + path — the script splits the first component off as
+                  # the bucket, so a bare "langfuse/clickhouse/" made it list a
+                  # nonexistent bucket and fail with AccessDenied.
+                  value: home-cnpg-backups-7cd4e906/langfuse/clickhouse/
                 - name: RETAIN_DAYS
                   value: "30"
                 - name: S3_ENDPOINT

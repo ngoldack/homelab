@@ -29,7 +29,7 @@ const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 // buildInfoVersion identifies the deployed broker build. It tracks the image tag
 // in the build Job (image-builds/llama-kv-broker.yaml); bump it together with the
 // tag so a scrape can tell builds apart.
-const buildInfoVersion = "3"
+const buildInfoVersion = "4"
 
 // The label values each family can produce. Keeping them as explicit lists is what
 // makes the pre-seeding and the deterministic render order possible.

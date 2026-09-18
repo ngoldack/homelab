@@ -72,6 +72,14 @@ const (
 	actionRestore = "restore"
 	actionSave    = "save"
 	actionErase   = "erase"
+
+	// KV_RESTORE_MODE selects when a slot file may be restored into the live
+	// slot: off (the shipped default) never restores, auto restores once per
+	// file after a detected server restart, always restores whenever the file
+	// exists.
+	restoreModeOff    = "off"
+	restoreModeAuto   = "auto"
+	restoreModeAlways = "always"
 )
 
 // hopHeaders are connection-scoped and must not be forwarded in either direction.
@@ -134,6 +142,8 @@ type config struct {
 	cacheTypeV string
 	flashAttn  string
 
+	restoreMode string
+
 	propsTTL time.Duration
 	ttl      time.Duration
 	capBytes int64
@@ -141,16 +151,27 @@ type config struct {
 
 func (c config) String() string {
 	return fmt.Sprintf(
-		"upstream=%s slot_path=%s listen=%s fingerprint=[image=%q model=%q ctx=%q cache_k=%q cache_v=%q flash_attn=%q] props_ttl=%s slot_ttl=%s cap_bytes=%d",
-		c.upstreamURL, c.slotPath, c.listenAddr, c.imageTag, c.modelRef, c.ctxSize,
-		c.cacheTypeK, c.cacheTypeV, c.flashAttn, c.propsTTL, c.ttl, c.capBytes)
+		"upstream=%s slot_path=%s listen=%s restore_mode=%s fingerprint=[image=%q model=%q ctx=%q cache_k=%q cache_v=%q flash_attn=%q] props_ttl=%s slot_ttl=%s cap_bytes=%d",
+		c.upstreamURL, c.slotPath, c.listenAddr, c.restoreMode, c.imageTag, c.modelRef,
+		c.ctxSize, c.cacheTypeK, c.cacheTypeV, c.flashAttn, c.propsTTL, c.ttl, c.capBytes)
 }
 
 func loadConfig() config {
+	// Strict on purpose: a typo in the Deployment must not quietly re-enable
+	// the restore path, so anything outside the three values falls back to off
+	// with a warning. Blank falls to the default without a warning.
+	mode := envStr("KV_RESTORE_MODE", restoreModeOff)
+	switch mode {
+	case restoreModeOff, restoreModeAuto, restoreModeAlways:
+	default:
+		log.Printf("warn: KV_RESTORE_MODE=%q is not one of off|auto|always, restoring stays off", mode)
+		mode = restoreModeOff
+	}
 	return config{
 		upstreamURL: strings.TrimRight(envStr("UPSTREAM_URL", ""), "/"),
 		slotPath:    envStr("SLOT_PATH", defaultSlotPath),
 		listenAddr:  envStr("LISTEN_ADDR", defaultListenAddr),
+		restoreMode: mode,
 		imageTag:    envStr("KV_IMAGE_TAG", ""),
 		modelRef:    envStr("KV_MODEL_REF", ""),
 		ctxSize:     envStr("KV_CTX_SIZE", ""),
@@ -434,40 +455,40 @@ func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
 	// erase or drop a save the server already produced state for.
 	opCtx := context.WithoutCancel(r.Context())
 
-	// Read the live slot's task counter before deciding to restore. Only a server
-	// restart (its counter went backwards) makes a file restore worth having; a
-	// probe failure changes no state and never blocks the request.
-	b.observeSlotTaskLocked(opCtx)
-
+	// The restore decision is mode-gated. off — the shipped default — runs no
+	// probe and touches no slot endpoint: the live measurement (restore is a
+	// destructive no-op on this build, 130 ms -> 44 s) is not worth paying on
+	// the serving path while the KV-layout experiment (--kv-unified /
+	// --ctx-checkpoints) that could make restores real stays pending. Saves
+	// keep running either way, so flipping the mode later starts from real
+	// slot files.
 	slotAbs := filepath.Join(b.cfg.slotPath, slot)
-	if !b.pendingRestore[slot] {
-		// The slot is warm: llama.cpp still holds this conversation's prefix in
-		// memory, so a restore would be inert *and* destroy that cache (measured
-		// on the P100: 130 ms -> 44 s of prompt processing). Leave it alone.
-		b.metrics.incRestore("skipped_warm")
-	} else {
-		// One shot: whichever way this goes, the obligation is discharged.
-		delete(b.pendingRestore, slot)
-		if _, err := os.Stat(slotAbs); err != nil {
-			// The file the restart marked is gone (swept, or never saved).
-			b.metrics.incRestore("skipped_no_file")
+	switch b.cfg.restoreMode {
+	case restoreModeOff:
+		// Nothing: no /slots probe, no restore, no erase. Saves below are the
+		// only slot traffic.
+	case restoreModeAuto:
+		// Read the live slot's task counter before deciding to restore. Only a
+		// server restart (its counter went backwards) makes a file restore
+		// worth having; a probe failure changes no state and never blocks the
+		// request.
+		b.observeSlotTaskLocked(opCtx)
+		if !b.pendingRestore[slot] {
+			// The slot is warm: llama.cpp still holds this conversation's
+			// prefix in memory, so a restore would be inert *and* destroy that
+			// cache (measured on the P100: 130 ms -> 44 s of prompt
+			// processing). Leave it alone.
+			b.metrics.incRestore("skipped_warm")
 		} else {
-			restoreStart := time.Now()
-			err := b.slotOp(opCtx, actionRestore, slot)
-			b.metrics.observeRestore(time.Since(restoreStart))
-			if err != nil {
-				b.metrics.incRestore("error")
-				log.Printf("warn: restore %s failed (%v), erasing the slot and serving cold", slot, err)
-				if e := b.slotOp(opCtx, actionErase, slot); e != nil {
-					log.Printf("warn: erase %s failed: %v", slot, e)
-				}
-				if e := os.Remove(slotAbs); e != nil && !os.IsNotExist(e) {
-					log.Printf("warn: remove %s failed: %v", slot, e)
-				}
-			} else {
-				b.metrics.incRestore("ok")
-				log.Printf("restore %s", slot)
-			}
+			b.restoreFromFileLocked(opCtx, slot, slotAbs)
+		}
+	case restoreModeAlways:
+		if _, err := os.Stat(slotAbs); err == nil {
+			b.restoreFromFileLocked(opCtx, slot, slotAbs)
+		} else {
+			// No file yet — nothing to restore over, and the live cache is the
+			// only one there is.
+			b.metrics.incRestore("skipped_no_file")
 		}
 	}
 
@@ -516,6 +537,32 @@ func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
 	}
 	b.metrics.incSave("ok")
 	log.Printf("save %s", slot)
+}
+
+// restoreFromFileLocked runs the one-shot restore obligation for a slot file
+// that is known to exist: restore it into the live slot, and on any failure
+// erase the live slot and unlink the file so the request serves cold from a
+// clean slate. It exists so the auto (restart-marked) and always (file-exists)
+// gates share one failure policy.
+func (b *broker) restoreFromFileLocked(ctx context.Context, slot, slotAbs string) {
+	// One shot: whichever way this goes, the obligation is discharged.
+	delete(b.pendingRestore, slot)
+	restoreStart := time.Now()
+	err := b.slotOp(ctx, actionRestore, slot)
+	b.metrics.observeRestore(time.Since(restoreStart))
+	if err != nil {
+		b.metrics.incRestore("error")
+		log.Printf("warn: restore %s failed (%v), erasing the slot and serving cold", slot, err)
+		if e := b.slotOp(ctx, actionErase, slot); e != nil {
+			log.Printf("warn: erase %s failed: %v", slot, e)
+		}
+		if e := os.Remove(slotAbs); e != nil && !os.IsNotExist(e) {
+			log.Printf("warn: remove %s failed: %v", slot, e)
+		}
+	} else {
+		b.metrics.incRestore("ok")
+		log.Printf("restore %s", slot)
+	}
 }
 
 // replayBody serves a buffered prefix and then the untouched remainder of the
@@ -743,7 +790,9 @@ type slotInfo struct {
 }
 
 // observeSlotTaskLocked polls the live slot list and turns a decreasing id_task
-// into a one-shot restore obligation for every slot file on disk.
+// into a one-shot restore obligation for every slot file on disk. It runs only
+// in restore mode auto — the /slots probe is skipped entirely in modes off and
+// always, so neither this call nor kv_broker_server_restarts_total moves there.
 //
 // WHY THE DECREASE IS THE SIGNAL — id_task only grows inside one server process,
 // and a restart resets it to a low value. Only a restart loses the in-memory cache
@@ -810,10 +859,13 @@ func (b *broker) observeSlotTaskLocked(ctx context.Context) {
 	b.lastSlotTaskID = *observed
 }
 
-// markRestorePendingLocked schedules one restore for every slot file the directory
-// currently holds, so each conversation pays for the restart once instead of
-// discovering it on its next request. A directory read failure leaves the existing
-// obligations alone rather than silently dropping them.
+// markRestorePendingLocked schedules one restore for every slot file the
+// directory currently holds, so each conversation pays for the restart once
+// instead of discovering it on its next request. A directory read failure
+// leaves the existing obligations alone rather than silently dropping them.
+// Restart detection itself only runs in restore mode auto; the comment block
+// above the mode switch in transactional records why the shipped default is
+// off.
 func (b *broker) markRestorePendingLocked() {
 	entries, err := os.ReadDir(b.cfg.slotPath)
 	if err != nil {

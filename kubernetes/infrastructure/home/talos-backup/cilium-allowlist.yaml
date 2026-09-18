@@ -65,6 +65,31 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
+    # The Talos API (apid, TCP 50000) — the etcd-snapshot path itself, and the
+    # one egress this namespace needs that is not HTTP(S). Two addressing
+    # forms for the same reason as the 443/6443 pair above: the ClusterIP
+    # (default/talos, provider=talos.dev, endpoint slice talos-ipv4 ->
+    # 10.30.0.10:50000) is what the talosconfig dials, while Cilium evaluates
+    # the post-service-translation backend address.
+    #
+    # Why this rule exists at all: the 2026-09-17 zero-trust rollout listed
+    # 443/6443 for the apiserver forms but not 50000, and the 2026-09-18
+    # 01:17 UTC backup run then failed 95s after starting with
+    #   failed to take etcd snapshot: ... dial tcp 172.21.96.111:50000:
+    #   i/o timeout
+    # (job talos-backup-29828237, BackoffLimitExceeded; reproduced by hand
+    # before this fix). The cluster had no fresh etcd backup until the
+    # TalosBackupStale alert in ../monitoring/rules-platform.yaml surfaced it.
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "50000", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "50000", protocol: TCP}
     # The Hetzner S3-compatible object storage backend.
     - toEntities:
         - world

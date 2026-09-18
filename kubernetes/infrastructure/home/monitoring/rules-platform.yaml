@@ -430,3 +430,119 @@ spec:
               VMProbe object (probe.yaml), the vmagent scrape path or the
               Cilium allowlist for them is broken. While this lasts, the
               public edge has no independent reachability check.
+---
+# Node pressure and container churn — added immediately after the 2026-09-18
+# control-plane incident, because it was exactly the gap this pack left: the
+# sole control plane (talos-bno-yij, a 6 GiB VM) exhausted its memory, entered
+# a kernel OOM-kill loop (517 "OOM controller triggered" lines in ~3 minutes of
+# Talos dmesg, victim cgroup = the tetragon pod, which had restarted 84 times)
+# and lost both its Talos API and kube-apiserver — every kubectl and Flux
+# operation failed until the node was hard-reset from the Proxmox host.
+# Nothing alerted: NodeNotReady never fired because kubelet kept reporting
+# Ready, and no memory signal existed at all. Live series behind these rules,
+# captured during the recovery:
+#   node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes — 4 series
+#     (one per node, node-exporter); the control-plane node sat near zero
+#     available during the incident, healthy values are 0.49-0.79. The
+#     pressure is a growth curve, not a spike: kube-apiserver's working set
+#     went 0.95 -> 2.05 GiB in ~15 minutes (kubelet stats API).
+#   kube_node_status_condition{condition="MemoryPressure"} — 12 series (4
+#     nodes x 3 status values), all 0 while healthy.
+#   kube_pod_container_status_restarts_total — 28 containers across 11
+#     namespaces had restarted >3 times in the preceding hour at capture time
+#     (cilium-envoy 9, cilium-operator 8, cert-manager-cainjector 8,
+#     agent-sandbox-controller 8, agentgateway-controller 8, the kyverno
+#     controllers 4-7, truenas-csi sidecars 4, ...) — ContainerRestartLoop is
+#     therefore expected to fire on the cluster's real current state.
+# The Proxmox HOST's memory (93.4/96 GiB committed — the tightest resource
+# there is) still has no series: see the homelab-infra-metrics note at the top
+# of this file. Until that push path is configured, these node-level rules are
+# the closest proxy available.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: node-pressure
+  namespace: monitoring
+spec:
+  groups:
+    - name: node-pressure
+      rules:
+        - alert: NodeMemoryPressure
+          # kubelet's own verdict, node-labelled. Fires only once the kernel
+          # is already reclaiming hard; NodeMemoryAvailableLow is the earlier
+          # warning.
+          expr: kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} reports MemoryPressure"
+            description: >-
+              kubelet on {{ $labels.node }} has been reporting
+              MemoryPressure=True for 10 minutes: the node is reclaiming
+              memory under duress. On 2026-09-18 the control-plane node
+              reached this state and then lost both its Talos API and
+              kube-apiserver to an OOM-kill loop, so treat it as an
+              imminent-loss signal, not a capacity note. Find the consumer
+              with `kubectl describe node {{ $labels.node }}` plus the
+              kubelet stats API (`/api/v1/nodes/{{ $labels.node }}/proxy/
+              stats/summary`) — on the control plane, kube-apiserver itself
+              grew past 2 GiB during the incident.
+        - alert: NodeMemoryAvailableLow
+          # Rests on: node_memory_MemAvailable_bytes /
+          # node_memory_MemTotal_bytes (node-exporter, 4 series; healthy
+          # values observed 0.49-0.79). 15% for 15m leaves room to act before
+          # kubelet starts evicting. The instance label is the node-exporter
+          # endpoint (<node-IP>:9100 — the control plane is 10.30.0.10:9100;
+          # `kubectl get nodes -o wide` maps the rest).
+          expr: >-
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} has under 15% memory available"
+            description: >-
+              {{ $labels.instance }} has kept under 15% of its memory
+              available for 15 minutes ({{ $value | humanizePercentage }}).
+              Sustained low availability is what precedes the eviction and
+              OOM-kill spiral seen on the control plane on 2026-09-18 —
+              identify the consumer before the kernel does.
+        - alert: NodeMemoryCriticalLow
+          expr: >-
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.instance }} is nearly out of memory"
+            description: >-
+              Under 5% of memory has been available on {{ $labels.instance }}
+              for 5 minutes ({{ $value | humanizePercentage }}). The kernel
+              OOM killer or Talos's OOM controller will start killing cgroups
+              — on 2026-09-18 that took the control plane's API endpoints
+              down for ~15 minutes. Act deliberately (drain the largest pod,
+              or reboot the node) instead of letting the allocator decide.
+        - alert: ContainerRestartLoop
+          # Rests on: increase(kube_pod_container_status_restarts_total[30m]);
+          # see the file header for the live capture. 3 restarts in 30m is a
+          # genuine crash loop — a single restart from a node reboot or an
+          # image pull does not reach it.
+          expr: >-
+            increase(kube_pod_container_status_restarts_total[30m]) > 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }}:{{ $labels.container }} is restarting repeatedly"
+            description: >-
+              Container {{ $labels.container }} of
+              {{ $labels.namespace }}/{{ $labels.pod }} restarted
+              {{ $value | humanize }} times in the last 30 minutes.
+              Crash-looping containers both hide real failures and are
+              themselves a symptom of node pressure. Read
+              `kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c
+              {{ $labels.container }} --previous --tail=50` and the last
+              termination reason before raising any limit: OOMKilled,
+              liveness-probe failure and a genuine crash each need a
+              different fix.

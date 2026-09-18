@@ -49,11 +49,15 @@ spec:
   install:
     createNamespace: false
     remediation:
-      # 0: a failed install wait must NOT trigger remediation (which
-      # deleted the worker sts mid-boot and caused the 17:00-19:00 churn).
-      # A failed install leaves the resources running; the next reconcile
-      # upgrades them instead of reinstalling from scratch.
-      retries: 0
+      # 3, not 0: a failed install wait must not uninstall the release
+      # (deleting the sts mid-boot was the 17:00-19:00 churn engine, and
+      # the uninstall is what the final failed retry would do). But 0 also
+      # marks the FIRST failed wait terminal — it latched Stalled/
+      # RetriesExceeded at 18:17 and blocked the subsequent installs that
+      # empty release storage should have allowed. 3 attempts lets helm
+      # re-evaluate a transient stall; the new 20m timeout (chart boot
+      # worst case) is the actual fix for the mid-boot failure.
+      retries: 3
   upgrade:
     remediation:
       # Once the release latches "failed" (a transient sts-health blip marked
@@ -173,6 +177,18 @@ spec:
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
         # Tasks claimed per poll cycle to match 2 replica balance.
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
+        # Memory bounds, sized against the chart's own documented model:
+        # a retain may hold RETAIN_MEMORY_BUDGET_MB (default 128) of
+        # extracted-but-unwritten state, and the docs say to budget it for
+        # WORKER_MAX_SLOTS concurrent retains. At the default 10 slots that
+        # is ~1.3GB of retain buffers on top of the base RSS + local models
+        # — the 2026-09-18 backlog drain OOM-killed both workers (exit 137,
+        # ~5s after the polling loop started, verification already passed)
+        # even at a 5Gi limit. 4 slots halves the concurrent retain buffers;
+        # the 96MB budget trims each. Throughput is unaffected in practice:
+        # the poller's work is LLM-round-trip bound, not slot bound.
+        HINDSIGHT_API_WORKER_MAX_SLOTS: "4"
+        HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
         # Audit logging enabled for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"

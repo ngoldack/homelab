@@ -128,19 +128,31 @@ spec:
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
       replicaCount: 2
-      # Memory raised twice on 2026-09-18: first to 3Gi (OOM during
-      # sentence_transformers load), then to 5Gi — after the outage backlog
-      # re-fired, each worker claimed up to 20 retained tasks per poll and
-      # OOM-killed (exit 137) ~5s after starting the polling loop, with
-      # connection verification already passed. The api (4Gi) drains the
-      # same queue without OOM; 5Gi covers the burst. cpu stays 1000m.
+      # Memory raised three times on 2026-09-18. Evidence, not estimation —
+      # live VmRSS of a booting worker, sampled every 2s:
+      #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)
+      #   then 1.93GB -> 3.78GB -> OOMKilled (5Gi) within 8s of the polling
+      #   loop starting, every restart, LLM verification already passed.
+      # So base RSS + local models is only ~300MB and is NOT the driver; the
+      # claim path adds ~3.5GB in seconds. Mechanism, read from the shipped
+      # source: claim_tasks selects `task_payload` per slot, then each
+      # claimed retain folds up to DEFAULT_MAX_FOLD_PEERS=16 peers, which
+      # fetch_foldable_retain_peers also loads WITH task_payload. The fold's
+      # only bound is a TOKEN budget (RETAIN_BATCH_TOKENS, 10k ~ 40KB text),
+      # applied after the JSON is already in memory; RETAIN_MEMORY_BUDGET_MB
+      # covers extraction state (memory_budget.py), not claim hydration.
+      # Nothing bounds bytes at claim time. The backlog holds retains of
+      # ~20MB each (161MB total over 9 rows), and a fold of those parses to
+      # GBs. 9Gi absorbs one cycle; nodes have the headroom (48Gi allocatable
+      # on talos-919-w9u). MAX_SLOTS=4 halves the cycle's claim width.
+      # The durable fix is upstream: producers submit 20MB retains.
       resources:
         requests:
           cpu: 200m
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: 1000m
-          memory: 5Gi
+          memory: 9Gi
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact
@@ -177,16 +189,12 @@ spec:
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
         # Tasks claimed per poll cycle to match 2 replica balance.
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
-        # Memory bounds, sized against the chart's own documented model:
-        # a retain may hold RETAIN_MEMORY_BUDGET_MB (default 128) of
-        # extracted-but-unwritten state, and the docs say to budget it for
-        # WORKER_MAX_SLOTS concurrent retains. At the default 10 slots that
-        # is ~1.3GB of retain buffers on top of the base RSS + local models
-        # — the 2026-09-18 backlog drain OOM-killed both workers (exit 137,
-        # ~5s after the polling loop started, verification already passed)
-        # even at a 5Gi limit. 4 slots halves the concurrent retain buffers;
-        # the 96MB budget trims each. Throughput is unaffected in practice:
-        # the poller's work is LLM-round-trip bound, not slot bound.
+        # Retain/claim bounds. The claim query selects `task_payload` per
+        # slot and each claimed retain folds up to 16 peers, also fetching
+        # `task_payload` — no byte bound at claim time (see the memory note
+        # on the worker resources above). MAX_SLOTS=4 narrows the cycle's
+        # claim width; RETAIN_MEMORY_BUDGET_MB=96 bounds extraction state
+        # (memory_budget.py), which is a separate pool.
         HINDSIGHT_API_WORKER_MAX_SLOTS: "4"
         HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
         # Audit logging enabled for the worker too.

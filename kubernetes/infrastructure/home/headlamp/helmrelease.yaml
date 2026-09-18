@@ -59,7 +59,12 @@ spec:
         callbackURL: https://headlamp.ngoldack.de/oidc-callback
         usePKCE: true
         validatorClientID: headlamp-oidc
-        validatorIssuerURL: https://authentik.ngoldack.de/application/o/headlamp-oidc
+        # Application-slug path, not the client id: …/application/o/headlamp-oidc/
+        # 404s (the id_token's iss claim carries /application/o/headlamp/), and
+        # the apiserver's --oidc-issuer-url in tofu/home/talos.tf must match the
+        # same string. The Secret's OIDC_VALIDATOR_ISSUER_URL already carries
+        # the correct value; this keeps the chart value from contradicting it.
+        validatorIssuerURL: https://authentik.ngoldack.de/application/o/headlamp
     pluginsManager:
       enabled: true
       baseImage: node:lts-alpine

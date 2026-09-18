@@ -1,0 +1,31 @@
+# Cluster access for OIDC identities that came through authentik.
+#
+# The kube-apiserver's OIDC flags live in tofu/home/talos.tf
+# (cluster.apiServer.extraArgs): issuer …/application/o/headlamp/,
+# client-id headlamp-oidc, username claim preferred_username, groups claim
+# groups, and the "oidc:" prefixes on both. With the prefixes set, an
+# authentik group named `akadmin` arrives as `oidc:akadmin`, which is what
+# this binding grants.
+#
+# Why cluster-admin: headlamp is the cluster dashboard and the group's only
+# member is the owner's superuser (akadmin), who already holds equivalent
+# access through kubeconfig. Narrow it to a read-only ClusterRole here if the
+# dashboard should ever be view-only — the binding is the single place that
+# decides.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oidc-authentik-akadmin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: oidc:akadmin
+  # The built-in group the bootstrap superuser also belongs to, in case the
+  # token's groups claim lists only that one.
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: oidc:authentik Admins

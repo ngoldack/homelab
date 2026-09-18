@@ -127,6 +127,30 @@ data "talos_machine_configuration" "controlplane" {
           proxy = { disabled = true }
         }
       }),
+      # OIDC (headlamp): the browser flow hands headlamp an id_token from
+      # authentik, and headlamp presents that token to the kube-apiserver —
+      # which must therefore trust the same issuer. Without these flags every
+      # login ends in "The cluster did not accept your sign-in. Its API server
+      # may not trust this OIDC provider". The issuer is the provider's
+      # APPLICATION slug path (…/application/o/headlamp/), not the client id:
+      # …/application/o/headlamp-oidc/ 404s, which is what the ID token's iss
+      # claim carries. Prefixes keep OIDC identities distinct from any local
+      # user of the same name; the matching ClusterRoleBinding for oidc:akadmin
+      # lives in kubernetes/infrastructure/home/authentik/cluster-oidc-rbac.yaml.
+      yamlencode({
+        cluster = {
+          apiServer = {
+            extraArgs = {
+              "oidc-issuer-url"      = "https://authentik.ngoldack.de/application/o/headlamp/"
+              "oidc-client-id"       = "headlamp-oidc"
+              "oidc-username-claim"  = "preferred_username"
+              "oidc-groups-claim"    = "groups"
+              "oidc-username-prefix" = "oidc:"
+              "oidc-groups-prefix"   = "oidc:"
+            }
+          }
+        }
+      }),
       yamlencode({
         machine = {
           install = {

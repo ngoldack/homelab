@@ -13,26 +13,45 @@
 # mixed-arch (amd64 home nodes, arm64 Hetzner worker), so the index digest is
 # the correct pin; the runtime picks the matching manifest.
 #
-# Config: the image's built-in /etc/blackbox_exporter/config.yml (module
-# http_2xx: follows redirects, ip4 preferred) — deliberately no ConfigMap, so
-# there is no config file to drift or to reload; the probe targets live in
-# probe.yaml where the alert they feed is documented.
+# Config: a module of our own rather than the image's built-in one, and the
+# reason is a live measurement, not taste. With the built-in `http_2xx` module
+# the probe reported both public hosts as DOWN while the edge was demonstrably
+# healthy: blackbox logged
+#   Invalid HTTP response status code, wanted 2xx ... status_code=403
+# with probe_dns_lookup_time_seconds = 0.004-0.010 and a valid certificate
+# (probe_ssl_earliest_cert_expiry = 1797399621), i.e. DNS, TCP, TLS and the
+# Gateway all answered — the 403 is the identity layer (authentik outpost /
+# edge auth) correctly refusing an unauthenticated request. `http_2xx` on an
+# SSO-protected UI is therefore a permanent false positive. `http_edge` keeps
+# the meaningful failure modes (DNS, connect, TLS, 5xx, timeouts) fatal while
+# accepting the statuses an edge legitimately returns to a caller with no
+# session: 2xx, 3xx, 401, 403.
 #
-# PSA restricted / Kyverno (same shape as github-runner/deployment.yaml):
-# runAsNonRoot with the image's own nobody uid 65534, seccomp RuntimeDefault,
-# no privilege escalation, ALL capabilities dropped, readOnlyRootFilesystem
-# (the exporter writes nothing to disk), and no ServiceAccount token (it
-# makes no API calls). Health endpoints verified against the pinned source
-# (prometheus/blackbox_exporter v0.28.0 main.go): /-/healthy exists;
-# /-/ready does NOT — both probes therefore use /-/healthy.
-#
+# The ConfigMap is mounted at the image's default path, so the exporter needs
+# no extra arguments.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter-config
+  namespace: monitoring
+data:
+  blackbox.yml: |
+    modules:
+      http_edge:
+        prober: http
+        timeout: 10s
+        http:
+          follow_redirects: true
+          preferred_ip_protocol: ip4
+          valid_status_codes: [200, 201, 204, 301, 302, 303, 307, 308, 401, 403]
+---
 # Network policy: kept beside the workload because it is part of making the
 # probe work. monitoring-default-deny (cilium-default-deny.yaml) plus
 # monitoring-intra-namespace-allow (security-baseline) already allow the
 # vmagent -> :9115 scrape and DNS, so NO port needs adding to
 # monitoring/cilium-allowlist.yaml; what is missing is kubelet health probes
 # and the exporter's own egress to the public HTTPS targets, and both are
-# added here.
+# added here (as the CNP at the end of this file).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,6 +67,14 @@ spec:
       labels:
         app.kubernetes.io/name: blackbox-exporter
     spec:
+      # PSA restricted / Kyverno (same shape as github-runner/deployment.yaml):
+      # runAsNonRoot with the image's own nobody uid 65534, seccomp
+      # RuntimeDefault, no privilege escalation, ALL capabilities dropped,
+      # readOnlyRootFilesystem (the exporter writes nothing to disk), and no
+      # ServiceAccount token (it makes no API calls). Health endpoints
+      # verified against the pinned source (prometheus/blackbox_exporter
+      # v0.28.0 main.go): /-/healthy exists; /-/ready does NOT — both probes
+      # therefore use /-/healthy.
       automountServiceAccountToken: false
       # Home site, like the rest of the monitoring stack: vmagent runs there,
       # so the scrape stays in one failure domain, and the probe measures the
@@ -86,6 +113,15 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox_exporter/config.yml
+              subPath: blackbox.yml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: blackbox-exporter-config
 ---
 # ClusterIP only: the exporter is reached by the in-cluster vmagent and by
 # nothing else, so it is not exposed through the Gateway or a LoadBalancer.

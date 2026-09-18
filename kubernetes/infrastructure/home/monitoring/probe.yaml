@@ -49,9 +49,13 @@ metadata:
   namespace: monitoring
 spec:
   interval: 30s
-  # The blackbox exporter's default module; explicit so a future config
-  # change cannot silently re-point the probes at another prober module.
-  module: http_2xx
+  # Our own edge module (defined in blackbox-exporter.yaml), not the image's
+  # http_2xx: the edge answers 403 to an unauthenticated caller while being
+  # perfectly healthy (measured live — DNS 10 ms, valid TLS, status 403 from
+  # the identity layer), so http_2xx would report both targets as down
+  # forever. http_edge keeps DNS/connect/TLS/5xx fatal and accepts
+  # 2xx/3xx/401/403.
+  module: http_edge
   vmProberSpec:
     url: http://blackbox-exporter.monitoring.svc.cluster.local:9115
   targets:

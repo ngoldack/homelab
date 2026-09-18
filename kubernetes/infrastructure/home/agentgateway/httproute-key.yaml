@@ -30,3 +30,13 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: openrouter-union-alpha
+    # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model
+    # (pinned tier, same backend the JWT path uses under /v1/synthetic-gpt-oss).
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/key/synthetic-gpt-oss
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-hf-openai-gpt-oss-120b

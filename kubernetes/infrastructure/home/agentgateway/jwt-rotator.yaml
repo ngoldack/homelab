@@ -1,0 +1,305 @@
+# In-cluster rotation of the shared aigateway-oidc client_credentials JWT.
+#
+# Both in-cluster consumers that cannot mint their own tokens read one 30-day
+# token (authentik provider: access_token_validity hours=720): hermes
+# (hermes-secret/OPENAI_API_KEY) and hindsight
+# (hindsight-env/HINDSIGHT_API_LLM_API_KEY). Without rotation both stop
+# authenticating against the agentgateway at expiry — simultaneously, since
+# they share the token.
+#
+# Ownership: the JWT keys are being REMOVED from the sops sources in git (the
+# same PR that adds this CronJob), so kustomize-controller no longer owns
+# those fields and never re-applies or prunes them. This CronJob claims the
+# fields with a patch and is their sole owner from then on. Flux keeps
+# reconciling the surrounding secret object (name/other keys) untouched.
+#
+# Flow (python script, run on the 1st and 15th at 03:00 — 2x slack vs the
+# 30-day TTL, so one missed run is not an outage):
+#   1. Read client_id/secret from authentik's in-cluster secret
+#      (authentik-oidc-aigateway, written by the blueprint seed).
+#   2. Mint: client_credentials grant against the SHARED token endpoint
+#      /application/o/token/ (per-provider issuer mode keeps one global
+#      token path; the per-app path 404s).
+#   3. Verify BEFORE writing: JWT shape, aud=aigateway-oidc claim, then a
+#      real completion POST through the gateway. A bad mint never replaces
+#      a working credential — the old token stays valid until its own exp.
+#   4. Patch both secrets, rollout-restart the three consumers, wait for
+#      the rollouts. Full-token comparison guards the restart gate: every
+#      JWT from the same provider shares the eyJhbG header, so a prefix
+#      match would false-positive on the stale value.
+#
+# No kubectl in the image: the script talks to the API server directly via
+# urllib + the pod's service-account token/CA (k8sclient.py in this
+# ConfigMap). Runs in the agentgateway namespace: same-namespace gateway
+# ingress, egress to authentik (JWT JWKS fetch rule, ports 9000/9443) and
+# world 443 already exist — the mint's HTTPS call and the gateway probe
+# need no new Cilium policy. RBAC: one Role scoped to get/patch the two
+# secrets plus rollout on the three controllers (rbac.yaml).
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aigateway-jwt-rotator
+  namespace: agentgateway
+spec:
+  schedule: "0 3 1,15 * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # A missed window (node down mid-rotation) must still run when noticed.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: aigateway-jwt-rotator
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: rotator
+              # Digest-pinned per repo convention (resolved from
+              # docker.io/library/python:3.12-alpine, 2026-09-18).
+              image: docker.io/library/python@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/rotator/rotate.py"]
+              env:
+                - name: TOKEN_URL
+                  value: https://authentik.ngoldack.de/application/o/token/
+                - name: GATEWAY_BASE
+                  value: http://agentgateway.agentgateway.svc.cluster.local
+                - name: HERMES_SECRET
+                  value: hermes/hermes-secret/OPENAI_API_KEY
+                - name: HINDSIGHT_SECRET
+                  value: hindsight/hindsight-env/HINDSIGHT_API_LLM_API_KEY
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /rotator
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: aigateway-jwt-rotator-script
+            - name: tmp
+              emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aigateway-jwt-rotator-script
+  namespace: agentgateway
+data:
+  rotate.py: |
+    #!/usr/bin/env python3
+    """In-cluster rotation of the shared aigateway-oidc JWT. See cronjob.yaml."""
+    import sys
+    from k8sclient import K8s
+    from rotatecore import main
+
+    if __name__ == "__main__":
+        try:
+            main()
+        except Exception as e:
+            print(f"ERROR: {type(e).__name__}: {e}", flush=True)
+            sys.exit(1)
+  k8sclient.py: |
+    """Minimal Kubernetes API client: urllib + the pod's SA token/CA."""
+    import base64, json, os, ssl, urllib.request, urllib.error
+
+    HOST = os.environ.get("KUBERNETES_SERVICE_HOST")
+    PORT = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
+    TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+    class K8s:
+        def __init__(self):
+            self.token = open(TOKEN_PATH).read().strip()
+            self.ca = ssl.create_default_context(cafile=CA_PATH)
+
+        def request(self, method, path, body=None, content_type="application/merge-patch+json"):
+            url = f"https://{HOST}:{PORT}{path}"
+            data = json.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request(url, data=data, method=method)
+            req.add_header("Authorization", f"Bearer {self.token}")
+            if data is not None:
+                req.add_header("Content-Type", content_type)
+            req.add_header("Accept", "application/json")
+            try:
+                with urllib.request.urlopen(req, context=self.ca, timeout=30) as r:
+                    return json.load(r) if r.status != 204 else {}
+            except urllib.error.HTTPError as e:
+                raise RuntimeError(f"K8s API {method} {path}: HTTP {e.code}: {e.read().decode()[:200]}")
+
+        # --- convenience wrappers ---
+        def get_secret(self, ns, name):
+            s = self.request("GET", f"/api/v1/namespaces/{ns}/secrets/{name}")
+            return {k: base64.b64decode(v).decode() for k, v in s["data"].items()}
+
+        def patch_secret(self, ns, name, key, value):
+            self.request("PATCH", f"/api/v1/namespaces/{ns}/secrets/{name}",
+                         body={"stringData": {key: value}})
+
+        def patch_deployment(self, ns, name, spec):
+            self.request("PATCH",
+                         f"/apis/apps/v1/namespaces/{ns}/deployments/{name}",
+                         body=spec)
+
+        def patch_statefulset(self, ns, name, spec):
+            self.request("PATCH",
+                         f"/apis/apps/v1/namespaces/{ns}/statefulsets/{name}",
+                         body=spec)
+
+        def rollout_status(self, kind, ns, name, timeout_s=300):
+            # Poll observedGeneration vs generation + replica readiness —
+            # the simplest reliable check without subresource watchers.
+            plural = {"deployment": "deployments", "statefulset": "statefulsets"}[kind]
+            path = f"/apis/apps/v1/namespaces/{ns}/{plural}/{name}"
+            deadline = time.time() + timeout_s
+            while time.time() < deadline:
+                obj = self.request("GET", path)
+                status = obj.get("status", {})
+                gen = obj.get("metadata", {}).get("generation", 0)
+                observed = status.get("observedGeneration", 0)
+                if gen == observed:
+                    if kind == "deployment":
+                        ready = status.get("readyReplicas", 0)
+                        want = obj.get("spec", {}).get("replicas", 1)
+                        if ready >= want:
+                            return
+                    else:  # statefulset
+                        ready = status.get("readyReplicas", 0)
+                        current = status.get("currentReplicas", 0)
+                        updated = status.get("updatedReplicas", 0)
+                        want = obj.get("spec", {}).get("replicas", 1)
+                        if ready >= want and current >= want and updated >= want:
+                            return
+                time.sleep(5)
+            raise RuntimeError(f"rollout of {kind}/{ns}/{name} did not complete in {timeout_s}s")
+  rotatecore.py: |
+    """Rotation flow shared by the entrypoint. See cronjob.yaml header."""
+    import base64, json, os, time, urllib.request, urllib.parse
+
+    from k8sclient import K8s
+
+    TOKEN_URL = os.environ["TOKEN_URL"]
+    GATEWAY_BASE = os.environ["GATEWAY_BASE"]
+    HERMES_SECRET = os.environ["HERMES_SECRET"].strip()   # ns/name/key
+    HINDSIGHT_SECRET = os.environ["HINDSIGHT_SECRET"].strip()
+
+    def log(msg):
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+    def mint(client_id, client_secret):
+        data = urllib.parse.urlencode({
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": "openid",
+        }).encode()
+        req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)["access_token"]
+
+    def jwt_payload(token):
+        p = token.split(".")[1]
+        p += "=" * ((4 - len(p) % 4) % 4)
+        return json.loads(base64.urlsafe_b64decode(p))
+
+    def verify_via_gateway(token):
+        data = json.dumps({
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+        }).encode()
+        req = urllib.request.Request(
+            f"{GATEWAY_BASE}/v1/synthetic-small/chat/completions",
+            data=data, method="POST",
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+
+    def split_target(target):
+        ns, rest = target.split("/", 1)
+        name, key = rest.split("/", 1)
+        return ns, name, key
+
+    def rollout_restart(k8s, ns, kind, name):
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        annotation = {"spec": {"template": {"metadata": {"annotations": {
+            "aigateway.ngoldack.de/jwt-rotated-at": now}}}}}
+        if kind == "deployment":
+            k8s.patch_deployment(ns, name, annotation)
+        else:
+            k8s.patch_statefulset(ns, name, annotation)
+
+    def main():
+        k8s = K8s()
+        # 1. Client credentials from the in-cluster secret the seed wrote.
+        creds = k8s.get_secret("authentik", "authentik-oidc-aigateway")
+        client_id = creds["client_id"]
+        client_secret = creds["client_secret"]
+        log("client credentials read from authentik-oidc-aigateway")
+
+        # 2. Mint + structural verification.
+        token = mint(client_id, client_secret)
+        if token.count(".") != 2 or not token.startswith("eyJ"):
+            raise RuntimeError("minted token is not a JWT")
+        payload = jwt_payload(token)
+        if payload.get("aud") != "aigateway-oidc":
+            raise RuntimeError(f"token aud is {payload.get('aud')!r}, "
+                               "expected aigateway-oidc")
+        log(f"minted token, aud ok, exp={payload.get('exp')}")
+
+        # 3. Verify through the gateway BEFORE touching the secrets.
+        status = verify_via_gateway(token)
+        if status != 200:
+            raise RuntimeError(f"gateway verification failed: HTTP {status}")
+        log("gateway verification passed (HTTP 200)")
+
+        # 4. Patch both secrets.
+        for target in (HERMES_SECRET, HINDSIGHT_SECRET):
+            ns, name, key = split_target(target)
+            k8s.patch_secret(ns, name, key, token)
+        log("both secrets patched")
+
+        # 5. Confirm the API surface carries the new token before restarting
+        #    (a restart before the patch lands would capture the old value).
+        for target in (HERMES_SECRET, HINDSIGHT_SECRET):
+            ns, name, key = split_target(target)
+            for attempt in range(30):
+                if k8s.get_secret(ns, name)[key] == token:
+                    break
+                time.sleep(2)
+            else:
+                raise RuntimeError(f"secret {ns}/{name} never carried the new token")
+        log("secrets confirmed in-cluster; restarting consumers")
+
+        # 6. Rollout-restart the three consumers and wait for each.
+        rollout_restart(k8s, "hermes", "statefulset", "hermes")
+        rollout_restart(k8s, "hindsight", "deployment", "hindsight-api")
+        rollout_restart(k8s, "hindsight", "statefulset", "hindsight-worker")
+        k8s.rollout_status("statefulset", "hermes", "hermes")
+        k8s.rollout_status("deployment", "hindsight", "hindsight-api")
+        k8s.rollout_status("statefulset", "hindsight", "hindsight-worker")
+        log("rotation complete")

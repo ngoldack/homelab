@@ -89,11 +89,11 @@ spec:
         HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
         HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
         # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
-        # expiry to rotate. The Authorization header stays Bearer <key> — the
-        # SDK requires the shape — and the gateway policy reads the key from
-        # X-Api-Key (policy-apikey.yaml), so both are the same value.
-        HINDSIGHT_API_LLM_DEFAULT_HEADERS: >-
-          {"X-Api-Key": "6909b13b725645222c94e8da5b0075a88d8d910e867965d8bbdbeed35049c394"}
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
         # Reasoning LOW + STRICT_SCHEMA so extraction is fast and JSON-only.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
@@ -151,11 +151,11 @@ spec:
         HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
         HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
         # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
-        # expiry to rotate. The Authorization header stays Bearer <key> — the
-        # SDK requires the shape — and the gateway policy reads the key from
-        # X-Api-Key (policy-apikey.yaml), so both are the same value.
-        HINDSIGHT_API_LLM_DEFAULT_HEADERS: >-
-          {"X-Api-Key": "6909b13b725645222c94e8da5b0075a88d8d910e867965d8bbdbeed35049c394"}
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"

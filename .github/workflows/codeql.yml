@@ -1,0 +1,55 @@
+# CodeQL code scanning (advanced setup).
+#
+# The "main - protected" ruleset requires CodeQL results before a pull request
+# may merge, so this workflow is what satisfies that requirement. It analyses
+# the languages this repo actually contains: the GitHub Actions workflows
+# themselves, the Go modules under kubernetes/infrastructure/home/image-builds/,
+# and the helper Python in hack/.
+#
+# The default template from GitHub's "advanced setup" UI is what was checked in
+# first; this is the same matrix with the boilerplate comments trimmed so
+# `task lint:yaml` (yamllint, 120 columns) passes.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "43 3 * * 3"
+
+permissions:
+  contents: read
+  # Required by github/codeql-action to upload results.
+  security-events: write
+  # Required to fetch internal or private CodeQL packs.
+  packages: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: go
+            build-mode: autobuild
+          - language: python
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

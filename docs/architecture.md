@@ -224,9 +224,23 @@ service-account-token read monitor for `hermes-sandbox`) was removed on
 Guest-level syscall visibility for
 Kata workloads is therefore **not** covered by the current sensor; the host-side
 Kata/QEMU escape risk and the mixed-use sandbox node are documented in
-[`docs/hermes-agent-sandbox.md`](hermes-agent-sandbox.md) ("Capacity"). A
-guest-Tetragon prototype is planned but not implemented — treat "the sandbox is
-observed at runtime" as `[unverified]` until it lands.
+[`docs/hermes-agent-sandbox.md`](hermes-agent-sandbox.md) ("Capacity").
+
+**The guest-Tetragon prototype is not viable with the shipped Kata kernel.**
+The plan gated it on the guest having BTF (any BPF CO-RE sensor needs
+`/sys/kernel/btf/vmlinux`). The Kata kernel this node actually boots was
+inspected directly — `talosctl -n 10.30.0.22 read
+/usr/local/share/kata-containers/vmlinux.container` (the path named by
+`configuration.toml`'s `kernel =`) — and the 40.6 MB ELF contains **no `.BTF`
+section name and no BTF magic**, i.e. it was built without
+`CONFIG_DEBUG_INFO_BTF`. It also carries no embedded kernel config
+(`IKCFG_ST` absent), so the option cannot be re-read from the image. The
+prototype therefore aborts per its own contingency rather than proceeding to a
+sidecar that could never load a CO-RE program; a future attempt needs a Kata
+kernel with BTF enabled (a rebuilt guest kernel, i.e. an image change on the
+node), and until then "the sandbox is observed at runtime" stays
+`[unverified]` — host Tetragon remains the sensor of record and sees the VMM,
+not the guest.
 
 Other visibility limits worth knowing before trusting a dashboard: Tetragon's
 tracing policies are `Post`-only (nothing blocks —

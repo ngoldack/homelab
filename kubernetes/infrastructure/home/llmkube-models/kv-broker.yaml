@@ -6,6 +6,22 @@
 # of at the raw serving Service, because with `parallelSlots: 1` the slot id is always 0
 # and the restore/save window must be serialized cluster-wide.
 #
+# METRICS: the broker serves Prometheus text at /metrics on that same :8080
+# port (the Service port named "http"), scraped by VMServiceScrape
+# llama-kv-broker in ../monitoring/scrapes.yaml.
+#
+# WHY the restore is GATED instead of run on every request: measured
+# 2026-09-18 on this image, `POST /slots/0?action=restore` answers 200 and the
+# server even reports `f_sim_best = 1.000`, yet the next identical prompt is
+# still fully re-evaluated (prompt_ms ≈ 44 300 vs ≈ 130 with the slot left
+# warm). The file restore is INERT for prompt reuse on this llama.cpp build AND
+# destroys the warm state, so restoring per request would turn a 130 ms prefill
+# into a 44 s one. The broker therefore restores only right after a server
+# restart, detected by a DECREASING /slots `id_task` (monotonic per process,
+# resetting low on start): that restore is neutral in the worst case (the
+# cold path is taken anyway) and becomes valuable if the server's KV layout
+# ever makes restored state reusable.
+#
 # WHY it runs as ROOT (no runAsUser): the slot directory is the shared NFS claim
 # `llama-kv-cache`, which is root-owned, and the serving container that must read and
 # write the very same files runs as uid 0 (fsGroup 102). A non-root broker would fail

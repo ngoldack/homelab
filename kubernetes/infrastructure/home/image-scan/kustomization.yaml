@@ -1,0 +1,13 @@
+# One control namespace, three files: the default-deny baseline, the
+# allowlists over it, and the daily scan itself. RBAC is separate so the
+# ClusterRole's cluster-scoped read (the one broad grant in this directory)
+# is reviewed in its own file.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
+  - scan-config.yaml
+  - cronjob.yaml

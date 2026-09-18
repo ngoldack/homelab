@@ -1018,23 +1018,29 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   `cloud-*` Object Storage buckets (state + etcd backups, both verifiably
   empty) were also left in place: deletion is irreversible and they cost
   nothing.
-- **Talos can never self-apply a node taint — this repo doesn't use
-  `machine.nodeTaints` at all any more.** Talos does not pass taints through
-  kubelet's `--register-with-taints`; `k8s.NodeApplyController` patches
-  labels *and* taints onto the Node object afterwards, using the kubelet's
-  own identity. Kubernetes' NodeRestriction admission plugin forbids a node
-  from setting its own taints, so that patch is rejected — and because
-  labels ride the same atomic patch, **the node also gets none of its
-  labels**. This affects every node carrying `nodeTaints`, including
-  brand-new ones (verified: `wk-main-media` hit it on its very first join,
-  not just already-registered nodes).
+- **Talos cannot self-apply a taint through `machine.nodeTaints` — this repo
+  does not use that field for anything.** With that field, Talos's
+  `k8s.NodeApplyController` patches labels *and* taints onto the Node object
+  afterwards using the kubelet's own identity, and Kubernetes' NodeRestriction
+  admission plugin forbids a node from setting its own taints, so the patch is
+  rejected — and because labels ride the same atomic patch, **the node also
+  gets none of its labels**. This affects every node carrying `nodeTaints`,
+  including brand-new ones (verified: `wk-main-media` hit it on its very first
+  join, not just already-registered nodes).
 
   `tofu/home/talos.tf` therefore never sets `machine.nodeTaints` at all, and
-  since 2026-09-16 no in-repo mechanism applies node taints (the Flux
-  `node-taints` Job was retired with the sandbox worker merge). Workload
-  placement is label/selector based — if a future taint is needed again, it
-  must be re-introduced as a Flux Job or applied manually, because a node
-  still can't taint itself. Symptom to remember: a node that's `Ready` but
+  since 2026-09-16 no in-repo mechanism applies node taints *that way* (the
+  Flux `node-taints` Job was retired with the sandbox worker merge). Workload
+  placement is label/selector based as a rule.
+
+  **The exception is the one node where a taint is load-bearing, and it uses
+  the mechanism that works**: the Hetzner ingress worker sets
+  `machine.kubelet.extraArgs["register-with-taints"] =
+  "dedicated=ingress:NoSchedule"` (`tofu/home/ingress.tf`). Kubelet applies
+  that at registration, before the node is schedulable, which is the property
+  a public node needs — there is no window in which an untolerated workload
+  could land on it. A taint needed elsewhere belongs in the same place, not in
+  `machine.nodeTaints`. Symptom to remember: a node that's `Ready` but
   has only the five stock `kubernetes.io/*` labels means its
   `NodeApplyController` patch was rejected — check
   `talosctl -n <ip> logs controller-runtime | grep NodeApplyController`

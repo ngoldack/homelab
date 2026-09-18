@@ -1,0 +1,183 @@
+# The scan script. One ConfigMap, one CronJob — so there is exactly one copy
+# of the scan logic to review and exactly one place a bug can live.
+#
+# `kustomize.toolkit.fluxcd.io/substitute: disabled` is load-bearing: the
+# script is full of ${...} and $VAR, and the repo's Flux Kustomizations run
+# strict postBuild envsubst, which would fail the whole Kustomization on the
+# first unresolved variable (same reason the restore-drill harness and the
+# vendored Grafana dashboards carry this annotation).
+#
+# Contract (README.md): enumerate every digest running in the cluster (all
+# namespaces, all container statuses), scan each unique digest with trivy,
+# push per-image severity counts plus the run timestamp to VictoriaMetrics,
+# and exit nonzero on INFRASTRUCTURE failure. A vulnerable image is NOT a
+# script failure — it is a metric; the alerting layer
+# (../monitoring/rules-image-scan.yaml) decides what fires.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-scan-script
+  namespace: image-scan
+  labels:
+    app.kubernetes.io/name: image-scan
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  scan.sh: |
+    #!/usr/bin/env bash
+    #
+    # Image rescan. Report-only: enumerates the digests actually running in
+    # the cluster, scans each unique digest with trivy, pushes the result as
+    # metrics to VictoriaMetrics. Nothing is blocked, deleted or restarted on
+    # a finding.
+    #
+    # Requires: kubectl, jq, curl, bash (alpine/k8s image) and the trivy
+    # binary staged into /stage by the init container (cronjob.yaml).
+    set -Eeuo pipefail
+
+    CONCURRENCY=${CONCURRENCY:-4}
+    TRIVY_TIMEOUT=${TRIVY_TIMEOUT:-600}
+    TRIVY_BIN=${TRIVY_BIN:-/stage/trivy}
+    TRIVY_CACHE_DIR=${TRIVY_CACHE_DIR:-/tmp/trivy}
+    VM_IMPORT_URL=${VM_IMPORT_URL:-http://vmsingle-monitoring-victoria-metrics-k8s-stack.monitoring.svc.cluster.local.:8428/api/v1/import/prometheus}
+
+    RESULTS_DIR=/tmp/results
+    LINES_FILE=/tmp/metric-lines.txt
+    mkdir -p "$RESULTS_DIR"
+    : > "$LINES_FILE"
+
+    log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+    # ----------------------------------------------------------------- metrics
+    # Prometheus exposition, pushed to VictoriaMetrics' import endpoint (the
+    # endpoint and its lack of auth were read off the live deployment —
+    # vmagent writes to the same URL). Pushed samples are ordinary series, so
+    # the staleness alert stays answerable for the whole retention window.
+    #
+    # FAILURE SEMANTICS, stated once and honored everywhere below: a run that
+    # reaches the push pushes image_scan_run_timestamp_seconds; a run that
+    # fails on infrastructure (API unreachable, killed by the deadline, push
+    # itself failing) pushes NOTHING, so the last pushed sample ages out and
+    # ImageScanStale fires — fail-loud by absence, never a fake success value.
+    # A scan that COMPLETED but found vulnerabilities is a successful run:
+    # vulnerability counts are data, not failure.
+    push_metrics() {
+      log "metric payload:"
+      cat "$LINES_FILE"
+      if curl -sS --max-time 30 -X POST --data-binary @"$LINES_FILE" \
+          -H 'Content-Type: text/plain' "$VM_IMPORT_URL" >/dev/null; then
+        log "metric push ok"
+      else
+        log "WARNING: metric push to $VM_IMPORT_URL failed"
+        exit 1
+      fi
+    }
+
+    # ----------------------------------------------------------------- enum
+    # Every container imageID in the cluster, all namespaces: the three
+    # status arrays cover regular/init/ephemeral containers of pods in every
+    # phase, which includes Job pods while they run. imageID is the digest
+    # reference the CRI resolved at pull time — reading it instead of
+    # spec.image is the point: a tag can be re-pushed after the pod started,
+    # the imageID of a running pod cannot change under it.
+    enumerate() {
+      kubectl get pods -A -o json 2>/dev/null | jq -r '
+        [.items[]
+         | .status.containerStatuses[]?, .status.initContainerStatuses[]?,
+           .status.ephemeralContainerStatuses[]?
+         | .imageID] | unique | .[]' \
+        | grep -E '@sha256:[0-9a-f]{64}$' | sort -u
+    }
+
+    # ----------------------------------------------------------------- scan
+    # One scan per unique digest. Writes /tmp/results/<safe-name>.json plus a
+    # per-image status file (STATUS ok|error) — the counters live in files,
+    # not variables, because each scan runs in a background subshell whose
+    # variable writes would vanish; the parent tallies them after wait().
+    scan_one() {
+      local ref="$1" repo digest name json
+      repo="${ref%@*}"
+      digest="${ref#*@}"
+      # Filesystem-safe per-image name; the digest (the unique part) stays
+      # verbatim.
+      name=$(printf '%s' "$ref" | sed -E 's#[/.]#_#g; s#@#_#g')
+      json="$RESULTS_DIR/$name.json"
+      log "scanning $ref"
+      # TLS verification stays ON: the first-party registry presents a real
+      # Let's Encrypt wildcard (registry helmrelease comment), and every
+      # third-party registry in use presents valid certificates. A failure
+      # to verify is an error line, not something to work around.
+      if ! "$TRIVY_BIN" --cache-dir "$TRIVY_CACHE_DIR" \
+          image --quiet \
+          --format json --output "$json" \
+          --timeout "${TRIVY_TIMEOUT}s" \
+          "$repo@$digest" >"$RESULTS_DIR/$name.log" 2>&1; then
+        log "ERROR: trivy failed on $ref (see $name.log)"
+        printf 'error\n' > "$RESULTS_DIR/$name.status"
+        return 0
+      fi
+      # Severity counts from trivy's JSON: per-image gauge with one series
+      # per severity class, ALWAYS emitted (even all-zero), so "no criticals"
+      # is a real 0 and the alert's `> 0` comparison cannot be fooled by a
+      # missing series. Classes: critical/high/medium and `other` (low +
+      # unknown + anything else) — the alert only reads critical.
+      if jq -r --arg ref "$ref" --arg digest "$digest" '
+          [ .Results[]?.Vulnerabilities[]? | .Severity ] as $sevs
+          | ( $sevs | map(select(. == "CRITICAL")) | length ) as $crit
+          | ( $sevs | map(select(. == "HIGH")) | length ) as $high
+          | ( $sevs | map(select(. == "MEDIUM")) | length ) as $med
+          | ( $sevs | length ) as $total
+          | ( $total - $crit - $high - $med ) as $other
+          | ( $ref | sub("@.*$"; "") ) as $img
+          | "image_scan_cve{image=\"\($img)\",digest=\"\($digest)\",severity=\"critical\"} \($crit)",
+            "image_scan_cve{image=\"\($img)\",digest=\"\($digest)\",severity=\"high\"} \($high)",
+            "image_scan_cve{image=\"\($img)\",digest=\"\($digest)\",severity=\"medium\"} \($med)",
+            "image_scan_cve{image=\"\($img)\",digest=\"\($digest)\",severity=\"other\"} \($other)"
+        ' "$json" >> "$LINES_FILE" 2>>"$RESULTS_DIR/jq-errors.log"; then
+        printf 'ok\n' > "$RESULTS_DIR/$name.status"
+      else
+        log "ERROR: jq parse failed for $ref"
+        printf 'error\n' > "$RESULTS_DIR/$name.status"
+      fi
+    }
+
+    # ----------------------------------------------------------------- main
+    mapfile -t DIGESTS < <(enumerate)
+    if [ "${#DIGESTS[@]}" -eq 0 ]; then
+      log "ERROR: no digests enumerated — Kubernetes API unreachable or empty cluster?"
+      exit 1
+    fi
+    log "enumerated ${#DIGESTS[@]} unique running digests"
+
+    # Concurrency-bounded scanning: start up to $CONCURRENCY scans, wait for
+    # the batch, continue. Bounded and simple beats an unbounded xargs -P on
+    # a small cluster.
+    i=0
+    for ref in "${DIGESTS[@]}"; do
+      scan_one "$ref" &
+      i=$((i + 1))
+      if [ "$((i % CONCURRENCY))" -eq 0 ]; then wait; fi
+    done
+    wait
+
+    ERRORS=$(grep -l '^error$' "$RESULTS_DIR"/*.status 2>/dev/null | wc -l || true)
+    SCANNED=$(grep -l '^ok$' "$RESULTS_DIR"/*.status 2>/dev/null | wc -l || true)
+    for f in "$RESULTS_DIR"/*.status; do
+      [ -e "$f" ] || continue
+      [ "$(cat "$f")" = "error" ] && \
+        printf 'image_scan_scan_errors_total{scan="%s"} 1\n' \
+          "$(basename "$f" .status)" >> "$LINES_FILE"
+    done
+
+    # Run gauge: value = the scan completion timestamp; the staleness alert
+    # reads time() - image_scan_run_timestamp_seconds. One series, no labels,
+    # so absent() guards work without label surgery.
+    printf 'image_scan_run_timestamp_seconds %s\n' "$(date +%s)" >> "$LINES_FILE"
+    # Coverage gauges: how many digests were enumerated vs scanned OK, so a
+    # run that enumerated 20 but scanned 2 (errors spiking) is visible as
+    # data, not only as an alert.
+    printf 'image_scan_images_enumerated %s\n' "${#DIGESTS[@]}" >> "$LINES_FILE"
+    printf 'image_scan_images_scanned %s\n' "$SCANNED" >> "$LINES_FILE"
+
+    push_metrics
+    log "scan complete: $SCANNED ok, $ERRORS errors of ${#DIGESTS[@]} digests"

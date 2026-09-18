@@ -66,6 +66,10 @@ resources:
   # entry exists, and it needs the CNPG CRDs + the VictoriaMetrics import
   # endpoint, expressed as dependsOn edges in the file itself.
   - cnpg-restore-drills.yaml
+  # Daily rescan of the image digests actually running in the cluster
+  # (trivy per digest -> image_scan_cve metrics + the rules-image-scan alerts).
+  # Reports only; the build-time gate stays in image-builds/.
+  - image-scan.yaml
   # Multus secondary-CNI meta-plugin: prerequisite for the media namespace's
   # VLAN 2080 macvlan attachments (no CRD/Gateway deps of its own).
   - multus.yaml

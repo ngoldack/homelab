@@ -1,0 +1,24 @@
+# Default-deny baseline for the image-scan namespace — same semantics as the
+# drill/control-namespace pilots: selecting an endpoint with an ingress/egress
+# section flips that direction to default-deny, and an empty rule whitelists
+# no peer. The allowlists in cilium-allowlist.yaml are the only exceptions.
+#
+# The single workload here (the scan Job pod) is a Kubernetes-API client with
+# one network output (the VictoriaMetrics import POST) and one scan input
+# (registry blob fetches); it needs no inbound traffic at all beyond kubelet
+# health probes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: image-scan-default-deny
+  namespace: image-scan
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in image-scan. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

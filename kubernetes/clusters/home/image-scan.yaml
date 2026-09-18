@@ -1,0 +1,41 @@
+# image-scan — daily rescan of the image digests that are ACTUALLY running.
+#
+# The build path (image-builds/) scans what it just produced; this scans what
+# the cluster is running today, which is the set that can be exploited. A CronJob
+# enumerates the running digests, runs trivy per digest, pushes
+# `image_scan_cve{image,digest,severity}` to VictoriaMetrics and stops there —
+# it reports, it never blocks anything. The alerts live in
+# ../monitoring/rules-image-scan.yaml.
+#
+# Ordering: the CronJob needs the cluster API (to enumerate pod images) and the
+# VictoriaMetrics import endpoint; both are expressed as dependsOn here rather
+# than assumed, and the namespace's own CNP allowlist names the same peers.
+# wait:true because a namespace whose RBAC or CNP failed to apply would
+# otherwise fail silently at 04:45 instead of reporting not-Ready.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: image-scan
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/image-scan
+  prune: true
+  wait: true
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    # The import endpoint the scan pushes its metric to.
+    - name: monitoring
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

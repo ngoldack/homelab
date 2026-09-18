@@ -1,0 +1,16 @@
+# The image rescan namespace: holds the daily image-scan CronJob that
+# enumerates every digest running in the cluster and scans each of them with
+# trivy, reporting per-image CVE counts as pushed metrics.
+#
+# Pod Security Admission labels mirror the drill namespaces (audit+warn at
+# `restricted`; enforcement stays the cluster default). The scan pod satisfies
+# `restricted` by construction — non-root, no capabilities, RuntimeDefault
+# seccomp, read-only root filesystem.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-scan
+  labels:
+    app.kubernetes.io/name: image-scan
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

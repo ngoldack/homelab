@@ -1,0 +1,129 @@
+# Image-vulnerability alerting for the daily rescan
+# (kubernetes/infrastructure/home/image-scan/).
+#
+# The three metric families this file rests on are PUSHED by the scan CronJob
+# to vmsingle's /api/v1/import/prometheus — the same push pattern the CNPG
+# restore drills use (see rules.yaml, group restore-drills) — so the labels
+# are the scanner's own (image, digest, severity) rather than a scrape
+# relabeling of a pod label:
+#
+#   image_scan_cve{image,digest,severity}   per-image CVE count by severity
+#                                           class (critical/high/medium/other,
+#                                           ALWAYS all four series per image)
+#   image_scan_run_timestamp_seconds        value = completion time of the
+#                                           last run that pushed anything
+#   image_scan_images_enumerated            digests found running this run
+#   image_scan_images_scanned               digests scanned without error
+#   image_scan_scan_errors_total{scan}      one series per failed scan
+#
+# Failure semantics of the scanner matter for reading these rules: a run that
+# fails on infrastructure pushes NOTHING, so image_scan_run_timestamp_seconds
+# keeps its last value and ImageScanStale fires within a day; a run that
+# completes but finds vulnerabilities pushes zeros or counts as data and only
+# ImageScanCriticalCve reacts.
+#
+# House rules: expressions quote the live evidence behind them. At
+# implementation time the series did not exist yet (the CronJob has not run —
+# it deploys with this change), so the rules were validated the same way the
+# drill rules were: the PromQL SHAPE was verified live against VictoriaMetrics
+# (count_over_time/staleness math over pushed samples, see the scan README's
+# verification section), and the first real run must confirm the metric
+# families appear exactly as named here. A rule that can never fire is worse
+# than no rule, so ImageScanMetricsAbsent below doubles as the canary: if the
+# families come out named differently, THIS rule fires instead of silence.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: image-scan
+  namespace: monitoring
+spec:
+  groups:
+    - name: image-scan
+      rules:
+        - alert: ImageScanCriticalCve
+          # Fires when ANY digest currently running in the cluster carries at
+          # least one CRITICAL CVE. The scan runs daily; a pushed sample stays
+          # queryable until the next run replaces it (same-series overwrite on
+          # the next push, retention otherwise), so `> 0` reads "the latest
+          # scan of this digest found criticals". digest is the running image
+          # ID — the exact bytes in memory — not a mutable tag, so the alert
+          # names the thing that would need a redeploy to change.
+          expr: image_scan_cve{severity="critical"} > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Running image {{ $labels.image }} ({{ $labels.digest }}) has
+              {{ $value | humanize }} critical CVE(s)
+            description: >-
+              The daily rescan found {{ $value | humanize }} CRITICAL
+              vulnerabilities in digest {{ $labels.digest }}, which is running
+              right now on at least one pod. This is a report-only pipeline:
+              nothing was blocked or changed by the scanner — triage decides.
+              Steps: confirm the digest is current with its build unit's
+              latest build (kubernetes/infrastructure/home/image-builds/ for
+              first-party images; Renovate for third-party); if a fixed
+              version exists, rebuild/bump and let Flux roll it — the digest
+              in the alert is what the rollout replaces. If the CVE has no fix
+              or the image is end-of-life, record the decision in the policy
+              exception register (docs/policy-exceptions.md). The full trivy
+              report for this digest is in the scan Job's /tmp/results on the
+              run that flagged it, and the per-image counts are in Grafana via
+              `image_scan_cve{digest="{{ $labels.digest }}"}`.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/service-catalog.md
+        - alert: ImageScanStale
+          # Rests on: time() - image_scan_run_timestamp_seconds > 26 * 3600 —
+          # the daily schedule (04:45 UTC) plus 2h of slack, the same shape as
+          # TalosBackupStale in rules-platform.yaml (26h there for a daily
+          # backup). The scanner pushes this gauge only on a run that reached
+          # the push step, so a run that dies at enumeration, at a scan or at
+          # the push leaves the timestamp untouched and this fires. A value of
+          # -1 style "never pushed" cannot occur: the series does not exist
+          # until the first push, and that state is ImageScanMetricsAbsent's
+          # job below.
+          expr: time() - image_scan_run_timestamp_seconds > 26 * 3600
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image rescan has not pushed a result for over 26 hours"
+            description: >-
+              No image-scan run has completed its metric push for
+              {{ $value | humanizeDuration }} (daily schedule: 04:45 UTC).
+              Either the CronJob did not start, the script died before the
+              push (enumeration failure, deadline, registry unreachable) or
+              the push itself failed. While this lasts the cluster's
+              running-image vulnerability picture is aging: critical-CVE
+              coverage silently goes stale. Check
+              `kubectl -n image-scan get jobs` and the latest Job's log (the
+              script logs every step); the job's RBAC/CNP allowlists
+              (image-scan/cilium-allowlist.yaml) are the usual suspects when
+              enumeration or push fails while scans succeed.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/service-catalog.md
+        - alert: ImageScanMetricsAbsent
+          # Absence guard, same pattern as TalosBackupMetricsAbsent /
+          # RestoreDrillMetricsAbsent: if the scan pipeline never produced a
+          # sample (CronJob removed by mistake, image-scan Kustomization
+          # deleted, first run failed) ImageScanStale cannot fire — there is
+          # no series for it to read. This alert is what keeps the other two
+          # honest, and it doubles as the schema canary: if the first real
+          # run pushes metric names that differ from this file's table (the
+          # one failure mode the pre-deployment validation could not fully
+          # prove), the series named here stays absent and this fires —
+          # pointing at the README contract rather than failing silently.
+          expr: absent(image_scan_run_timestamp_seconds)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image scan metrics absent"
+            description: >-
+              No image_scan_run_timestamp_seconds series exists: the rescan
+              has never pushed a metric (first run pending or failed), the
+              image-scan CronJob was removed, or the series name drifted from
+              the contract in
+              kubernetes/infrastructure/home/image-scan/README.md. While this
+              lasts, ImageScanStale and ImageScanCriticalCve are blind —
+              running images are unsurveyed rather than merely stale.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/service-catalog.md

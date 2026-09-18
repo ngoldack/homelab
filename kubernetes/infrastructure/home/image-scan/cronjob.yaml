@@ -1,0 +1,161 @@
+# The daily rescan: a single CronJob that enumerates every digest actually
+# running in the cluster (pods + Jobs, all namespaces — digests are read from
+# status.containerStatuses[].imageID, NOT from spec.image, because the spec
+# can name a tag that has since been re-pushed) and scans each unique digest
+# with trivy, pushing per-image severity counts to VictoriaMetrics.
+#
+# Report-only by construction: the container is the scan script; it holds no
+# RBAC beyond read-only pod/job listing (rbac.yaml), writes only to its own
+# emptyDir volumes, and its only network destinations are the Kubernetes API
+# (for enumeration), DNS, the registry (for scan input) and the VictoriaMetrics
+# import endpoint (for output). A critical CVE finding changes nothing in the
+# cluster directly — it raises a metric, the VMRule in ../monitoring/
+# rules-image-scan.yaml raises an alert, and a human decides.
+#
+# Runtime is bounded three ways: concurrencyPolicy: Forbid (no overlap),
+# activeDeadlineSeconds: 3600 (hard wall-clock stop) and per-image trivy
+# --timeout 600s with concurrency 4 (inside the script, CONCURRENCY/
+# TRIVY_TIMEOUT env — the number of images grows sublinearly today: 14 unique
+# digests live at implementation time, one image ~2-3 GiB worst case, ~10 min
+# each at 4x parallelism with the P100 node's disk, well inside the hour).
+#
+# 04:45 UTC: after the talos-backup window (03:17) and before the first
+# business hours; nothing else in the cluster schedules at 04:45.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: image-scan
+  namespace: image-scan
+  labels:
+    app.kubernetes.io/name: image-scan
+spec:
+  schedule: "45 4 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  # 2h of slack for the scheduled fire after a missed one (a node reboot or
+  # window of API pressure should not silently skip a day's scan).
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No retry: a failed run is caught by ImageScanStale within 26h, and a
+      # retry would only re-pay a systemic failure (registry down, API down).
+      backoffLimit: 0
+      # The scan of 14 digests needs minutes, not hours; 1h is 4x headroom
+      # over the measured estimate and bounds the worst case hard.
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: image-scan
+        spec:
+          restartPolicy: Never
+          serviceAccountName: image-scan
+          # The token is the only credential: read-only pods/jobs list per
+          # rbac.yaml. No registry credentials are mounted — the registry is
+          # anonymous-pull (registry helmrelease comment), so the scan needs
+          # none.
+          automountServiceAccountToken: true
+          # Same site pin as the registry's own nodeSelector: the scan pulls
+          # blobs from the registry volume, which is NAS-backed and not
+          # routable from the Hetzner ingress node.
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Stage the trivy binary from the pinned image into a shared
+            # emptyDir, so the main container (alpine/k8s) gets kubectl/jq/
+            # curl AND trivy without needing a custom image build. Same
+            # staged-binary pattern the image-builds scan gate uses, one
+            # shared trivy pin cluster-wide.
+            - name: trivy
+              # Pinned: docker.io/aquasec/trivy:0.74.0, resolved to this
+              # digest on 2026-09-18; the same pin the image-builds scan gate
+              # uses (coordinated with the supply-chain unit so there is
+              # exactly one trivy version in the cluster).
+              image: docker.io/aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - cp /usr/local/bin/trivy /stage/trivy && chmod +x /stage/trivy
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: stage
+                  mountPath: /stage
+          containers:
+            - name: scan
+              # Pinned: alpine/k8s:1.36.4 (Alpine + bash + kubectl 1.36 + jq +
+              # curl); kubectl 1.36 matches the cluster's v1.36.2 server.
+              # Provenance note: third-party toolbox image, but it executes
+              # only this repo's script (scan-config.yaml) with a read-only
+              # RBAC view of the cluster and no secrets mounted.
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/scan.sh"]
+              env:
+                - name: CONCURRENCY
+                  value: "4"
+                - name: TRIVY_TIMEOUT
+                  value: "600"
+                # The trivy DB cache dir. The DB download (~40-60 MiB
+                # compressed) lands here on every run: an emptyDir, not a
+                # cache PVC — one download per day is the whole cost of
+                # staying simple, and a cache PVC would add a stateful
+                # failure mode to a stateless job.
+                - name: TRIVY_CACHE_DIR
+                  value: /tmp/trivy
+                - name: HOME
+                  value: /tmp
+                - name: VM_IMPORT_URL
+                  value: http://vmsingle-monitoring-victoria-metrics-k8s-stack.monitoring.svc.cluster.local.:8428/api/v1/import/prometheus
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: stage
+                  mountPath: /stage
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: image-scan-script
+            # /tmp holds the trivy cache, the per-image JSON reports and the
+            # assembled metric payload; fsGroup on the pod makes the staged
+            # binary and the cache dir group-writable for runAsUser 65534.
+            - name: tmp
+              emptyDir: {}
+            - name: stage
+              emptyDir: {}

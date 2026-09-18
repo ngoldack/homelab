@@ -1,0 +1,59 @@
+# RBAC for the image rescan.
+#
+# The scan enumerates the digests ACTUALLY RUNNING in the cluster — every
+# namespace, not a repo-enumerable subset: application namespaces are managed
+# through Flux Kustomizations whose workload lists change with every image
+# bump, so a hardcoded namespace list would silently go stale and scan a lie.
+# The one privilege the job needs is therefore cluster-scoped and read-only:
+# list+watch Pods and Jobs. Nothing else — no get on secrets, no exec, no
+# create anywhere. The watch verb is listed alongside list because client-go
+# informers request both even for one-shot enumerations; granting watch without
+# list would not work and granting list without watch breaks resourceVersion
+# retries.
+#
+# The ClusterRole is justified, not lazy: kube-state-metrics would have been
+# the zero-RBAC path, but this deployment exports NO image_id label (verified
+# live 2026-09-18: kube_pod_container_info{image_id!=""} returns zero series
+# while 171 container series exist), so digests cannot be enumerated from
+# metrics and the API read is required.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-scan
+  namespace: image-scan
+  labels:
+    app.kubernetes.io/name: image-scan
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: image-scan-enumerate
+  labels:
+    app.kubernetes.io/name: image-scan
+rules:
+  # Read-only workload enumeration. Pods carry the running digests
+  # (status.containerStatuses[].imageID); Jobs are included so a digest
+  # running only inside a Job — e.g. an in-flight build or a restore drill's
+  # recovery pod — is scanned during the same window it is actually running.
+  # Terminal-phase pods are filtered by the script, not by RBAC.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: image-scan-enumerate
+  labels:
+    app.kubernetes.io/name: image-scan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: image-scan-enumerate
+subjects:
+  - kind: ServiceAccount
+    name: image-scan
+    namespace: image-scan

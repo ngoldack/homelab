@@ -25,6 +25,11 @@ resources:
   # alert on the notification-failure counters themselves.
   - alertmanager-config.sops.yaml
   - rules-alerting.yaml
+  # The in-use-digest rescan alerts (image-scan CronJob in ../image-scan/):
+  # critical CVE found in a digest that is actually running, and the scan
+  # itself going stale. Separate file so a scan-rule edit never touches the
+  # platform rules.
+  - rules-image-scan.yaml
   # Platform alert-rule pack (certificate expiry, Flux controller errors,
   # talos-backup staleness, node health, cloud-ingress-node hygiene) and the
   # in-cluster probe of the public edge: the blackbox exporter, the policy

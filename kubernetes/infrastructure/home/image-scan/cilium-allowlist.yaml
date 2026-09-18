@@ -1,0 +1,135 @@
+# image-scan allowlist.
+#
+# One workload, four egress needs, each enumerated with its justification:
+#
+#   1. kube-apiserver — the pod/token lists Pods across the cluster
+#      (rbac.yaml). All three addressing forms are needed, exactly as for
+#      the monitoring scrapers: the entity, the control-plane VIP
+#      (10.30.0.10 — read off `kubectl get svc kubernetes`), and the Service
+#      CIDR path the in-cluster kubeconfig resolves the API through.
+#   2. kube-dns — resolving every name below.
+#   3. monitoring:8428 — the VictoriaMetrics import POST (metric output).
+#      The destination side of this flow is the rule in
+#      ../monitoring/cilium-allowlist.yaml
+#      (monitoring-vmsingle-image-scan-import): Cilium allows are the union,
+#      but the vmsingle pod's own baseline denies cross-namespace peers
+#      unless named — without that destination rule the push is dropped
+#      (fail-closed, by design).
+#   4. Registry access for the scan INPUT, over HTTPS to the cluster's
+#      Gateway (registry.ngoldack.de):
+#      - toEntities: ingress covers the Gateway/envoy data path the registry
+#        CNP already admits (zot-allowlist has an identical `ingress`
+#        rule), and works for both first-party repos (zot serves them) and
+#        pull-through-cache repos (zot proxies them upstream on demand —
+#        the onDemand sync entries in the zot config).
+#      - toEntities: world:443 covers the SAME pull-through path where zot
+#        itself must fetch the upstream manifest/blobs — wait, no: that
+#        fetch is zot's own egress (already allowed in the zot CNP), not
+#        the scanner's. The scanner's world egress is for digests that
+#        never touch our registry at all: images pulled directly from
+#        third-party registries by DaemonSets and controllers whose
+#        manifests bypass the pull-through cache (verified live: 12 of 14
+#        running digests point at docker.io/ghcr.io/quay.io/nvcr.io/reg.kyverno.io
+#        directly). Scanning "the digests actually running" requires
+#        fetching manifests for those, so world:443 it is — bounded by
+#        port, like every other world rule in this repo, and the scanner
+#        performs no auth against any of them (public registries).
+#
+# Inbound: nothing. Health probes from kubelet (entity `health`) only.
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: image-scan-allowlist
+  namespace: image-scan
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: image-scan
+  ingress:
+    - fromEntities:
+        - health
+  egress:
+    # 2. Cluster DNS.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # 1. Kubernetes API for the enumeration (read-only pods/jobs list).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # 3. Metric output: the vmsingle import endpoint. Unauthenticated, the
+    #    same URL vmagent writes to (monitoring helmrelease).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: vmsingle
+            app.kubernetes.io/instance: monitoring-victoria-metrics-k8s-stack
+      toPorts:
+        - ports:
+            - {port: "8428", protocol: TCP}
+    # 4a. Registry over the Gateway data path (first-party + pull-through
+    #     repos). The zot CNP admits the `ingress` entity on :5000; the
+    #     Gateway listener terminates TLS for registry.ngoldack.de.
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+    # 4b. Third-party digests that bypass our registry entirely ( DaemonSets
+    #     and operators pulling straight from docker.io / ghcr.io / quay.io /
+    #     nvcr.io / reg.kyverno.io). Port-bounded HTTPS, like grafana's
+    #     world rule in the monitoring allowlist.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# The destination side of the metric push. Declared HERE rather than in
+# ../monitoring/cilium-allowlist.yaml for the same reason the restore drills
+# declare theirs in cnpg-restore-drills/cilium-allowlist.yaml: Flux ownership
+# is per object, so monitoring's own Kustomization neither owns nor prunes
+# this rule. monitoring-scrapers-allowlist admits in-namespace peers, the
+# kubelet and the API server to vmsingle, and nothing else — without this
+# rule the scan's import POST is dropped (fail-closed, by design) and the
+# image_scan_* metrics would silently never arrive.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: monitoring-vmsingle-image-scan-import
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmsingle
+      app.kubernetes.io/instance: monitoring-victoria-metrics-k8s-stack
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: image-scan
+      toPorts:
+        - ports:
+            - {port: "8428", protocol: TCP}

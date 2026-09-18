@@ -86,8 +86,14 @@ spec:
         # agentgateway backend named synthetic (api.synthetic.new), verified on
         # 2026-09-16. The base URL stays OpenAI-compatible (/v1/...), the model
         # name matches the backend's openai.model stanza.
-        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
         HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. The Authorization header stays Bearer <key> — the
+        # SDK requires the shape — and the gateway policy reads the key from
+        # X-Api-Key (policy-apikey.yaml), so both are the same value.
+        HINDSIGHT_API_LLM_DEFAULT_HEADERS: >-
+          {"X-Api-Key": "6909b13b725645222c94e8da5b0075a88d8d910e867965d8bbdbeed35049c394"}
         # Reasoning LOW + STRICT_SCHEMA so extraction is fast and JSON-only.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
@@ -142,8 +148,14 @@ spec:
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
         # agentgateway synthetic OVER (2026-09-18): same model as the api.
-        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
         HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. The Authorization header stays Bearer <key> — the
+        # SDK requires the shape — and the gateway policy reads the key from
+        # X-Api-Key (policy-apikey.yaml), so both are the same value.
+        HINDSIGHT_API_LLM_DEFAULT_HEADERS: >-
+          {"X-Api-Key": "6909b13b725645222c94e8da5b0075a88d8d910e867965d8bbdbeed35049c394"}
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"

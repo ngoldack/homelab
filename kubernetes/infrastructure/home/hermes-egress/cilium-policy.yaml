@@ -105,12 +105,16 @@ spec:
 # counter still escalates the response, but no claim dies; Phase-1's
 # egress deny/quarantine counter alerts on the gap).
 #
-# authorizer/reaper -> kube-apiserver + DNS: the identity corroboration + the
-# headless Service DNS. FAILURE MODE: missing = the reaper cannot map
-# source_ip -> claim -> session-hash, so it must deny fail-closed (no
-# quarantine); the authorizer cannot resolve the reaper's DNS. Widened beyond
-# kube-apiserver:443 = the guard's credentials could reach arbitrary cluster
-# services.
+# reaper -> kube-apiserver + DNS: the quarantine path. FAILURE MODE: missing =
+# the reaper cannot resolve the session's claims by the
+# workload.hermes.io/session-hash label nor write the hermes-quarantine
+# ledger, so containment fails (the 503 is logged and Phase-1's quarantine
+# counter alerts). Widened beyond kube-apiserver:443/6443 = the guard's
+# credentials could reach arbitrary cluster services.
+#
+# The AUTHORIZER needs no apiserver access at all: it verifies the HMAC token
+# and decides from the policy file, so its identity is the token and nothing
+# else. It reaches only the reaper (events) and cluster DNS.
 #
 # Everything else (other pods, other services, node/management CIDRs) is
 # default-deny: a compromised guard pod cannot pivot to the cluster.
@@ -122,8 +126,8 @@ metadata:
 spec:
   description: >-
     Egress allowlist: proxy -> world 80/443 (the tunnel), authorizer ->
-    reaper 8080 (events), authorizer+reaper -> kube-apiserver 443 + 6443 and
-    cluster DNS 53 (identity corroboration + service resolution).
+    reaper 8080 (events), reaper -> kube-apiserver 443 + 6443 (claim lookup
+    by session-hash label + the quarantine ledger) and cluster DNS 53.
   endpointSelector:
     matchLabels: {}
   egress:
@@ -147,29 +151,6 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # kube-apiserver for the REAPER: it lists/deletes SandboxClaims and writes
-    # the quarantine ConfigMap. The namespace-wide rule also covers the
-    # authorizer pod, but the authorizer makes NO Kubernetes API call by
-    # design (token-only identity, no SA token mounted) — the rule's real
-    # consumer is the reaper.
-    #
-    # WHY toEntities and not toEndpoints: the apiserver is a host-network
-    # static process, identified in ipcache by the reserved kube-apiserver
-    # identity (verified on this cluster: 10.30.0.10 -> identity 7), so a
-    # toEndpoints + label selector can never match it — the same shadowing
-    # lesson as the 50000-port incident in
-    # ../../talos-backup/cilium-allowlist.yaml. WHY 6443 as well as 443: the
-    # in-cluster kubernetes VIP:443 DNATs to the node's :6443 and policy
-    # evaluates the post-translation backend. FAILURE MODE: missing = the
-    # reaper cannot delete a quarantined claim (silent containment failure).
-    - toEntities:
-        - kube-apiserver
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-            - port: "6443"
-              protocol: TCP
     # Cluster DNS: the authorizer resolves the reaper Service, the reaper
     # resolves the apiserver. FAILURE MODE: missing = the guard cannot resolve
     # its own dependencies (fail-closed, alerts fire on the dead-man rule).
@@ -182,4 +163,46 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+---
+# The Kubernetes API, scoped to the pod that actually calls it.
+#
+# WHY a separate document: the effective allow set is the UNION over every
+# policy selecting an endpoint, so an apiserver rule in the namespace-wide doc
+# would give the authorizer a network path it has no code for. The authorizer
+# is deliberately token-only (no Kubernetes client, no ServiceAccount, no
+# mounted token — rbac.yaml grants it nothing either); scoping the rule is the
+# same boundary stated at the network layer.
+#
+# WHY toEntities and not toEndpoints: the apiserver is a host-network static
+# process, identified in ipcache by the reserved kube-apiserver identity
+# (verified on this cluster: 10.30.0.10 -> identity 7), so a toEndpoints +
+# label selector can never match it — the same shadowing lesson as the
+# 50000-port incident in ../../talos-backup/cilium-allowlist.yaml. WHY 6443 as
+# well as 443: the in-cluster kubernetes VIP:443 DNATs to the node's :6443 and
+# policy evaluates the post-translation backend. FAILURE MODE: missing = the
+# reaper cannot resolve a session's claims nor write the quarantine ledger
+# (silent containment failure; the 503 is logged and the Phase-1 quarantine
+# counter alerts).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-egress-apiserver-reaper
+  namespace: hermes-egress
+spec:
+  description: >-
+    Egress from the sandbox-reaper only: the Kubernetes API on 443/6443 — the
+    claim lookup by session-hash label and the hermes-quarantine ledger write.
+    The authorizer has no apiserver access.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-reaper
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP

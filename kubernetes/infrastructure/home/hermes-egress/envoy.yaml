@@ -111,11 +111,12 @@ data:
                                   - exact: x-egress-profile
                                   - exact: x-egress-kill
                             # The CheckRequest's source.address is the sandbox
-                            # pod IP (use_remote_address). It is the identity
-                            # corroboration channel: the authorizer maps
-                            # pod IP -> pod -> SandboxClaim -> session-hash
-                            # label via the Kubernetes API when it can, and
-                            # NEVER trusts the sandbox-supplied identity.
+                            # pod IP (use_remote_address). The authorizer does
+                            # NOT look it up: identity comes only from the
+                            # verified HMAC token in Proxy-Authorization, and
+                            # the source address rides along for the violation
+                            # events' forensics. Forwarding it here is what
+                            # makes that record possible.
                             include_peer_certificate: false
                       # 2) The router: only requests the ext_authz filter
                       #    ALLOWED reach this point — a deny was already

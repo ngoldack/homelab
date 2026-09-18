@@ -37,3 +37,4 @@ resources:
   - synthetic-key.sops.yaml
   - httproute-edge.yaml
   - otel-collector.yaml
+  - otel-collector-queue-pvc.yaml

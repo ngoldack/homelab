@@ -1,0 +1,27 @@
+# Persistent per-session KV slot files for qwen36-35b (llama.cpp --slot-save-path).
+#
+# WHY a dedicated volume: the model cache (`llmkube-model-cache`, the 60Gi PVC the
+# llmkube helmrelease creates) is mounted at /models with readOnly: true — the runtime
+# only ever reads GGUF weights from it — so the slot directory cannot be a subpath of
+# that mount. Slot writes need their own writable claim.
+#
+# WHY ReadWriteOnce is enough (no RWX): the claim is consumed by exactly two pods —
+# the qwen36-35b serving pod and the llama-kv-broker — and BOTH are pinned to the
+# single GPU node by nodeSelector `hardware/gpu.model: Tesla-P100`. That is the same
+# single-node assumption the model-cache claim already relies on.
+#
+# This volume is a DISPOSABLE CACHE: losing it costs a prompt prefill, never
+# correctness. The server rejects any restore whose KV layout does not match the live
+# model, and the broker invalidates stale files by its config fingerprint.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llama-kv-cache
+  namespace: llmkube-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: truenas-fast-nfs-llmkube-models
+  resources:
+    requests:
+      storage: 100Gi

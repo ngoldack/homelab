@@ -79,3 +79,27 @@ spec:
     gpuMemory: "16Gi"
     cpu: "4"
     memory: "8Gi"
+  # Persistent per-session KV slots, broker-managed.
+  #
+  # The restore -> infer -> save choreography lives in llama-kv-broker (see
+  # kv-broker.yaml), not here: the operator only needs to hand llama.cpp the slot
+  # directory, and the broker — not a client — decides which slot file is restored and
+  # when it is written back. The slot dir is a disposable cache on its own claim
+  # (kv-cache-pvc.yaml; /models is mounted readOnly), and invalidation is by the
+  # broker's config fingerprint over the fields below, so a flag change here needs no
+  # manual cache purge.
+  #
+  # parallelSlots: 1 above STAYS: with a single slot the server always uses slot 0, so
+  # no other slot flag is added or tuned — --slot-prompt-similarity, --slots,
+  # --cache-idle-slots and --kv-unified-per-slot keep their defaults, which is the
+  # already-live behavior.
+  extraArgs:
+    - --slot-save-path
+    - /var/lib/llama/kv
+  extraVolumes:
+    - name: kv-cache
+      persistentVolumeClaim:
+        claimName: llama-kv-cache
+  extraVolumeMounts:
+    - name: kv-cache
+      mountPath: /var/lib/llama/kv

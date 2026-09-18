@@ -11,6 +11,7 @@ resources:
   - llama-p100.yaml
   - hermes-agent-sandbox-plugin.yaml
   - github-runner.yaml
+  - llama-kv-broker.yaml
 
 # The ik_llama build needs OUR Dockerfile (with the sm_60 fast-FP16 patch) while
 # its build context is the remote ik_llama git tree. buildkit accepts a local

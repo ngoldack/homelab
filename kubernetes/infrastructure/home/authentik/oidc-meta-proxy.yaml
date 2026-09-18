@@ -1,0 +1,131 @@
+# In-cluster OIDC metadata for the kube-apiserver.
+#
+# Why this exists: the apiserver's JWT authenticator runs in-process, so it
+# fetches the issuer's discovery document and JWKS from its node's host
+# network. That path to the public edge vhost is broken for node-origin
+# clients (verified live: 503 "upstream connect error ... connection timeout"
+# from the control-plane node, while browser traffic and pod traffic get 200),
+# so every OIDC token was rejected with a JWT-authenticator failure even
+# though the issuer, audience, signing key and claims were all correct.
+#
+# This namespace already had the answer for pods: fetch authentik in-cluster,
+# never from the edge (see ../agentgateway/policy-jwt.yaml — the gateway's
+# remoteJWKS points at authentik-server, not at the public URL). The apiserver
+# cannot take a bare JWKS URL, only a discovery URL, so this proxy serves
+# authentik's own document with two deliberate adjustments:
+#   * Host is rewritten to the public hostname, because authentik derives the
+#     `issuer` from the request Host — the token's `iss` claim is the public
+#     URL, so the document the apiserver sees must advertise that same issuer.
+#   * `jwks_uri` is rewritten to this proxy, so the key fetch stays in-cluster
+#     instead of following the public URL back out through the broken path.
+# Plain HTTP is fine: the apiserver takes the issuer separately (the
+# AuthenticationConfiguration's issuer.url) and needs no TLS here.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oidc-meta-proxy-config
+  namespace: authentik
+data:
+  nginx.conf: |
+    events {}
+    http {
+      resolver 172.21.0.10 valid=10s ipv6=off;
+      server {
+        listen 8080;
+
+        # The discovery document: authentik's own, with the public Host so its
+        # `issuer` matches the tokens, and jwks_uri pointed back here.
+        location = /application/o/headlamp/.well-known/openid-configuration {
+          proxy_pass http://authentik-server.authentik.svc.cluster.local/application/o/headlamp/.well-known/openid-configuration;
+          proxy_set_header Host authentik.ngoldack.de;
+          proxy_set_header Accept-Encoding "";
+          sub_filter '"jwks_uri": "https://authentik.ngoldack.de/application/o/headlamp/jwks/"'
+                     '"jwks_uri": "http://oidc-meta.authentik.svc.cluster.local/jwks/headlamp"';
+          sub_filter_once on;
+          sub_filter_types application/json;
+        }
+
+        # The keys, straight from authentik in-cluster.
+        location = /jwks/headlamp {
+          proxy_pass http://authentik-server.authentik.svc.cluster.local/application/o/headlamp/jwks/;
+          proxy_set_header Host authentik.ngoldack.de;
+        }
+
+        location / { return 404; }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oidc-meta-proxy
+  namespace: authentik
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oidc-meta-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oidc-meta-proxy
+    spec:
+      nodeSelector:
+        topology.homelab/site: home
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.29-alpine
+          args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Deliberately no runAsNonRoot: the image's default user is root
+            # and the kubelet refuses to start such a container under
+            # runAsNonRoot. It listens on 8080 (non-privileged) and drops all
+            # capabilities, so root buys it nothing.
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+      volumes:
+        - name: conf
+          configMap:
+            name: oidc-meta-proxy-config
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oidc-meta
+  namespace: authentik
+spec:
+  selector:
+    app.kubernetes.io/name: oidc-meta-proxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

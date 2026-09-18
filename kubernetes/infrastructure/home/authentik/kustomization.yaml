@@ -22,6 +22,7 @@ resources:
   - ldap-outpost.yaml
   - server-service-local.yaml
   - portal-bridge.yaml
+  - oidc-meta-proxy.yaml
   - authentik-backup-s3-credentials.sops.yaml
   - objectstore.yaml
   - scheduled-backup.yaml

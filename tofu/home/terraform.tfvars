@@ -86,20 +86,24 @@ nodes = {
     vm_id     = 103
     cpu_cores = 4
     cpu_class = "efficiency"
-    # 6 GiB: etcd + apiserver + scheduler/controller-manager + the Talos
-    # runtime itself, with room for an apiserver burst. Raised from 4 in the
-    # two-worker consolidation; fleet total stays inside the allocatable
-    # budget (6 + 28 + 48 = 82 of 90).
-    memory     = 6144
+    # 8 GiB: etcd + apiserver + scheduler/controller-manager + the Talos
+    # runtime itself, with room for an apiserver burst. Raised from 4 to 6 in
+    # the two-worker consolidation, then to 8 on 2026-09-18 after the node hit
+    # memory pressure: with no swap, Talos's OOM controller started SIGKILLing
+    # besteffort pods in a tight loop, which starved the control plane
+    # (apiserver TLS handshake timeouts, controller-manager and scheduler
+    # not ready). Fleet total stays inside the allocatable budget
+    # (8 + 28 + 48 = 84 of 94).
+    memory     = 8192
     disk_size  = 32
     talos_role = "controlplane"
-    # Tailscale, control-plane only: an out-of-band admin path to the Talos
-    # API (:50000) that works from anywhere without touching LAN or the
-    # KubeSpan mesh. (Originally added for the GitHub Actions etcd-backup
-    # job; that job is gone — backups are now an in-cluster CronJob — but
-    # the admin path is kept. See README "Known limitations".)
-    # See local.tailscale_config_patch in talos.tf for the TS_AUTHKEY wiring.
-    extensions = ["siderolabs/tailscale"]
+    # No extensions: the siderolabs/tailscale extension was removed on
+    # 2026-09-18. It had been kept for an out-of-band admin path to the Talos
+    # API, but the GitHub-hosted etcd-backup job that needed the tailnet was
+    # already retired in favour of the in-cluster talos-backup CronJob, and
+    # the extension sat in ext-tailscale's restart-forever loop on this node
+    # without ever authenticating. Dropping it also shrinks the boot image.
+    extensions = []
     # node_labels omitted: role, topology.zone, cpu model/cores and memory.gb
     # are derived automatically.
   }

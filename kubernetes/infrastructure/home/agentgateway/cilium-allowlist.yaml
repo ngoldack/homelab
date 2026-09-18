@@ -47,9 +47,10 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
-    # Model backends: the only in-cluster backend is the llmkube llama.cpp
-    # InferenceService (backends.yaml: qwen36-35b.llmkube-system.svc:8080), so
-    # this is scoped to that namespace instead of every cluster endpoint.
+    # Model backends: the only in-cluster backend is the llmkube KV broker in
+    # front of the llama.cpp InferenceService (backends.yaml:
+    # llama-kv-broker.llmkube-system.svc:8080), so this is scoped to that
+    # namespace instead of every cluster endpoint.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: llmkube-system

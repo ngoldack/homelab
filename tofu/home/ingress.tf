@@ -37,8 +37,10 @@ locals {
   # cross-site endpoints, nesting WireGuard(1420) inside Tailscale(1280) and
   # black-holing large cross-site packets. Without the extension there is no
   # tailnet interface to harvest, so KubeSpan advertises only the node's
-  # direct public endpoint. Home nodes keep tailscale as the out-of-band
-  # admin path.
+  # direct public endpoint. The home nodes used to keep tailscale as an
+  # out-of-band admin path; 2026-09-18 that extension was removed from the
+  # whole cluster (see terraform.tfvars), so no node runs it now — the same
+  # harvesting risk applied to cp-main, which is the control plane.
   cloud_base_extensions = []
 
   cloud_extension_sets = {

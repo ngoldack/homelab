@@ -97,8 +97,8 @@ paths via the `llm-edge` route, and gateway-scoped `AgentgatewayPolicy`
 
 | Path (`PathPrefix`) | Backend | Upstream |
 |---|---|---|
-| `/v1/chat/completions` | `local-p100` | llmkube llama.cpp on the P100, `/v1/chat/completions` |
-| `/v1/models` | `local-p100` | same, passthrough (the "Models" route type 501s for custom providers) |
+| `/v1/chat/completions` | `local-p100` | llmkube llama.cpp on the P100 via `llama-kv-broker`, `/v1/chat/completions` |
+| `/v1/models` | `local-p100` | same, passthrough via `llama-kv-broker` (the "Models" route type 501s for custom providers) |
 | `/v1/synthetic-small` | `synthetic-small` | `api.synthetic.new`, model `syn:small:text` |
 | `/v1/synthetic-large` | `synthetic-large` | `api.synthetic.new`, model `syn:large:text` |
 | `/v1/synthetic-deepseek` | `synthetic-hf-deepseek` | `api.synthetic.new`, model `hf:deepseek-ai/DeepSeek-V4.1-Flash` |

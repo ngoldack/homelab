@@ -4,7 +4,8 @@
 # a single successful backup. Five defects in it were fixed; the sixth was
 # fatal and environmental — every CI run joined a NEW ephemeral Tailscale
 # device needing manual admin-console approval, so it could never run
-# unattended. Running inside the cluster removes the problem at the root
+# unattended. (The cluster's own Tailscale extension was removed
+# 2026-09-18, so nothing joins the tailnet any more.) Running inside the cluster removes the problem at the root
 # rather than working around it: there is no tailnet hop, and no node IP or
 # hostname to keep in sync (see the endpoint note below).
 apiVersion: batch/v1

@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - cilium-default-deny.yaml
   - cilium-allowlist.yaml
+  - cilium-gateway-backends.yaml
   - namespace.yaml
   - helmrelease.yaml

@@ -50,11 +50,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: reaper
-          # digest: pinned after build (buildctl via image-builds/hermes-egress-reaper.yaml).
-          image: registry.ngoldack.de/hermes-egress-guard:0.1.1-16569d2
-          # digest: PENDING build (build-hermes-egress-reaper-16569d2) — see authorizer.yaml
-          # placeholder rationale: uncommitted worktree context cannot produce a
-          # digest in this run; pin from the next buildctl run.
+          # Pinned by manifest digest — same single guard image as the
+          # authorizer (one image, two roles selected by argv), so the digest
+          # equals the authorizer's; it is repeated here because a Deployment
+          # may not inherit another's pin. Re-pin after every rebuild.
+          image: registry.ngoldack.de/hermes-egress-guard@sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
           # argv dispatch: the image entrypoint imports this module and calls
           # main(). There is no EGRESS_ROLE env — the module path IS the
           # selector, so a wrong/missing arg fails loudly at startup.

@@ -55,9 +55,15 @@ class ReaperConfig:
     listen_port: int
 
 
-def quarantine_entry(event: dict, now: int) -> str:
-    """The ConfigMap value for one quarantine: reason/strikes/TTL, one line."""
-    ttl = now + int(event.get("ttl_s") or 0)
+def quarantine_entry(event: dict, now: int, default_ttl_s: int = 0) -> str:
+    """The ConfigMap value for one quarantine: reason/strikes/TTL, one line.
+
+    The event MAY carry its own ``ttl_s``; when it does not, the reaper's
+    configured default applies, so a ledger entry always states a real expiry
+    instead of an already-past one.
+    """
+    ttl_seconds = int(event.get("ttl_s") or default_ttl_s or 0)
+    ttl = now + ttl_seconds
     return json.dumps(
         {
             "reason": event.get("reason") or "unknown",
@@ -124,7 +130,7 @@ class Reaper:
                 "session %s: no live claims found; quarantining the hash anyway",
                 session_hash,
             )
-        entry = quarantine_entry(event, now)
+        entry = quarantine_entry(event, now, self.config.quarantine_ttl_s)
         self._write_ledger(session_hash, entry)
         deleted = 0
         for claim in claims:

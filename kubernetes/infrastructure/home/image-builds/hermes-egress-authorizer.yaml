@@ -9,13 +9,24 @@
 # tag; hermes-egress-reaper.yaml pushes the reaper tag.
 #
 # OUTPUT: this Job records the digest of the image it BUILT. Last built digest:
-#   (pending — first build; the hermes-egress/authorizer.yaml image line carries
-#   a pin-after-build comment until this Job runs and the digest lands)
+#   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
+#   (registry.ngoldack.de/hermes-egress-guard:0.1.0, first build; produced from
+#   this revision's sources through buildkitd and pinned in
+#   hermes-egress/authorizer.yaml + reaper.yaml. The sources were not yet
+#   pushed when this build ran, so the revision recorded below is the local
+#   worktree's; a rebuild after the push yields the same image content and a
+#   new digest — re-pin.)
 # Re-record the digest here and re-pin hermes-egress/authorizer.yaml after
 # every rebuild.
 #
 # RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
 # tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
+#
+# !! The context SHA above MUST be the commit that contains
+# image-builds/hermes-egress-guard/ — a run against a tree without those
+# sources fails in the Dockerfile's COPY step. The digest recorded above was
+# produced from this working revision through buildkitd directly
+# (buildctl --local context=.), which is the same build the Job performs.
 apiVersion: batch/v1
 kind: Job
 metadata:

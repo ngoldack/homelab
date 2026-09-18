@@ -50,15 +50,12 @@ spec:
           type: RuntimeDefault
       containers:
         - name: authorizer
-          # digest: pinned after build (buildctl via image-builds/hermes-egress-authorizer.yaml;
-          # until then the tag alone would violate the repo pin rule, so this
-          # manifest is NOT Flux-wired until the digest line lands — see README).
-          image: registry.ngoldack.de/hermes-egress-guard:0.1.0-16569d2
-          # digest: PENDING build — the build context is the remote git tree
-          # (image-builds convention: --opt=context=<remote>#SHA>), and this
-          # worktree is uncommitted by assignment (no commit/push), so the
-          # digest cannot be produced in this run. Placeholder comment per
-          # contract; pin from the next buildctl run after the context lands.
+          # Pinned by manifest digest (Docker-Content-Digest of
+          # registry.ngoldack.de/hermes-egress-guard:0.1.0, built from this
+          # revision's sources through buildkitd:1234 and verified with
+          # `skopeo inspect`). Re-pin after every rebuild — record the new
+          # digest in image-builds/hermes-egress-authorizer.yaml too.
+          image: registry.ngoldack.de/hermes-egress-guard@sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
           # argv dispatch: the image entrypoint imports this module and calls
           # main(). There is no EGRESS_ROLE env — the module path IS the
           # selector, so a wrong/missing arg fails loudly at startup.

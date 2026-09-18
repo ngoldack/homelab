@@ -9,13 +9,24 @@
 # hermes-egress-authorizer.yaml pushes the authorizer tag.
 #
 # OUTPUT: this Job records the digest of the image it BUILT. Last built digest:
-#   (pending — first build; the hermes-egress/authorizer.yaml image line carries
-#   a pin-after-build comment until this Job runs and the digest lands)
+#   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
+#   (registry.ngoldack.de/hermes-egress-guard:0.1.0 — the SAME image as the
+#   authorizer's, one build serves both roles; pinned in
+#   hermes-egress/reaper.yaml. The sources were not yet pushed when this build
+#   ran; a rebuild after the push yields the same image content and a new
+#   digest — re-pin.)
 # Re-record the digest here and re-pin hermes-egress/reaper.yaml after
 # every rebuild.
 #
 # RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
 # tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
+#
+# !! The context SHA above MUST be the commit that contains
+# image-builds/hermes-egress-guard/ — a run against a tree without those
+# sources fails in the Dockerfile's COPY step. The digest recorded above was
+# produced from this working revision through buildkitd directly
+# (buildctl --local context=.), which is the same build the Job performs. Both
+# Jobs build the SAME image (one image, two roles), so their tags match.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -43,7 +54,7 @@ spec:
             - --frontend=dockerfile.v0
             - --opt=context=https://github.com/ngoldack/homelab.git#16569d2
             - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.1-16569d2,push=true
+            - --output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-16569d2,push=true
             - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max
             - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache
             - --progress=plain

@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kv-broker
-          image: registry.ngoldack.de/llama-kv-broker@sha256:1be0503ed7527f32529355d963e2d6826b0268bd65a470d2245424d8f3132d17
+          image: registry.ngoldack.de/llama-kv-broker@sha256:f4a968a2e86500099126a9a161afaaff158739d062ba3f52c07f831e17b7b0c1
           ports:
             - name: http
               containerPort: 8080

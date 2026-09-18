@@ -153,21 +153,23 @@ spec:
         limits:
           cpu: 1000m
           memory: 9Gi
-      # Probes widened from the chart default (3x10s liveness) to 12x10s.
-      # Evidence from the 2026-09-18 kill of worker-0 mid-retain:
-      #   20:28:25  claimed the 24.6M-token batch_retain
-      #   20:28:32  split into ~10k sub-batches
-      #   20:29:19  "Processing sub-batch 1" — 47s after the claim
-      #   20:29:20  every extraction call: HTTP 429 from api.synthetic.new
-      #   20:29:23  "waiting for 1 in-flight tasks" (graceful SIGTERM)
-      # So the stall is the synchronous planning/encoding pass (47s, well past
-      # the 30s default) compounded by upstream 429 backoff on a document that
-      # fans into thousands of sub-calls. The SIGTERM then requeued the
-      # operation onto the other replica, which repeated it. 2 minutes covers
-      # a whole pass, so a slow-but-progressing retain is no longer killed.
-      # The durable fixes are producer-side (submit whole documents, not the
-      # 100MB above) and upstream (the 429s come from the model provider, not
-      # this cluster's gateway).
+      # Probes widened from the chart default (3x10s) to 12x10s. The
+      # 2026-09-18 kill events read "Liveness probe failed: /health/live:
+      # context deadline exceeded" — the request TIMED OUT rather than the
+      # failure count running out — while the app's loop watchdog reported only
+      # brief (~1s) stalls in the same window, and a direct in-pod curl answers
+      # 200 in <1ms. So the endpoint is healthy but intermittently too slow to
+      # answer within 5s, and the chart's 3-miss budget turns that into a
+      # restart mid-retain, requeuing the operation onto the other replica
+      # (observed alternating between worker-0 and worker-1).
+      # The load behind it: one 24.6M-token document (claimed 20:28:25,
+      # "Processing sub-batch 1" 47s later, then every extraction call hitting
+      # HTTP 429 from api.synthetic.new) fans into thousands of sub-calls.
+      # A wider budget lets a worker that is genuinely progressing keep its
+      # claimed work; verified: no liveness kills for the 15+ min after the
+      # 12x10s config rolled, both replicas steady.
+      # Durable fixes are producer-side (bank unikraft submitted ~100MB of
+      # text in one retain) and upstream (the 429s are the model provider's).
       livenessProbe:
         httpGet:
           path: /health/live

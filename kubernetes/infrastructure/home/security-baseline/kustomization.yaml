@@ -6,6 +6,10 @@ resources:
   - flux-system-cilium.yaml
   # Intra-namespace communication allowed by default (operator requirement).
   - intra-namespace-allow.yaml
+  # stop projecting a `default` ServiceAccount token into pods that cannot use
+  # it: 27 infrastructure namespaces whose `default` SA has no binding and whose
+  # pods use no Kubernetes API. Method, counts and the skip list are in the file.
+  - default-service-accounts.yaml
 
 # There is deliberately NO CiliumClusterwideNetworkPolicy here.
 #

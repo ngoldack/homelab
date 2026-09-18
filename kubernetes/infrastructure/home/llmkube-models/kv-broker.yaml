@@ -133,6 +133,12 @@ kind: Service
 metadata:
   name: llama-kv-broker
   namespace: llmkube-system
+  # VMServiceScrape/llama-kv-broker (../monitoring/scrapes.yaml) selects the
+  # SERVICE by this label — the selector below only picks the pods. Without it
+  # the scrape job discovers zero targets ("0/0 up") and /metrics never lands in
+  # VictoriaMetrics.
+  labels:
+    app: llama-kv-broker
 spec:
   # ClusterIP only: the slot endpoints must never be reachable outside this hop.
   selector:

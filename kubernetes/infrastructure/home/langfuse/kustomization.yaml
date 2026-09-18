@@ -12,6 +12,7 @@ resources:
   - scheduled-backup.yaml
   - valkey.yaml
   - clickhouse.yaml
+  - clickhouse-backup.yaml
   - keeper.yaml
   - langfuse-secret.sops.yaml
   - sources.yaml

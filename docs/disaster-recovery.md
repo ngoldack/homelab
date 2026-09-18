@@ -51,9 +51,17 @@ framing only holds if the rotation below is judged unsafe on a single
 control-plane cluster.
 
 **Order matters, and so does the prerequisite.** Take a fresh etcd snapshot
-first (`talos-backup`) and confirm a recent CNPG base backup exists — every
-step below is recoverable only from those. Plan a maintenance window: the
-control plane restarts as certificates change.
+first and confirm a recent CNPG base backup exists — every step below is
+recoverable only from those. Plan a maintenance window: the control plane
+restarts as certificates change.
+
+The snapshot does not have to wait for the `talos-backup` CronJob: `talosctl
+etcd snapshot <file>` works directly and is what the encryption drill used, so
+a rotation can start even while the CronJob's egress fix is unmerged. Two
+properties to handle: such a snapshot carries Secrets ciphertext under the
+**leaked** key, so age-encrypt it (or delete it once the rotation is verified),
+and any snapshot taken before the rotation keeps old-key ciphertext forever —
+it is a recovery artifact, not a post-rotation source of truth.
 
 1. **Rotate the CAs.** `talosctl rotate-ca` rotates both the Talos CA and the
    Kubernetes API issuing CA (each selectable). Its `--dry-run` defaults to

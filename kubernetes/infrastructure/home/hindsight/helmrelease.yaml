@@ -109,6 +109,20 @@ spec:
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
         # Audit logging off by default; enable so the ingest paths are auditable.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
+        # Retention (verified against hindsight_api/config.py in the shipped
+        # image: these feed the hourly maintenance sweep in
+        # engine/maintenance.py `_run_retention`). The defaults keep rows
+        # forever — DEFAULT_OPERATION_RETENTION_DAYS=0 ("zero retention days
+        # disables automatic pruning entirely, and is the default") and
+        # DEFAULT_AUDIT_LOG_RETENTION_DAYS=-1 (keep forever) — so the
+        # Postgres store grows without bound and every prompt/response body
+        # llm_requests captured during retain survives indefinitely. 14 days
+        # bounds that store and the personal-data surface; bump only with a
+        # reason. Config applies on pod start: api AND both workers read it
+        # (the worker env block below is written out in full, not anchored),
+        # so the values are repeated there on purpose.
+        HINDSIGHT_API_OPERATION_RETENTION_DAYS: "14"
+        HINDSIGHT_API_AUDIT_LOG_RETENTION_DAYS: "14"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation
       # LLM chains are long and must not starve recall latency on the API pod.
@@ -166,6 +180,11 @@ spec:
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
         # Audit logging is disabled by default — roll it on for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
+        # Same retention window as the api (the chart does not merge api.env
+        # into the worker — the env above is deliberately written out in
+        # full, not anchored — and the maintenance sweep runs per process).
+        HINDSIGHT_API_OPERATION_RETENTION_DAYS: "14"
+        HINDSIGHT_API_AUDIT_LOG_RETENTION_DAYS: "14"
     controlPlane:
       enabled: true
     nodeSelector:

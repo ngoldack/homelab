@@ -136,3 +136,70 @@ a failure domain in [`docs/architecture.md`](architecture.md).
 | GitHub (`ngoldack/homelab`) | Source of truth for Flux, and the runner's job queue | Workflows + runner Deployment in-repo; the repo itself is not |
 | UDM Pro / home network | VLANs, routing, the `.1` resolver | No repo footprint (the split-horizon resolver was retired 2026-09-13) |
 | Authentik edge outpost chain | Login for every edge-served app | In-repo (`authentik/`, `network/edge.yaml`) but depends on the cloud node being up |
+
+## Retention and redaction
+
+What each service keeps, for how long, and what was deliberately left as an
+accepted risk. Verified against the manifests, the deployed images and the
+live stores on 2026-09-18; knobs that do not exist were not invented.
+
+| Store | Knob | Set to | Protects against |
+| --- | --- | --- | --- |
+| Hindsight (`hindsight` Postgres) | `HINDSIGHT_API_OPERATION_RETENTION_DAYS` / `HINDSIGHT_API_AUDIT_LOG_RETENTION_DAYS` (api + worker env in `hindsight/helmrelease.yaml`; verified against `hindsight_api/config.py` in the shipped image — they feed the hourly `_run_retention` sweep) | `14` / `14` | Unbounded growth: defaults are `0` (pruning disabled) and `-1` (keep forever); `llm_requests` alone grew to 222 MB in two days with every prompt/response body stored indefinitely |
+| Hermes → Langfuse trace payloads | `HERMES_LANGFUSE_CAPTURE` + `HERMES_LANGFUSE_MAX_CHARS` (`hermes/statefulset.yaml`; verified against the bundled plugin source in the deployed image) | `sanitized` (explicit pin of the plugin default) / `12000` | Raw prompt/response bodies: `sanitized` redacts secret-shaped strings (API keys, JWTs, private keys, `password=`) before truncation; pinning the default in git makes "never `full`" auditable and survives plugin default drift at image bumps |
+| agentgateway → Langfuse spans/access log | `frontend.accessLog.attributes.remove` / `frontend.tracing.attributes.remove` exist in the installed `agentgateway.dev/v1alpha1` CRD (verified live against the CRD schema) | not set — nothing to remove | The default access-log field set (`http.method/host/path/version/status`, `trace.id`, `span.id`, `jwt.sub`, `gen_ai.*`) carries no `authorization` or other request headers — verified over live gateway logs, zero header/auth fields in 40 lines — so there is nothing for the redaction knob to strip today; the knob is the ready-made fix if an `add:` CEL expression ever surfaces one |
+| Langfuse ClickHouse (`events_full`, `events_core`) | none in this repo — the app's own migrations own the DDL (`0039_create_events_full.up.sql`, `0040_create_events_core.up.sql` contain no `TTL`), and the only app-level retention control is the per-project `retention_days` column behind Langfuse's Enterprise-gated Data-Retention feature (UI/Org-API only; `LANGFUSE_INIT_PROJECT_RETENTION` seeds new projects at init only — the existing project was created without it, and no `LANGFUSE_EE_LICENSE_KEY` is set). **Accepted risk, with the proposed SQL** if a window is wanted: `ALTER TABLE default.events_full MODIFY TTL toDateTime(start_time) + INTERVAL 90 DAY;` and `ALTER TABLE default.events_core MODIFY TTL toDateTime(start_time) + INTERVAL 90 DAY;` — run manually against `langfuse-clickhouse-0-0-0` (28.42 MiB today; at the observed rate the bound is years away, so this is growth control, not urgency). A migration that recreates either table would drop the TTL, which the alert pack does not yet watch — re-check after every Langfuse chart bump | — | The OLAP store growing without bound (unlike the v3 `traces`/`observations` tables, the v4 `events_*` tables have no TTL at all; only `observations_batch_staging` carries one, 48 h) |
+| Hindsight LLM trace payloads | `HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS` exists (default `1` day — already bounded) and `HINDSIGHT_API_LLM_TRACE_MAX_CHARS` exists; `HINDSIGHT_API_LLM_TRACE_ENABLED`/`_SCOPES` control capture itself | not changed — defaults already bounded | Prompt/response bodies in `llm_requests` expire after a day by default, so no window was added; the memory corpus itself (`memories`) has no TTL knob — accepted risk, bounded only by the operation retention above |
+
+## Cloud ingress node — hardening posture and accepted risks
+
+Node: `home-talos-ingress-fsn1` (Hetzner cax11, Talos 1.13.4, declared in
+`tofu/home/ingress.tf`). What is enforced vs. what remains unenforced:
+
+**Enforced (verified live against the node's machine config):**
+
+| Restriction | Field | Where |
+| --- | --- | --- |
+| Nothing schedules here by default | `machine.kubelet.extraArgs["register-with-taints"] = "dedicated=ingress:NoSchedule"` — registration-time, so there is no untaunted window between node join and a tainting Job | `tofu/home/ingress.tf` (live config confirmed) |
+| truenas-csi (tolerates all taints, hostPath `/`) kept off | positive `nodeLabels: topology.homelab/site: cloud` — a taint alone cannot stop an `operator: Exists` DaemonSet | `tofu/home/ingress.tf` |
+| Node API surface closed to the internet | HCloud firewall (`hcloud_firewall.cloud`) allows only UDP 51820 (KubeSpan), TCP 443 (edge Gateway) and ICMP; probed from outside: 10250, 10255, 50000, 30308 (edge Gateway's nodePort), 9100 all refused | `tofu/home/ingress.tf` |
+| Kubelet hardening (whole cluster) | `defaultRuntimeSeccompProfileEnabled: true`, `disableManifestsDirectory: true`, anonymous kubelet auth off, `protectKernelDefaults: true` (all Talos defaults, present in the live config) | Talos defaults |
+| Drift detection | `UnexpectedWorkloadOnIngressNode` VMRule fires on any Running/Pending pod on the node outside the reviewed owner allowlist | `monitoring/rules-platform.yaml` |
+
+**Expressible in this Talos version (1.13.4) but deliberately not set** — the
+candidate fields exist (`machine.sysctls`, `machine.kubelet.extraArgs` beyond
+the taint, `IngressFirewall` documents accepted via config patches; the live
+node runs hardened sysctl defaults such as `kernel.unprivileged_bpf_disabled=1`,
+`kernel.kptr_restrict=2`, `kernel.yama.ptrace_scope=2` already):
+
+| Restriction | Status |
+| --- | --- |
+| Talos `IngressFirewall` (node-level L3/L4 rules independent of the HCloud firewall) | Not configured — the HCloud firewall already blocks everything but 443/51820/ICMP inbound, and a node-level duplicate adds a second failure mode (a bad rule can cut KubeSpan exactly like the tailscale incident recorded in `ingress.tf`). Accepted risk: nothing filters node-originated *outbound* traffic at the node level (Cilium CNPs filter pod traffic; the host itself can reach anything). If Cilium's host firewall (`cni.hostFirewall`) is ever enabled cluster-wide, revisit |
+| Kubelet read-only port 10255 | Already closed (Talos default, confirmed: no listener, external probe refused) — no field needed |
+| Restricting the kubelet's cAdvisor / metrics exposure | Covered by the firewall: 10250/10255 are not internet-reachable; `jwt.sub`-style internal metrics stay in-cluster |
+
+**Vestigial exposure:** the HCloud firewall still admits TCP 443 from
+anywhere; that is load-bearing (the `edge` Gateway's LoadBalancer Service pins
+2.28.31.116 on this node and serves every `*.ngoldack.de` edge name through
+Cilium). The older comment in `ingress.tf` calls the 443 rule vestigial from
+the retired hostNetwork Envoy era, but the *current* edge Gateway made it
+load-bearing again — do not remove it.
+
+**Taint/toleration exactness (audited over the full `kustomize build` of every
+infrastructure directory plus the live node):** exactly two workloads tolerate
+`dedicated=ingress:NoSchedule`, both with a matching positive selector —
+`authentik/authentik-proxy` and `authentik/portal-bridge-cloud`
+(`nodeSelector: topology.homelab/site: cloud`), both live on the node as
+intended. `authentik/authentik-server` tolerates the taint with NO nodeSelector
+but its `topologySpreadConstraints` on `topology.homelab/site`
+(`maxSkew: 1`, `DoNotSchedule`) splits it deterministically one-replica-per-site
+— this is the one broad-ish toleration in the tree, and it is intentional
+(the straddle keeps a local authentik upstream on the edge node for
+`portal-bridge-cloud`, see the comment in `authentik/helmrelease.yaml`).
+Everything tolerating via `operator: Exists` (cilium, multus, tetragon,
+crowdsec, node-exporter, vlagent) is a per-node DaemonSet or explicitly
+documented as such in its manifest. The live node's pod set matches this
+allowlist exactly (11 pods, all accounted for). Residual risk: the bare
+`kube-system/hosttest` pod (created by hand on 2026-09-16, Succeeded phase,
+no owner) proves a cluster-admin can still schedule anything here deliberately —
+taints do not bind humans; the drift alert is the compensating control.

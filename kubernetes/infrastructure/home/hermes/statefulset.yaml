@@ -150,6 +150,26 @@ spec:
             # ../../langfuse/cilium-allowlist.yaml.
             - name: HERMES_LANGFUSE_BASE_URL
               value: http://langfuse-web.langfuse.svc.cluster.local:3000
+            # Redaction/retention knobs of the bundled observability/langfuse
+            # plugin (env names verified against the plugin source in the
+            # deployed image: plugins/observability/langfuse reads
+            # HERMES_LANGFUSE_CAPTURE / _MAX_CHARS / _SAMPLE_RATE per call).
+            # CAPTURE chooses how much conversation content reaches Langfuse:
+            #   metadata  — no content, shape/size stubs only
+            #   sanitized — content after secret-pattern redaction
+            #               (API keys, JWTs, private keys, password=
+            #               assignments), THEN truncated (default)
+            #   full      — raw content, truncated only
+            # Pinned explicitly so the guarantee "traces store redacted,
+            # bounded content — never raw" is auditable in git and cannot be
+            # lost to a plugin default change at the next image bump; MAX_CHARS
+            # bounds each exported field. Pattern redaction is defense in
+            # depth, not DLP — documented as the residual risk in
+            # docs/service-catalog.md. Do NOT set full here.
+            - name: HERMES_LANGFUSE_CAPTURE
+              value: sanitized
+            - name: HERMES_LANGFUSE_MAX_CHARS
+              value: "12000"
             # P100 request budget, 600 s (default is 1800). This is the knob the
             # client actually reads: run_agent._resolved_api_call_timeout and
             # chat_completion_helpers._stream_timeouts both prefer a per-provider

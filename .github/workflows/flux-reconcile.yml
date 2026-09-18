@@ -54,30 +54,37 @@ jobs:
 
       # Order matters: the source is refreshed first, so the children annotated
       # below already see the new revision and reconcile it immediately instead
-      # of waiting out their own 10m poll.
-      - name: Force a fetch of main
-        run: flux reconcile source git flux-system -n flux-system
+      # of waiting out their own 10m poll. The revision this run must end with
+      # applied everywhere is whatever the fetch just produced.
+      - name: Force a fetch of main and record the revision it produced
+        run: |
+          flux reconcile source git flux-system -n flux-system
+          REVISION=$(kubectl get gitrepository flux-system -n flux-system \
+            -o jsonpath='{.status.artifact.revision}')
+          echo "REVISION=$REVISION" >> "$GITHUB_ENV"
 
       - name: Reconcile the root Kustomization
         run: flux reconcile kustomization flux-system -n flux-system
 
       - name: Nudge every child Kustomization
-        run: |
-          REQUESTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          echo "REQUESTED_AT=$REQUESTED_AT" >> "$GITHUB_ENV"
-          kubectl annotate kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all \
-            "reconcile.fluxcd.io/requestedAt=$REQUESTED_AT" --overwrite
+        run: >-
+          kubectl annotate kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
+          "reconcile.fluxcd.io/requestedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
 
       # A Kustomization that is already Ready stays Ready until its own
-      # reconcile starts, so waiting on Ready alone can pass while this run's
-      # request has not been handled at all — a green run that proves nothing.
-      # Wait for kustomize-controller to echo the annotation written above
-      # (it copies the value verbatim into status.lastHandledReconcileAt)
-      # before trusting the Ready condition at all.
-      - name: Wait until this run's reconcile request has been handled
+      # reconcile starts, so a bare Ready check can pass before this revision
+      # has been applied anywhere — a green run proving nothing. Gate on the
+      # revision itself being the last thing every one of them applied.
+      #
+      # Deliberately NOT the reconcile-request annotation's echo in
+      # status.lastHandledReconcileAt: that value can be superseded before a
+      # controller consumes it, which makes the equality unsatisfiable and
+      # hangs the run for the whole timeout (observed). lastAppliedRevision has
+      # no such lifecycle and is set only by an actual apply.
+      - name: Wait until this run's revision is applied everywhere
         run: >-
           kubectl wait kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
-          --for=jsonpath='{.status.lastHandledReconcileAt}'="$REQUESTED_AT" --timeout=15m
+          --for=jsonpath='{.status.lastAppliedRevision}'="$REVISION" --timeout=15m
 
       - name: Wait for every Kustomization to be Ready
         run: >-

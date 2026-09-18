@@ -572,10 +572,11 @@ that used to be typed by hand: it forces a fetch of the GitRepository,
 reconciles the root Kustomization, nudges every child, then waits for all of
 them to be Ready — so a merge converges in seconds instead of waiting out the
 10m poll interval, and fails loudly if reconciliation does not converge. The
-wait is not a bare Ready check: it first waits for kustomize-controller to
-handle *this run's* reconcile request (the `requestedAt` annotation echoed into
-`status.lastHandledReconcileAt`), because an already-Ready Kustomization would
-otherwise satisfy a Ready check before the new revision was ever applied.
+wait is not a bare Ready check: an already-Ready Kustomization would satisfy
+one before the new revision was ever applied, so the workflow first waits for
+the revision this run fetched to be what every Kustomization last applied
+(`status.lastAppliedRevision`), and only then for Ready — a green run means the
+merge is actually live, not merely that nothing is currently broken.
 Trigger it by merging, or manually with
 `gh workflow run flux-reconcile.yml`.
 

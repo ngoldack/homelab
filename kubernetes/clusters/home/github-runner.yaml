@@ -1,0 +1,34 @@
+# The self-hosted GitHub Actions runner for this repo.
+#
+# It exists so that post-merge Flux reconciliation happens inside the cluster
+# instead of on the operator's laptop: .github/workflows/flux-reconcile.yml
+# runs on push to main and nudges the GitRepository and every Kustomization
+# through the runner's ServiceAccount, which rbac.yaml scopes to exactly that
+# in flux-system — no kubeconfig exists outside the cluster.
+#
+# No dependsOn: the app needs no CRD, no Gateway and no datastore. Its image is
+# pulled by the kubelet from the cluster's own Zot (see
+# infrastructure/home/image-builds/github-runner.yaml for how it is built).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: github-runner
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/github-runner
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

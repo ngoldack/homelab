@@ -1,0 +1,47 @@
+# github-runner — the cluster's self-hosted GitHub Actions runner image.
+#
+# WHY THIS IMAGE
+#
+# This repo's CI runs inside the cluster: the workflow performs the post-merge
+# Flux reconcile that used to be typed by hand on the operator's laptop. The
+# runner therefore needs the flux CLI, and the upstream
+# ghcr.io/actions/actions-runner image has none. Nothing can be installed at
+# job time either — the runner namespace is PSA restricted, where setuid
+# binaries (sudo) cannot work — so the flux binary is COPY'd out of the
+# official flux-cli image and the registration entrypoint is baked in.
+#
+# BUILD SHAPE
+#
+# The Dockerfile AND the entrypoint ship as the ConfigMap
+# `github-runner-dockerfile` (see ../kustomization.yaml), mounted at
+# /dockerfile and passed as BOTH the build context and the dockerfile local:
+# those two files are the entire build input. Nothing is fetched from the repo
+# at build time, so this Job needs no `--opt=context=...git#<sha>` pin and can
+# be committed in the same change as the files it builds.
+#
+# RE-BUILDING
+#
+# Jobs are immutable. A rebuilt image (new base digests, changed entrypoint)
+# means bumping the Job name suffix in ../github-runner.yaml, its --output tag,
+# and the digests below together; Flux prunes the old Job.
+#
+# PINS (multi-arch index digests, checked 2026-09-18)
+#   ghcr.io/fluxcd/flux-cli:v2.9.5        sha256:704d5529535570a495249b643159c93a9aa88ffca07813c974a54b7ba6edbd86
+#   ghcr.io/actions/actions-runner:latest sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+# flux-cli v2.9.5 is the same release line as the cluster's controllers
+# (source/kustomize-controller v1.9.5). The runner base is Ubuntu 24.04 with
+# curl, jq and git already installed and its `runner` user at uid 1001 — the
+# uid the pod pins in its securityContext.
+FROM ghcr.io/fluxcd/flux-cli:v2.9.5@sha256:704d5529535570a495249b643159c93a9aa88ffca07813c974a54b7ba6edbd86 AS flux
+FROM ghcr.io/actions/actions-runner@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
+
+# The upstream image's CMD is a bare bash with an unconfigured runner. The
+# entrypoint registers this pod as an ephemeral repo-scoped runner and then
+# runs exactly one job.
+COPY --from=flux /usr/local/bin/flux /usr/local/bin/flux
+# A ConfigMap-mounted file is 0644, so bash is the interpreter: the kernel
+# cannot execute it as a program.
+COPY runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh
+
+USER 1001:1001
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/runner-entrypoint.sh"]

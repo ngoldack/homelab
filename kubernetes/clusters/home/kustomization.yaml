@@ -63,6 +63,10 @@ resources:
   # Media stack: Jellyfin/Jellyseerr + the *arr download chain, with the
   # download pods' egress VPN-routed via VLAN 2080.
   - media.yaml
+  # Self-hosted GitHub Actions runner for this repo: performs the post-merge
+  # Flux reconcile from inside the cluster, so no laptop holds a kubeconfig or
+  # types `flux reconcile` after a merge. Nothing depends on it.
+  - github-runner.yaml
   # Admission policy engine (Kyverno, audit-only policies + PSA labels). No
   # app depends on it: it observes rather than gates.
   - kyverno.yaml

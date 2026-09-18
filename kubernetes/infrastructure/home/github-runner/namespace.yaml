@@ -1,0 +1,14 @@
+# github-runner — the namespace the self-hosted CI runner pod runs in.
+#
+# PSA restricted is the floor here, not the cluster default (Talos enforces
+# `baseline`): this pod's ServiceAccount may patch Flux objects in flux-system
+# (see rbac.yaml) and it carries the GitHub PAT that registers runners, so only
+# a hardened pod may run in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: github-runner
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

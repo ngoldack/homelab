@@ -1,0 +1,35 @@
+# What the CI runner is allowed to do from inside the cluster, and nothing
+# more: nudge reconciliation of the two Flux kinds it needs and read their
+# state. It cannot create, edit or delete workload objects in any namespace.
+#
+# patch is the whole mechanism: `flux reconcile` and `kubectl annotate
+# --overwrite` both set the reconcile.fluxcd.io/requestedAt annotation, and
+# `watch` is what the workflow's `kubectl wait` needs. The Role is scoped to
+# flux-system — every Kustomization and the GitRepository live there — so the
+# runner has no authority in any application namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-flux-reconcile
+  namespace: flux-system
+rules:
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-flux-reconcile
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-flux-reconcile
+subjects:
+  - kind: ServiceAccount
+    name: ci-runner
+    namespace: github-runner

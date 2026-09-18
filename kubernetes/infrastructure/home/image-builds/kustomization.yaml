@@ -10,6 +10,7 @@ resources:
   - hermes-sandbox-runtime.yaml
   - llama-p100.yaml
   - hermes-agent-sandbox-plugin.yaml
+  - github-runner.yaml
 
 # The ik_llama build needs OUR Dockerfile (with the sm_60 fast-FP16 patch) while
 # its build context is the remote ik_llama git tree. buildkit accepts a local
@@ -30,6 +31,17 @@ configMapGenerator:
   - name: llama-p100-dockerfile
     namespace: buildkit
     files: [llama-p100/dockerfile]
+    options:
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  # The github-runner build has no remote context: this ConfigMap directory is
+  # BOTH the context and the Dockerfile local, and its two keys are the entire
+  # build input (see github-runner.yaml).
+  - name: github-runner-dockerfile
+    namespace: buildkit
+    files:
+      - github-runner/dockerfile
+      - github-runner/runner-entrypoint.sh
     options:
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled

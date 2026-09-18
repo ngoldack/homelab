@@ -281,7 +281,9 @@ personal keys — `age.key` plus the backup identity) and the broader
 in-cluster `sops-age` Secret carries for kustomize-controller. tofu files are
 only ever decrypted locally, so Flux's key is deliberately absent from that
 rule. There is no CI recipient any more: nothing outside the cluster and the
-operator decrypts anything. Print the remaining recipients with
+operator decrypts anything. The CI runner is no exception — it reads its GitHub
+PAT from an in-cluster Secret and holds no decryption identity. Print the
+remaining recipients with
 `task sops:keys:local:public` / `task sops:keys:home-flux:public`.
 
 `tofu/home/secret.sops.yaml` holds, in one place: the state-encryption
@@ -559,10 +561,26 @@ which is the aggregate of `task lint:yaml`, `task lint:tofu`,
 `task lint:kustomize` and `task sops:check:all`. Add
 `task tofu:home:validate` when you touch the tofu tree.
 
-There is no CI — no workflow runs any of this automatically; running
-`task check` locally before pushing is on you for now. (The former GitHub
-Actions etcd-backup workflow was the last one and is gone; see "Talos etcd
-backups".)
+Running `task check` locally before pushing is still on you — it is the
+pre-merge gate, and CI does not re-run it.
+
+What CI does is the deployment side. `.github/workflows/flux-reconcile.yml`
+runs on a self-hosted runner inside the cluster
+(`kubernetes/infrastructure/home/github-runner/`, registered for this
+repository only) on every push to `main`, and performs the `flux reconcile`
+that used to be typed by hand: it forces a fetch of the GitRepository,
+reconciles the root Kustomization, nudges every child, then waits for all of
+them to be Ready — so a merge converges in seconds instead of waiting out the
+10m poll interval, and fails loudly if reconciliation does not converge.
+Trigger it by merging, or manually with
+`gh workflow run flux-reconcile.yml`.
+
+Because the runner lives in the cluster, no laptop needs a kubeconfig. Its
+ServiceAccount (`ci-runner`) may only patch Flux objects in `flux-system`, and
+the workflow deliberately does not run on pull requests: the runner has
+cluster-side authority and a readable PAT, so untrusted code must never execute
+on it. The former GitHub Actions etcd-backup workflow is gone; see "Talos etcd
+backups".
 
 Common workflows are wrapped in the Taskfile (`task --list`):
 

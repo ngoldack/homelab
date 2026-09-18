@@ -1,0 +1,76 @@
+# Post-merge Flux reconciliation, run on the in-cluster self-hosted runner.
+#
+# The runner pod carries the ci-runner ServiceAccount, which rbac.yaml binds to
+# a flux-system Role allowing exactly this: patch the GitRepository and the
+# Kustomizations. There is no kubeconfig anywhere but the pod.
+#
+# Manual nudge: gh workflow run flux-reconcile.yml
+#
+# The trigger is deliberately push-to-main plus manual dispatch only. The
+# runner holds write access to Flux objects and its GitHub PAT is readable from
+# its own process environment, so a workflow from a pull request must never run
+# here.
+name: flux reconcile
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flux-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: [self-hosted, homelab]
+    timeout-minutes: 20
+    steps:
+      - name: Point the flux CLI at the in-cluster API server
+        run: |
+          mkdir -p "$HOME/.kube"
+          cat > "$HOME/.kube/config" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: in-cluster
+              cluster:
+                certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                server: https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}
+          users:
+            - name: ci-runner
+              user:
+                tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+          contexts:
+            - name: in-cluster
+              context:
+                cluster: in-cluster
+                user: ci-runner
+          current-context: in-cluster
+          EOF
+
+      # Order matters: the source is refreshed first, so the children annotated
+      # below already see the new revision and reconcile it immediately instead
+      # of waiting out their own 10m poll.
+      - name: Force a fetch of main
+        run: flux reconcile source git flux-system -n flux-system
+
+      - name: Reconcile the root Kustomization
+        run: flux reconcile kustomization flux-system -n flux-system
+
+      - name: Nudge every child Kustomization
+        run: >-
+          kubectl annotate kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
+          "reconcile.fluxcd.io/requestedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
+
+      - name: Wait for every Kustomization to be Ready
+        run: >-
+          kubectl wait kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
+          --for=condition=Ready --timeout=15m
+
+      - name: Status
+        if: always()
+        run: flux get kustomizations -n flux-system

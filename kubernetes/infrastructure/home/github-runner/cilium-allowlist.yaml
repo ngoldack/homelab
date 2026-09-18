@@ -1,0 +1,56 @@
+# github-runner allowlist — the only traffic that may cross the default-deny
+# baseline. There are deliberately NO ingress rules: nothing in the cluster
+# connects to a runner. The kubelet's own probes come from the host, not the
+# pod network, so they are unaffected.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: github-runner-allowlist
+  namespace: github-runner
+spec:
+  endpointSelector:
+    matchLabels: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The API server the workflow's flux/kubectl calls hit. All three
+    # addressing forms (entity, control-plane VIP, in-cluster Service CIDR) are
+    # live in this cluster — same set as the agentgateway allowlist.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # GitHub. Job and action downloads fan out across github.com,
+    # api.github.com, codeload.github.com, objects.githubusercontent.com and
+    # Azure blob storage, so a host allowlist would break silently and only
+    # when GitHub changes a redirect target. world:443 is the deliberate
+    # grant — and the reason the workflow may only run from this repo's own
+    # main branch (no pull_request trigger), since anything that can reach the
+    # runner runs here with its Flux RBAC and its PAT.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

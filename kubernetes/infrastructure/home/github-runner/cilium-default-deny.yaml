@@ -1,0 +1,18 @@
+# github-runner default-deny baseline — same semantics as the buildkit and
+# paperless pilots: deny all ingress and egress for every endpoint in the
+# namespace, with cilium-allowlist.yaml as the only exception.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: github-runner-default-deny
+  namespace: github-runner
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in github-runner. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

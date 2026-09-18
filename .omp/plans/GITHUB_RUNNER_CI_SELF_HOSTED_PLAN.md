@@ -1,5 +1,19 @@
 # github-runner CI: repo-scoped self-hosted runner + Flux reconcile on push
 
+## Outcome (recorded after execution)
+
+Executed 2026-09-18 as planned, with two deviations:
+
+* The upstream `ghcr.io/actions/actions-runner` image ships **no `kubectl`**, so
+  the workflow's annotate/wait steps died at `kubectl: command not found` in the
+  first production run (the `flux` steps all succeeded). The image was rebuilt
+  with kubectl COPY'd from the same flux-cli image: Job
+  `build-github-runner-2`, tag `2`, digest
+  `sha256:c824f807b37e42d9413961c65259821fb8938d67dd43abd2b66e2f0c8ef7762a`,
+  which is what `github-runner/deployment.yaml` pins.
+* The runner base image already carries curl, jq and git, so the planned
+  `apt-get install` layer is not in the Dockerfile.
+
 ## Context
 
 The repo has no CI at all (`.github/` does not exist; `README.md:562` says "There is no CI", `.sops.yaml` records that the CI age recipient was dropped). Today the operator runs `flux reconcile source git flux-system` and then `flux reconcile kustomization <name>` by hand from a laptop after merges.

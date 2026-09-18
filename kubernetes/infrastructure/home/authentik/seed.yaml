@@ -34,6 +34,12 @@ data:
           client_id: headlamp-oidc
           client_type: confidential
           client_secret: !File /secrets-headlamp/client_secret
+          # Explicit RSA signing key: with signing_key unset authentik signs ID
+          # tokens with HS256 and the provider's JWKS is EMPTY ({}), which
+          # headlamp rejects at the callback with
+          # `unexpected signature algorithm "HS256"; expected ["RS256"]`.
+          # Same trap as the langfuse/hermes providers.
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
           # grant_types MUST be pinned (see grafana-oidc): an empty model
           # default [] denies every OIDC login.
           issuer_mode: per_provider
@@ -416,6 +422,10 @@ data:
           client_id: grafana
           client_type: confidential
           client_secret: !File /secrets/client_secret
+          # Explicit RSA signing key: with signing_key unset authentik signs ID
+          # tokens with HS256 and the provider's JWKS is EMPTY ({}), which any
+          # RS256-verifying client (grafana's generic_oauth) rejects.
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
           # grant_types MUST be pinned. OAuth2Provider.grant_types is a PG
           # ArrayField defaulting to [] — when it is empty every OIDC login is
           # denied: authorize.py check_grant logs "Invalid grant_type for
@@ -941,6 +951,10 @@ data:
           client_id: paperless
           client_type: confidential
           client_secret: !File /secrets-paperless/client_secret
+          # Explicit RSA signing key: with signing_key unset authentik signs ID
+          # tokens with HS256 and the provider's JWKS is EMPTY ({}), which
+          # allauth's openid_connect provider rejects.
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
           # grant_types MUST be pinned (see the grafana-oidc comment): an empty
           # model default [] denies every OIDC login.
           issuer_mode: per_provider

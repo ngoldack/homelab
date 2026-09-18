@@ -1,4 +1,5 @@
-# hermes-go — the ONLY SandboxTemplate sandboxes in hermes-sandbox may use.
+# hermes-go — the Go profile SandboxTemplate: the pod shape every sandbox in
+# hermes-sandbox is built from, and the one the warm pool adopts today.
 #
 # WHY: every sandbox must be a Kata-isolated, credential-less, non-root pod
 # label-pinned to the shared Kata-capable worker; the ValidatingAdmissionPolicy
@@ -6,11 +7,24 @@
 # so the template defines the one shape that passes. Every field is grounded
 # in `kubectl explain sandboxtemplate.spec --recursive` of the installed
 # v1beta1 CRD.
+#
+# ONE OF A FIXED PROFILE SET: hermes-go (here) + hermes-core and hermes-offline
+# (sandbox-templates-profiles.yaml). No profile exists for Python: the runtime
+# image below ships no Python interpreter. A profile is identified by the
+# workload.hermes.io/profile label, carried on the template, on every pod the
+# template stamps and (set by Hermes) on the claim; that label is the key the
+# per-profile Cilium network classes (cilium-policy.yaml) and the Kyverno
+# allowlist (kyverno-policies/policies.yaml, hermes-sandbox-profile-allowlist)
+# select on. Hermes chooses a profile by NAME only — it never supplies image,
+# runtimeClassName, namespace, serviceAccount, mounts or network policy.
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxTemplate
 metadata:
   name: hermes-go
   namespace: hermes-sandbox
+  # Profile identity on the template object itself (see sandbox-templates-profiles.yaml).
+  labels:
+    workload.hermes.io/profile: go
 spec:
   # Cilium owns every sandbox packet (cilium-policy.yaml); the controller
   # must not overlay its own network-policy bookkeeping on top.
@@ -22,6 +36,12 @@ spec:
   # that could carry host or cluster state into a session.
   volumeClaimTemplatesPolicy: Disallowed
   podTemplate:
+    metadata:
+      # The profile identity the pod carries: this is what the per-profile
+      # Cilium egress classes select on (cilium-policy.yaml), so it must be on
+      # the POD, not only on this template object.
+      labels:
+        workload.hermes.io/profile: go
     spec:
       # Kata is the only runtime (RuntimeClass `kata`); a runc fallback would
       # silently drop the isolation boundary, so the admission policy rejects

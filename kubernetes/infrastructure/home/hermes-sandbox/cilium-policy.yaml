@@ -5,8 +5,9 @@
 # (its endpointSelector matches) and carries an ingress and/or egress section
 # flips that endpoint to default-deny for the matching direction. The
 # default-deny doc therefore carries one empty rule per direction, and the
-# two allow docs below carve out exactly the traffic sandboxes emit and
-# accept. Every field is grounded in `kubectl explain
+# allow docs below carve out exactly the traffic sandboxes emit and accept:
+# a wildcard DNS backstop, one egress-class doc per profile, and the ingress
+# allowlist. Every field is grounded in `kubectl explain
 # ciliumnetworkpolicy.spec --recursive` of the installed cilium.io/v2 CRD.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -56,9 +57,14 @@ metadata:
   namespace: hermes-sandbox
 spec:
   description: >-
-    The ONLY egress sandboxes get: cluster DNS. This doc selects every pod
-    in hermes-sandbox (empty matchLabels {} is a wildcard): the namespace
-    has no other allow CNP to subdivide the endpoints with.
+    Backstop egress allowlist: cluster DNS for every pod in hermes-sandbox,
+    including any pod that no per-profile class doc covers (a sandbox
+    provisioned before the workload.hermes.io/profile label existed must keep
+    working across this change). The classes themselves are the
+    hermes-sandbox-class-* docs below, one per profile; this doc stays a
+    wildcard on purpose and must never grow beyond DNS — Phase 3 routes
+    sandbox egress through the hermes-egress forward proxy, so anything added
+    here would be a bypass of that guard.
   endpointSelector:
     matchLabels: {}
   egress:
@@ -82,6 +88,114 @@ spec:
     # Guest-side package/module fetches therefore need either an internal
     # mirror selected with toEndpoints, or a deliberate CIDR allow added
     # here. The plugin's injected sandbox facts tell the model the same.
+---
+# Egress class `dns-only` — profile `go` (template hermes-go).
+#
+# WHY a class doc per profile: reachability is a property of the PROFILE, not
+# of the namespace, and Phase 3 (the hermes-egress forward proxy) will move
+# one profile at a time — hermes-offline to "deny everything", the toolchain
+# profiles to "DNS + proxy only". One doc per profile keeps that change a
+# single-doc edit and keeps "what may profile X reach?" a single grep.
+#
+# WHY it repeats the wildcard backstop's DNS rule instead of relying on it:
+# this doc IS the class definition (an endpointSelector with no rules would
+# define nothing), so the allowed set has to be written here. Cilium computes
+# the effective allow set as the UNION of the rules of every policy selecting
+# the endpoint, so the duplicate changes nothing today — both allow cluster
+# DNS and nothing else.
+#
+# NOTHING MAY WIDEN EGRESS FROM THIS FILE before Phase 3: today the sandbox
+# has no egress proxy and no dependency mirror, so an added CIDR/FQDN rule
+# would be unmediated internet access for model-authored commands. The FQDN
+# caveat above applies here too (no transparent DNS proxy => FQDN rules are
+# inert), and a new allowance belongs in Phase 3's proxy config, not here.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-class-dns-only-go
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    Egress class dns-only for profile go: cluster DNS, nothing else.
+  endpointSelector:
+    matchLabels:
+      workload.hermes.io/profile: go
+  egress:
+    # Cluster DNS only — keyed on the k8s-app label Cilium recognizes for
+    # kube-dns, the same peer as the wildcard backstop above.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Egress class `dns-only` — profile `core` (template hermes-core).
+#
+# Same class, same single allowance as the go doc above (see it for the union
+# semantics and the Phase 3 hand-over); only the profile differs. A claim that
+# carries no profile label lands on the wildcard backstop instead — same
+# reachability, but with no class of its own to tighten in Phase 3.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-class-dns-only-core
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    Egress class dns-only for profile core: cluster DNS, nothing else.
+  endpointSelector:
+    matchLabels:
+      workload.hermes.io/profile: core
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Egress class `dns-only` — profile `offline` (template hermes-offline).
+#
+# The profile that will NOT keep this class: Phase 3 gives it the strictest
+# one (the egress proxy denies every CONNECT), which is the whole point of
+# having a profile that declares it fetches nothing. Until the proxy exists,
+# an offline session gets exactly what every other profile gets — cluster DNS
+# — because removing DNS today would break name resolution without adding any
+# guard, and the class list is enforced here, not by the template (the CRD's
+# spec.networkPolicy is K8s-NetworkPolicy-shaped and additive next to Cilium,
+# which is why every template sets networkPolicyManagement: Unmanaged).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-sandbox-class-dns-only-offline
+  namespace: hermes-sandbox
+spec:
+  description: >-
+    Egress class dns-only for profile offline: cluster DNS, nothing else
+    until Phase 3 replaces this class with the proxy's deny-all.
+  endpointSelector:
+    matchLabels:
+      workload.hermes.io/profile: offline
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
 ---
 # hermes-sandbox ingress allowlist — the only callers of sandbox APIs.
 apiVersion: cilium.io/v2

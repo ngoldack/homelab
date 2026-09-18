@@ -1,0 +1,87 @@
+# read-only RBAC for Kyverno's controllers over the Agent Sandbox CRs.
+#
+# WHY: the ClusterPolicy hermes-sandbox-profile-allowlist
+# (kubernetes/infrastructure/home/kyverno-policies/policies.yaml) matches
+# Sandbox/SandboxClaim/SandboxTemplate/SandboxWarmPool. Kyverno's own admission
+# webhook validates that when the policy is applied and warns, live and
+# verbatim, "system:serviceaccount:kyverno:kyverno-reports-controller requires
+# permissions get,list,watch for resource <kind>" for each of them (observed
+# 2026-09-18 with `kubectl apply --dry-run=server` against the running
+# cluster). Without the grant the policy can admit but cannot report: the audit
+# trail this policy exists to produce (PolicyReports) never gets written for
+# these kinds, so a violation would be silent — exactly the failure mode
+# audit-first policies are supposed to avoid.
+#
+# WHY a ClusterRole and not a namespaced Role (the non-obvious part): Kyverno
+# runs a SubjectAccessReview for the reports controller and, when it passes a
+# namespace, appends " in namespace <ns>" to that warning (kyverno/kyverno
+# pkg/policy/auth/auth.go, buildMessage). The warning above carries NO such
+# suffix, so the check is cluster-scoped — a Role in hermes-sandbox would never
+# satisfy it. A ClusterRole+ClusterRoleBinding does, and the effective blast
+# radius is the same either way: these four resource types exist only in
+# hermes-sandbox by design (namespace.yaml plus the ValidatingAdmissionPolicy
+# in agent-sandbox/policies/ keep every sandbox in there).
+#
+# Reading is the whole of it: no write, no delete, no pods/exec, no secrets.
+# The reports controller needs get/list/watch — upstream Kyverno's own
+# ClusterRole grants exactly those three verbs on the resources it knows about.
+# Both controllers that touch resources in a background scan are bound:
+# reports-controller (writes the PolicyReport) and background-controller (runs
+# the periodic scans). The webhook only named reports-controller, but binding
+# only that one would leave the scan itself unable to read the CRs, which is
+# the same silent failure one step earlier.
+#
+# ServiceAccount names/namespace are the live ones
+# (`kubectl get sa -n kyverno -o name`, 2026-09-18): default,
+# kyverno-admission-controller, kyverno-background-controller,
+# kyverno-cleanup-controller, kyverno-reports-controller.
+#
+# HONEST LIMIT: whether the live warning actually clears cannot be proven until
+# this file is applied — the check reads live RBAC, so a dry-run still reports
+# the missing grant. That verification belongs to the apply/reconcile step.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno-agent-sandbox-read
+rules:
+  # Both API groups the policies here reference:
+  #   agents.x-k8s.io            -> Sandbox (the core CRD)
+  #   extensions.agents.x-k8s.io -> SandboxClaim, SandboxTemplate, SandboxWarmPool
+  - apiGroups:
+      - agents.x-k8s.io
+      - extensions.agents.x-k8s.io
+    resources:
+      - sandboxes
+      - sandboxclaims
+      - sandboxtemplates
+      - sandboxwarmpools
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kyverno-reports-controller-agent-sandbox-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kyverno-agent-sandbox-read
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-reports-controller
+    namespace: kyverno
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kyverno-background-controller-agent-sandbox-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kyverno-agent-sandbox-read
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-background-controller
+    namespace: kyverno

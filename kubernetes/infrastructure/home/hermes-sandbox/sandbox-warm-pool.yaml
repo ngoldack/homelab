@@ -8,6 +8,32 @@
 # ceiling, not an exclusivity guarantee (there is no taint; other workloads
 # schedule there too).
 #
+# MEASURED (2026-09-18, live `kubectl --kubeconfig kubeconfig-home.yaml` on the
+# node labeled workload.hermes.io/sandbox=true = talos-919-w9u, which is also
+# the GPU node): allocatable 15.95 cores / 46.47 GiB; sum of pod requests
+# 10.47 cores / 21.84 GiB (50 pods) => 5.48 cores / 24.63 GiB of request
+# headroom, so a second 1 CPU/4 GiB sandbox WOULD fit the scheduler's criterion.
+# It is deliberately not added here, because requests are not the binding
+# constraint: the sum of pod LIMITS on that node is 25.30 cores / 53.13 GiB —
+# already 1.59x CPU and 1.14x memory over allocatable (buildkit alone holds a
+# 20 GiB / 12 CPU limit, the two GPU models 12 GiB together) — and two warm
+# sandboxes can each burst to 5 GiB while a session runs. Doubling the resident
+# warm set to buy a faster start for a second CONCURRENT session is a decision
+# for whoever defines session concurrency (the bounded queue work) and it must
+# be re-measured then, not inferred from today's request slack.
+#
+# This pool also stays the ONLY pool for now. The profile templates added in
+# sandbox-templates-profiles.yaml have no pool of their own yet: a claim reaches
+# a template THROUGH its pool (SandboxClaim.spec.warmPoolRef -> pool ->
+# spec.sandboxTemplateRef), so shipping a profile's pool is what makes that
+# profile selectable by a session. Careful before adding one with
+# `replicas: 0` to reserve the name: the healthCheckExprs on the Flux
+# Kustomization in kubernetes/clusters/home/hermes-sandbox.yaml are
+# `status.readyReplicas == spec.replicas` (current) and `status.readyReplicas
+# == 0` (failed), and both are TRUE for a zero-replica pool — verify which one
+# Flux honours before a zero-replica pool becomes the reason the whole
+# hermes-sandbox Kustomization (and therefore hermes) never reports Ready.
+#
 # Fields grounded in `kubectl explain sandboxwarmpool.spec --recursive` of
 # the installed v1beta1 CRD.
 apiVersion: extensions.agents.x-k8s.io/v1beta1

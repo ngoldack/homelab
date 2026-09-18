@@ -1,0 +1,220 @@
+# hermes-core + hermes-offline — the fixed profile SandboxTemplates besides
+# hermes-go (sandbox-template.yaml).
+#
+# WHY a fixed set at all: a Hermes session may choose a backend by NAME only.
+# The plugin hardcodes namespace+template as an allowlist and never reads
+# either from the caller
+# (image-builds/hermes-agent-sandbox-plugin/src/hermes_agent_sandbox/config.py:
+# NAMESPACE/TEMPLATE are module constants, "not overridable by callers"), so
+# the NAME is the entire contract between Hermes and the cluster. This file
+# plus sandbox-template.yaml are where that vocabulary is defined, and
+# kubernetes/infrastructure/home/kyverno-policies/policies.yaml
+# (hermes-sandbox-profile-allowlist) is where it is closed: any claim, pool or
+# template naming something outside the set is reported.
+#
+# WHY the pod shape is duplicated verbatim instead of shared via an anchor or
+# a patch: SandboxTemplate has no inheritance and no cluster-scoped default,
+# and the per-field rationale lives in sandbox-template.yaml (the fields below
+# are `kubectl explain sandboxtemplate.spec --recursive`-grounded exactly as it
+# documents — Kata-only runtime, no SA token, non-root 10001, read-only root
+# filesystem, ALL caps dropped, workspace+/tmp as the only writable mounts,
+# cpu+memory limits on every container). Kustomize patches would hide the
+# isolation posture of a profile behind a base file, which is the one thing
+# here that must stay readable at a glance.
+#
+# WHY these two are IDENTICAL to hermes-go today, image included
+# (registry.ngoldack.de/hermes-sandbox-runtime@sha256:8317b00f…117f1, the same
+# digest as hermes-go — no new image in this unit):
+#   * the toolchain is baked into that single image — the Go toolchain is
+#     copied wholesale from the pinned golang stage, and no interpreter beyond
+#     the shell exists (image-builds/hermes-sandbox-runtime/Dockerfile: apt
+#     installs ca-certificates procps curl jq ripgrep git coreutils util-linux
+#     only). A profile with a DIFFERENT toolchain needs its own image built
+#     from image-builds/; that is a separate unit, not a rename.
+#   * so a profile today is an IDENTITY (name + workload.hermes.io/profile
+#     label) and a NETWORK CLASS (the per-profile Cilium docs in
+#     cilium-policy.yaml), not yet a different resource envelope. Inventing a
+#     smaller envelope here would be guessing at numbers nobody measured; the
+#     sandbox node is mixed-use (see sandbox-warm-pool.yaml), so right-sizing
+#     belongs to a measurement, not to this file.
+#   * NO hermes-python: the image installs no Python interpreter, so a python
+#     template would be a name that lies about its toolchain. It ships with the
+#     python toolchain image instead.
+#
+# WHY hermes-offline exists when its egress class is the same as everyone
+# else's (dns-only, today): it names the session that promises to need no
+# external dependency fetching, and it is the profile Phase 3 gives the
+# strictest class (the egress proxy denies everything for it). Nothing may
+# widen egress from a template in the meantime: SandboxTemplate.spec.
+# networkPolicy would be K8s-NetworkPolicy-shaped and additive next to Cilium's
+# policies, which is exactly why every template here sets
+# networkPolicyManagement: Unmanaged — Cilium stays the single source of truth
+# for what a sandbox can reach.
+#
+# Fields are otherwise spelled out per profile below: metadata.name is the
+# name Hermes selects, metadata.labels carries the profile identity on the
+# object, podTemplate.metadata.labels stamps it onto every pod.
+---
+# hermes-core — the generic shell/file profile: the smallest useful session
+# (file ops, shell commands, artifacts) with no language-specific promise.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: hermes-core
+  namespace: hermes-sandbox
+  labels:
+    workload.hermes.io/profile: core
+spec:
+  # Cilium owns every sandbox packet (cilium-policy.yaml); the controller must
+  # not overlay its own network-policy bookkeeping on top.
+  networkPolicyManagement: Unmanaged
+  # No environment injection: sandboxd surfaces only SANDBOX_*-prefixed vars
+  # over its metadata endpoint.
+  envVarsInjectionPolicy: Disallowed
+  # No volume claims: the two emptyDirs below are the whole writable surface.
+  volumeClaimTemplatesPolicy: Disallowed
+  podTemplate:
+    metadata:
+      # The profile identity the POD carries — the key the per-profile Cilium
+      # egress classes (cilium-policy.yaml) select on.
+      labels:
+        workload.hermes.io/profile: core
+    spec:
+      # Kata is the only runtime (RuntimeClass `kata`, runtimeclass-kata.yaml);
+      # a runc fallback would silently drop the isolation boundary, and the
+      # ValidatingAdmissionPolicy admits no other runtimeClassName.
+      runtimeClassName: kata
+      # No cluster credentials: nothing to mount, ever.
+      automountServiceAccountToken: false
+      # Label-pin to the (mixed-use) sandbox node. The label only attracts;
+      # there is no taint, so other workloads still schedule there too.
+      nodeSelector:
+        workload.hermes.io/sandbox: "true"
+      # Non-root 10001 end to end (image user, pod and container security
+      # contexts) so nothing in a session can escalate via a UID mismatch.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runtime
+          # Digest-pinned zot ref — manifest digest of hermes-sandbox-runtime:1.0.3
+          # (build-hermes-sandbox-runtime-2be5991-r2); re-pin by bumping that Job.
+          image: registry.ngoldack.de/hermes-sandbox-runtime@sha256:8317b00f8aa3801b9dc5746f18178a0f4ec3df1e1b51a24e8468b1a3352117f1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # sandboxd listeners: 8080 REST FilesystemService, 9090 gRPC
+          # ProcessService (TCP only).
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            - containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "5Gi"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      # The only writable paths (image layout): task state in /workspace,
+      # scratch in /tmp — emptyDirs, gone with the pod. HOME=/tmp in the image
+      # is why the toolchain caches keep working under a read-only rootfs.
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: "20Gi"
+        - name: tmp
+          emptyDir:
+            sizeLimit: "2Gi"
+---
+# hermes-offline — the profile for sessions that declare they fetch nothing:
+# byte-identical shape to hermes-core today. It differs in INTENT, and from
+# Phase 3 in network class (the egress proxy denies everything for it); until
+# then it gets cluster DNS like every other profile, because the class list
+# lives in cilium-policy.yaml and no template can express one.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: hermes-offline
+  namespace: hermes-sandbox
+  labels:
+    workload.hermes.io/profile: offline
+spec:
+  # Cilium owns every sandbox packet (cilium-policy.yaml); the controller must
+  # not overlay its own network-policy bookkeeping on top.
+  networkPolicyManagement: Unmanaged
+  # No environment injection: sandboxd surfaces only SANDBOX_*-prefixed vars
+  # over its metadata endpoint.
+  envVarsInjectionPolicy: Disallowed
+  # No volume claims: the two emptyDirs below are the whole writable surface.
+  volumeClaimTemplatesPolicy: Disallowed
+  podTemplate:
+    metadata:
+      # The profile identity the POD carries — the key the per-profile Cilium
+      # egress classes (cilium-policy.yaml) select on.
+      labels:
+        workload.hermes.io/profile: offline
+    spec:
+      # Kata is the only runtime (RuntimeClass `kata`, runtimeclass-kata.yaml).
+      runtimeClassName: kata
+      # No cluster credentials: nothing to mount, ever.
+      automountServiceAccountToken: false
+      # Label-pin to the (mixed-use) sandbox node (attract-only, no taint).
+      nodeSelector:
+        workload.hermes.io/sandbox: "true"
+      # Non-root 10001 end to end.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runtime
+          # Same digest as every other profile — no new image in this unit.
+          image: registry.ngoldack.de/hermes-sandbox-runtime@sha256:8317b00f8aa3801b9dc5746f18178a0f4ec3df1e1b51a24e8468b1a3352117f1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # sandboxd listeners: 8080 REST, 9090 gRPC (TCP only).
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            - containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "5Gi"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: "20Gi"
+        - name: tmp
+          emptyDir:
+            sizeLimit: "2Gi"

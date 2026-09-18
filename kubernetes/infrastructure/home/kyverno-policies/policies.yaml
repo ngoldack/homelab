@@ -4,8 +4,9 @@
 # fails the *reconcile* of whatever manifest it catches, not a human's
 # `kubectl apply`. Flipping one to Enforce (`validationFailureAction: Enforce`)
 # is a deliberate per-namespace decision — and clean PolicyReports are NOT the
-# gate for it. These four policies only cover latest tags, host namespaces,
-# hostPath volumes and privileged/escalation, whereas `restricted` PSA also
+# gate for it. The four Pod-shape policies below only cover latest tags, host
+# namespaces, hostPath volumes and privileged/escalation, whereas `restricted`
+# PSA also
 # requires runAsNonRoot, a seccompProfile and all capabilities dropped — none of
 # which any policy here checks. (A read-only root filesystem is good practice but
 # is not one of this cluster's PSA `restricted` controls, so it is not part of
@@ -16,6 +17,15 @@
 # pods failing at least one restricted control, so those securityContexts have
 # to be added per workload first. Pod Security Admission labels carry the actual
 # pod-hardening enforcement in the meantime.
+#
+# The fifth policy (hermes-sandbox-profile-allowlist, appended at the end) is a
+# different animal and is NOT part of the hardening census above: it audits
+# Agent Sandbox custom resources (Sandbox/SandboxClaim/SandboxTemplate/
+# SandboxWarmPool), not Pods, and it is the one policy here whose scope is
+# exactly the namespace every Pod policy above excludes (hermes-sandbox
+# sandboxes are hardened by their SandboxTemplate + the ValidatingAdmissionPolicy
+# agent-sandbox/policies/secure-hermes-sandbox, so Pod patterns do not apply to
+# them).
 #
 # Scope: the app namespaces (authentik, paperless, immich, langfuse, hindsight,
 # headlamp, hermes, agentgateway, aigateway, registry, llmkube-system,
@@ -311,3 +321,196 @@ spec:
               - securityContext:
                   =(privileged): false
                   allowPrivilegeEscalation: false
+---
+# The Hermes sandbox profile allowlist — the fixed set of backends a session
+# may be aimed at, audited on the Agent Sandbox custom resources.
+#
+# WHY this policy exists: Hermes selects a sandbox by NAME only. The plugin
+# hardcodes namespace+template as a module-constant allowlist and never reads
+# either from the caller
+# (image-builds/hermes-agent-sandbox-plugin/src/hermes_agent_sandbox/config.py),
+# and the templates in kubernetes/infrastructure/home/hermes-sandbox/ define
+# the vocabulary: hermes-go (sandbox-template.yaml), hermes-core and
+# hermes-offline (sandbox-templates-profiles.yaml). Nothing in the CRDs stops a
+# claim, pool or template from naming anything else — any string is a valid
+# name — so this rule set is what turns "the plugin is careful" into "the
+# cluster reports the name". It is the other half of the profile contract the
+# templates and the per-profile Cilium classes (hermes-sandbox/cilium-policy.yaml)
+# express.
+#
+# THREE CHECKS, one per hop of the reference chain (claim -> pool -> template),
+# plus the profile label that ties an object to its class:
+#   1. profile label — WHERE IT EXISTS it must be a known profile name. Absence
+#      is deliberately allowed for now: the plugin starts stamping the label on
+#      claims in the same phase, and the warm-pool sandbox provisioned before
+#      this change carries no label and must not be reported. Every path the
+#      CRDs let it appear on is checked (object metadata; the claim's
+#      spec.additionalPodMetadata; a template's spec.podTemplate.metadata), so
+#      a label that skips one of them cannot slip through unnoticed. When the
+#      label is on every claim, a follow-up flips this to "must exist".
+#   2. claim -> warm pool (spec.warmPoolRef.name): a claim may only adopt a pool
+#      of the fixed set. Today that set is exactly {hermes-go} — one warm slot,
+#      the ceiling the mixed-use sandbox node's headroom supports
+#      (sandbox-warm-pool.yaml) — so a claim naming any other pool is a typo or
+#      an attempt to leave the profile set, and it would never become Ready
+#      anyway. The field is CRD-required, so there is no absent case here.
+#   3. pool -> template (SandboxWarmPool.spec.sandboxTemplateRef.name) and the
+#      template's own metadata.name: both must be in the shipped template
+#      allowlist. The empty string is allowed in the sandboxTemplateRef
+#      condition because that field does not exist on a SandboxTemplate — for
+#      those, the metadata.name condition is the binding one.
+#
+# ADDING A PROFILE = ONE COMMIT: the template, its warm pool, its Cilium class
+# doc (cilium-policy.yaml) and its name in the lists below — all of them. The
+# label vocabulary below already names the six contract profiles (core,
+# offline, python, go, node, web), because a label alone grants nothing: it
+# only classifies. What makes a profile USABLE is its template + pool + class,
+# which is what the name lists gate. hermes-python ships with the python
+# toolchain image, not before (the current runtime image contains no Python).
+#
+# Operator and format facts (both grounded in the Kyverno JMESPath docs, and
+# both checked against the pinned engine version 3.9.1 / Kyverno 1.14, whose
+# admission webhook also VALIDATES this policy's expressions at apply time):
+#   * AllNotIn takes a LIST value, which is how a name allowlist is expressed.
+#     It is the non-deprecated spelling of NotIn (the live webhook warns
+#     "Operator NotIn has been deprecated ... Use AllNotIn/AnyNotIn"), and for
+#     these scalar keys AllNotIn is the exact replacement: one value, so "any
+#     not in" and "all not in" coincide.
+#   * `|| 'token'` supplies the default for an absent field as a raw STRING
+#     literal; `|| ""` would be a quoted identifier (a field lookup named ""),
+#     not a string, and would leave the default null. Proven with a JMESPath
+#     implementation, not assumed.
+#   * kinds are written in Group/Version/Kind form — "SandboxClaim" alone is
+#     ambiguous across the two Agent Sandbox API groups here
+#     (agents.x-k8s.io: Sandbox; extensions.agents.x-k8s.io: SandboxClaim,
+#     SandboxTemplate, SandboxWarmPool).
+#   * `deny` rules with explicit kinds ARE evaluated in background scans, which
+#     is why this policy can keep background: true and report pre-existing
+#     objects; wildcards in match would not be allowed to.
+#   * the live API server also warns that kyverno.io/v1 ClusterPolicy itself is
+#     deprecated in favour of ValidatingPolicy (policies.kyverno.io); migrating
+#     is a repo-wide decision for all five policies here, so this one stays in
+#     the same API version as the four above rather than splitting the file.
+#   * Kyverno's reports controller needs get/list/watch on these CRs to write
+#     PolicyReports at all; that grant lives beside the CRs
+#     (hermes-sandbox/kyverno-policy-read-rbac.yaml), scoped to this namespace.
+#   * ORDERING CAVEAT: this policy matches CRDs owned by the
+#     kubernetes/clusters/home/agent-sandbox.yaml Kustomization, while
+#     kubernetes/clusters/home/kyverno-policies.yaml dependsOn kyverno only.
+#     Kyverno resolves the kinds at evaluation time, so an early reconcile can
+#     mark the policy not-ready until Agent Sandbox has installed the CRDs
+#     (Flux retries); adding agent-sandbox to that dependsOn list removes the
+#     window, and is the recommended follow-up.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: hermes-sandbox-profile-allowlist
+  annotations:
+    policies.kyverno.io/title: Restrict Hermes sandbox profiles to the fixed set
+    policies.kyverno.io/category: Hermes sandbox
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, not just to
+  # PolicyReports (the applier otherwise sees nothing — same rationale as the
+  # four policies above).
+  emitWarning: true
+  # Report pre-existing CRs, not just newly admitted ones.
+  background: true
+  rules:
+    # Hop 0: the profile label, wherever a claim, sandbox, template or pool can
+    # carry it. `|| ""` maps "field absent" to the empty string, which is in the
+    # allowed list — that is the deliberate presence-optional behaviour.
+    - name: profile-label-known
+      match:
+        any:
+          - resources:
+              kinds:
+                - agents.x-k8s.io/v1beta1/Sandbox
+                - extensions.agents.x-k8s.io/v1beta1/SandboxClaim
+                - extensions.agents.x-k8s.io/v1beta1/SandboxTemplate
+                - extensions.agents.x-k8s.io/v1beta1/SandboxWarmPool
+              namespaces:
+                - hermes-sandbox
+      validate:
+        message: >-
+          workload.hermes.io/profile must be one of the fixed Hermes profiles
+          (core, offline, python, go, node, web) when it is set — an unknown
+          value would give the sandbox an egress class that does not exist.
+        deny:
+          conditions:
+            any:
+              # Object-level label (set by Hermes on the claim, by us on the
+              # templates — see sandbox-template.yaml / sandbox-templates-profiles.yaml).
+              # `|| 'unlabelled'` is a JMESPath raw-string default (single quotes —
+              # double quotes are quoted identifiers in JMESPath, not strings),
+              # so an absent label becomes a real token that is present in the
+              # allowlist instead of an empty value with ambiguous semantics.
+              - key: "{{ request.object.metadata.labels.\"workload.hermes.io/profile\" || 'unlabelled' }}"
+                operator: AllNotIn
+                value: [unlabelled, core, offline, python, go, node, web]
+              # Claim-side pod label passthrough (the SandboxClaim CRD exposes
+              # spec.additionalPodMetadata.labels; absent on the other kinds).
+              # Folded scalars keep the expression on one logical line while the
+              # file stays inside the 120-column limit.
+              - key: >-
+                  {{ request.object.spec.additionalPodMetadata.labels."workload.hermes.io/profile" || 'unlabelled' }}
+                operator: AllNotIn
+                value: [unlabelled, core, offline, python, go, node, web]
+              # Template-side pod label (the label the pod actually gets, and
+              # therefore the one the Cilium class docs select on).
+              - key: >-
+                  {{ request.object.spec.podTemplate.metadata.labels."workload.hermes.io/profile" || 'unlabelled' }}
+                operator: AllNotIn
+                value: [unlabelled, core, offline, python, go, node, web]
+    # Hop 1: claim -> warm pool.
+    - name: claim-warmpool-allowlisted
+      match:
+        any:
+          - resources:
+              kinds:
+                - extensions.agents.x-k8s.io/v1beta1/SandboxClaim
+              namespaces:
+                - hermes-sandbox
+      validate:
+        message: >-
+          SandboxClaim spec.warmPoolRef.name must name a warm pool of the fixed
+          Hermes profile set (hermes-go) — the only pool that exists, and the
+          only one a claim can become Ready against.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.warmPoolRef.name }}"
+                operator: AllNotIn
+                value: [hermes-go]
+    # Hop 2: pool -> template, and the template's own identity.
+    - name: pool-and-template-name-allowlisted
+      match:
+        any:
+          - resources:
+              kinds:
+                - extensions.agents.x-k8s.io/v1beta1/SandboxTemplate
+                - extensions.agents.x-k8s.io/v1beta1/SandboxWarmPool
+              namespaces:
+                - hermes-sandbox
+      validate:
+        message: >-
+          SandboxTemplate/SandboxWarmPool names must be one of the shipped
+          Hermes profile names (hermes-core, hermes-offline, hermes-go). Add the
+          template, its warm pool, its Cilium class and this allowlist entry in
+          the same commit.
+        deny:
+          conditions:
+            any:
+              # The object's own name — what Hermes selects by, and what a pool
+              # must be named after (pool name == profile name is the contract
+              # the plugin's NAME-only selection relies on).
+              - key: "{{ request.object.metadata.name || 'none' }}"
+                operator: AllNotIn
+                value: [none, hermes-core, hermes-offline, hermes-go]
+              # The template a pool provisions from; 'none' (the JMESPath
+              # raw-string default) is the SandboxTemplate case, where this
+              # field does not exist at all.
+              - key: "{{ request.object.spec.sandboxTemplateRef.name || 'none' }}"
+                operator: AllNotIn
+                value: [none, hermes-core, hermes-offline, hermes-go]

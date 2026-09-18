@@ -1,15 +1,24 @@
 # hermes-sandbox — Kata sandbox namespace: PSA-restricted namespace, the
-# Kata RuntimeClass, the runtime image template + warm pool, and Cilium
-# default-deny (sandboxes may only talk to DNS + approved mirrors/endpoints).
-# Order matters: namespace first (references below assume it exists).
+# Kata RuntimeClass, the runtime image templates + warm pool, and Cilium
+# default-deny (sandboxes may only talk to DNS until Phase 3 lands the egress
+# proxy). Order matters: namespace first (references below assume it exists).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
   - runtimeclass-kata.yaml
-  # Template before warm pool: the pool's sandboxTemplateRef must resolve.
+  # Templates before warm pool: the pool's sandboxTemplateRef must resolve.
+  # hermes-go stays in its own file (it is the profile the warm pool adopts);
+  # the rest of the fixed profile set lives beside it.
   - sandbox-template.yaml
+  - sandbox-templates-profiles.yaml
   - sandbox-warm-pool.yaml
+  # Kyverno's controllers must be able to READ the CRs above, or the audit
+  # policy that governs them (kyverno-policies/policies.yaml,
+  # hermes-sandbox-profile-allowlist) can admit but never report; the grant is
+  # read-only and cluster-scoped (Kyverno checks it with a cluster-scoped
+  # SubjectAccessReview), and it belongs with the CRs it covers.
+  - kyverno-policy-read-rbac.yaml
   # Cilium last: the default-deny baseline locks the namespace's traffic and
   # references nothing, so it can never apply ahead of its dependencies.
   # Deviation from the repo's cilium-default-deny.yaml + cilium-allowlist.yaml

@@ -554,17 +554,22 @@ which is also why Envoy no longer runs host-network there (see "Ingress").
 Before pushing, check the structure:
 
 ```bash
-task check   # yamllint + tofu fmt + kustomize builds + sops decrypt
+task check   # yamllint + tofu fmt + kustomize builds + orphan refs + sops decrypt
 ```
 
 which is the aggregate of `task lint:yaml`, `task lint:tofu`,
-`task lint:kustomize` and `task sops:check:all`. Add
+`task lint:kustomize`, `task lint:orphans` and `task sops:check:all`. Add
 `task tofu:home:validate` when you touch the tofu tree.
 
-Running `task check` locally before pushing is still on you — it is the
-pre-merge gate, and CI does not re-run it.
+Running `task check` locally before pushing is still the habit worth keeping,
+and `.github/workflows/validate.yml` re-runs its secret-free half — `task
+lint:yaml lint:tofu lint:kustomize lint:orphans` — on every pull request and
+every push to `main`, on GitHub-hosted runners. It deliberately omits
+`task sops:check:all`: CI holds no age identity (see `.sops.yaml`), and
+decrypting `kubernetes/` belongs to Flux's sops-age Secret, not to a runner
+outside the cluster.
 
-What CI does is the deployment side. `.github/workflows/flux-reconcile.yml`
+The other workflow is the deployment side. `.github/workflows/flux-reconcile.yml`
 runs on a self-hosted runner inside the cluster
 (`kubernetes/infrastructure/home/github-runner/`, registered for this
 repository only) on every push to `main`, and performs the `flux reconcile`

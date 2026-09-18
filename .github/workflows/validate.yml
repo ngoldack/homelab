@@ -1,0 +1,101 @@
+# Static validation gate. Runs on GitHub-hosted runners, on every pull request
+# and on every push to main — i.e. before and after merge, but never as the
+# deploy mechanism.
+#
+# Deliberately split from flux-reconcile.yml, which is the *deploy* path:
+#   * this file  — static checks (YAML, tofu fmt, kustomize render, orphan refs)
+#                  on ubuntu-latest; `permissions: contents: read`, nothing else;
+#   * that file  — post-merge reconcile on the in-cluster self-hosted runner,
+#                  whose pod carries the ci-runner ServiceAccount that
+#                  kubernetes/infrastructure/home/github-runner/rbac.yaml binds
+#                  to a flux-system Role allowed to patch the GitRepository and
+#                  the Kustomizations, and whose GitHub PAT is readable from its
+#                  own process environment. A pull-request workflow must never
+#                  run there, which is why nothing here targets [self-hosted].
+#
+# NO DECRYPTION HAPPENS HERE, and no age identity is injected. `task
+# sops:check:all` is deliberately NOT part of this workflow: .sops.yaml records
+# that the ci.age.key recipient (...age1f6cd8a...) was dropped when the cloud
+# cluster was destroyed, with the note "nothing in CI decrypts anything any
+# more" — etcd backups run in-cluster as a CronJob under
+# kubernetes/infrastructure/home/talos-backup/, and Flux's own sops-age Secret
+# decrypts kubernetes/ secrets via kustomize-controller. The four lint targets
+# below are exactly the secret-free subset of `task check`: yamllint skips
+# **/*.sops.yaml (.yamllint ignore), `tofu fmt -check` never reads values, and
+# `kustomize build` emits the encrypted files verbatim because decryption is
+# kustomize-controller's job and not the CLI's. Adding an age key here would
+# re-create the access path that was intentionally removed.
+#
+# Tool versions mirror the operator's local toolchain (captured 2026-09-18) so
+# that a green run here means the same thing it means locally:
+#   task 3.53.1        (local `task --version`)      -> arduino/setup-task@v2
+#   yamllint 1.38.0    (local `yamllint --version`)  -> pip, exact pin
+#   OpenTofu v1.12.6   (local `tofu version`)        -> opentofu/setup-opentofu@v1
+#   kustomize v5.8.1   (local `kustomize version`)   -> imranismail/setup-kustomize@v2
+# The kustomize input takes the bare semver on purpose: the action builds the
+# release tag itself as `kustomize/v<version>` (getPinnedVersion in its
+# dist/index.js), so passing "v5.8.1" would look up a non-existent
+# `kustomize/vv5.8.1` and fail. Upstream release tags checked: kustomize/v5.8.1,
+# go-task/task v3.53.1 and opentofu/opentofu v1.12.6 all exist.
+#
+# Taskfile.yml declares `dotenv: [.env]` and .env is gitignored, so it is absent
+# in CI. Verified with a minimal /tmp repro against task 3.53.1 (same version as
+# here) that a missing dotenv file is not fatal — `task hi` exited 0 with no
+# .env and again with an empty one — so no placeholder is created. If that ever
+# changes, add `touch .env` before the lint step; never commit a real .env.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Keyed on the ref so a new push to the same branch or PR supersedes the run in
+# flight, while the main-branch run is never cancelled by a PR run.
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install yamllint 1.38.0
+        run: python3 -m pip install yamllint==1.38.0
+
+      - name: Install Task 3.53.1
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.53.1
+
+      - name: Install OpenTofu 1.12.6
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.6
+
+      - name: Install kustomize 5.8.1
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: 5.8.1
+
+      # Prints what actually landed on the runner, so a setup action that
+      # silently resolves a different build than the pin above fails loudly here
+      # rather than as an inexplicable lint error further down.
+      - name: Show the pinned toolchain
+        run: |
+          task --version
+          yamllint --version
+          tofu version
+          kustomize version
+
+      # The lint half of `task check`, in the same order. sops:check:all is the
+      # excluded fifth target (see the header): CI holds no age identity.
+      - name: Run the static lint targets
+        run: task lint:yaml lint:tofu lint:kustomize lint:orphans

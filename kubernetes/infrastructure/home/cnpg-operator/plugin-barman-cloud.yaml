@@ -21,6 +21,10 @@ spec:
   install:
     createNamespace: false
   values:
+    # TEMPORARY diagnostic: barman's stderr is only surfaced at debug level,
+    # and three clusters (immich/langfuse/paperless) fail wal-archive while two
+    # (authentik/hindsight) succeed. Revert to info once diagnosed.
+    logLevel: debug
     # Keep the plugin on the LAN nodes. It only talks to the API server, but
     # the Hetzner ingress node is a small arm64 box reserved for ingress and
     # everything else in this cluster is pinned the same way.

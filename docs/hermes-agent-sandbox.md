@@ -474,7 +474,7 @@ metrics here — update them with the live node if it is renamed.
 
 ## Backup
 `data-hermes-0` PVC (10 GiB, `truenas-fast-nfs`) is covered by the repo's
-NAS snapshot policy (see README "Storage safety policy"); restore = create
+NAS snapshot policy (see [`overview.md`](overview.md) "Storage safety policy"); restore = create
 a PVC from the snapshot and point the StatefulSet's `volumeClaimTemplates`
 selector at it. Sandbox emptyDirs, warm-pool pods and runtime caches are
 never backed up.

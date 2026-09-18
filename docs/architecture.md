@@ -122,7 +122,7 @@ Cross-site pod reachability over KubeSpan is known-unreliable for gateway
 paths, so anything that must serve both sites follows the same-node bridge
 pattern (`authentik-server` runs 2 anti-affine replicas, each fronted by a
 same-node `portal-bridge` nginx that dials the `-local` Service). See
-"Every request path stays site-local" in `README.md`.
+"Every request path stays site-local" in [`overview.md`](overview.md).
 
 ### Identity
 
@@ -246,6 +246,6 @@ signal that distinguishes "no alerts" from "no delivery".
   alerts, restore drills and measured RTO/RPO.
 - [`docs/hermes-agent-sandbox.md`](hermes-agent-sandbox.md) — Hermes isolation,
   claim RBAC, profile set, dashboard exposure and egress guard wiring.
-- `README.md` — network layout, ingresses, SSO paths, tofu flow, bootstrap order.
+- [`overview.md`](overview.md) — network layout, ingresses, SSO paths, tofu flow, bootstrap order.
 - `kubernetes/clusters/home/kustomization.yaml` — the authoritative Flux
   ordering with the reasoning behind each edge.

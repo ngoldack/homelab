@@ -1,0 +1,117 @@
+# llama-kv-broker — the slot choreography in front of the qwen36-35b serving Service.
+#
+# WHAT IT IS NOT: not the model server, not a scheduler. It owns exactly one thing:
+# for each request it restores the session's slot file, sets cache_prompt, forwards,
+# and saves on a clean EOF. The AgentgatewayBackend/local-p100 host points here instead
+# of at the raw serving Service, because with `parallelSlots: 1` the slot id is always 0
+# and the restore/save window must be serialized cluster-wide.
+#
+# WHY it runs as ROOT (no runAsUser): the slot directory is the shared NFS claim
+# `llama-kv-cache`, which is root-owned, and the serving container that must read and
+# write the very same files runs as uid 0 (fsGroup 102). A non-root broker would fail
+# to create or unlink slot files and silently degrade every request to a cold prefill.
+# The hardening that does apply is kept: no privilege escalation, all capabilities
+# dropped, read-only root filesystem (the only writable path is the mounted cache).
+#
+# WHY replicas: 1 with strategy Recreate: the broker serializes restore and save under
+# ONE global mutex — a per-session lock cannot protect slot 0 when the server has a
+# single slot — and it is the single writer of a ReadWriteOnce slot dir. A second
+# rolling replica would double-mount the claim and race the same files, so a restart
+# intentionally drops the pod first.
+#
+# The slot directory is a disposable cache: contents are reconstructible, and the
+# broker invalidates them by its config fingerprint (image/model/ctx/quant/FA/props).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-kv-broker
+  namespace: llmkube-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: llama-kv-broker
+  template:
+    metadata:
+      labels:
+        app: llama-kv-broker
+    spec:
+      nodeSelector:
+        hardware/gpu.model: Tesla-P100
+      securityContext:
+        # Match the serving pod's fsGroup so both processes own the same NFS files.
+        fsGroup: 102
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kv-broker
+          image: registry.ngoldack.de/llama-kv-broker@sha256:PENDING_DIGEST_STEP5
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          env:
+            # The raw serving Service — the broker is its only gateway client.
+            - name: UPSTREAM_URL
+              value: http://qwen36-35b.llmkube-system.svc.cluster.local:8080
+            - name: SLOT_PATH
+              value: /var/lib/llama/kv
+            # Fingerprint inputs: must track the InferenceService spec (image,
+            # contextSize, cacheTypeK/V, flashAttention) or stale slots are restored.
+            - name: KV_IMAGE_TAG
+              value: registry.ngoldack.de/llama-p100:0.4.0-p100
+            - name: KV_MODEL_REF
+              value: qwen36-35b
+            - name: KV_CTX_SIZE
+              value: "32768"
+            - name: KV_CACHE_TYPE_K
+              value: q8_0
+            - name: KV_CACHE_TYPE_V
+              value: q8_0
+            - name: KV_FLASH_ATTN
+              value: "on"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: kv-cache
+              mountPath: /var/lib/llama/kv
+      volumes:
+        - name: kv-cache
+          persistentVolumeClaim:
+            claimName: llama-kv-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-kv-broker
+  namespace: llmkube-system
+spec:
+  # ClusterIP only: the slot endpoints must never be reachable outside this hop.
+  selector:
+    app: llama-kv-broker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

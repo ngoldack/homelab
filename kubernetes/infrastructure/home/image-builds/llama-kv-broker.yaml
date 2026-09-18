@@ -45,7 +45,7 @@ spec:
             - build
             - --frontend=dockerfile.v0
             # The repo commit whose tree carries the broker sources + Dockerfile.
-            - --opt=context=https://github.com/ngoldack/homelab.git#PENDING_SHA_A1
+            - --opt=context=https://github.com/ngoldack/homelab.git#d32a80eee33460ea10ab8b8f018bdc0776aeebb9
             # The Dockerfile within that tree (lowercase, like the other in-repo
             # Dockerfiles under image-builds/).
             - --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile

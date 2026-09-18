@@ -59,7 +59,11 @@ const (
 	// /props is tiny and only feeds a fingerprint, so it must never delay a
 	// request for long — a miss just means this request runs without slots.
 	propsTimeout = 5 * time.Second
-	sweepEvery   = 24 * time.Hour
+	// The /slots probe reads the serving server's restart signal and runs under
+	// the transaction mutex, so it is deliberately shorter than propsTimeout: a
+	// hung probe must not park every queued request for five seconds.
+	slotProbeTimeout = 2 * time.Second
+	sweepEvery       = 24 * time.Hour
 
 	slotPrefix  = "slot-"
 	slotSuffix  = ".bin"
@@ -216,6 +220,18 @@ type broker struct {
 	propsAt    time.Time
 	propsCache propsFields
 	propsOK    bool
+
+	// lastSlotTaskID is the serving server's own task counter for slot 0. It only
+	// grows inside one server process, so a value lower than the previous
+	// observation means the server restarted and its in-memory cache is gone;
+	// that decrease — never the absolute value — is the restart signal.
+	lastSlotTaskID int64
+	// pendingRestore holds the slot files that owe exactly one restore: every file
+	// that was on disk when a restart was detected. An empty set is the warm case,
+	// where the live slot must be left alone. Guarded by mu.
+	pendingRestore map[string]bool
+
+	metrics *metrics
 }
 
 // slotForm selects between the documented `?action=` endpoint and the path-form
@@ -247,19 +263,107 @@ func newBroker(cfg config) (*broker, error) {
 	// the passthrough paths.
 	proxy.FlushInterval = -1
 	proxy.ErrorLog = log.New(log.Writer(), "proxy: ", log.LstdFlags)
+	m := newMetrics()
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		m.incUpstreamError("proxy")
 		log.Printf("warn: proxy %s %s: %v", r.Method, r.URL.Path, err)
 		w.WriteHeader(http.StatusBadGateway)
 	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// The broker is a correct client, so a non-2xx here is the upstream
+		// failing to serve, not a request-shape problem.
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			m.incUpstreamError("proxy")
+		}
+		return nil
+	}
 	return &broker{
-		cfg:    cfg,
-		client: &http.Client{Transport: transport},
-		proxy:  proxy,
+		cfg:            cfg,
+		client:         &http.Client{Transport: transport},
+		proxy:          proxy,
+		pendingRestore: make(map[string]bool),
+		metrics:        m,
 	}, nil
 }
 
-func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// statusWriter records the status a request settles on, which is what labels its
+// outcome in kv_broker_requests_total. Unwrap and Flush keep
+// http.ResponseController — and with it streaming through the proxy and the
+// transactional path — working exactly as it does on the raw writer.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	if s.status == 0 {
+		s.status = code
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(p []byte) (int, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return s.ResponseWriter.Write(p)
+}
+
+func (s *statusWriter) Flush() {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+// requestResult maps a settled HTTP status onto the counter label: ok means the
+// caller got a 2xx, which is the only outcome that is not an error somewhere.
+func requestResult(status int) string {
+	if status >= 200 && status <= 299 {
+		return "ok"
+	}
+	return "error"
+}
+
+// handlerLabel mirrors ServeHTTP's routing, so the counter labels the route the
+// request actually took (a proxied /v1/* path is v1_other, not a completion, and a
+// non-GET /healthz falls through to the 404 branch).
+func handlerLabel(r *http.Request) string {
 	switch {
+	case r.URL.Path == "/metrics":
+		return "metrics"
+	case r.URL.Path == "/healthz":
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			return "healthz"
+		}
+		return "not_found"
+	case strings.HasPrefix(r.URL.Path, "/slots"):
+		return "rejected"
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions":
+		return "chat_completions"
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/completions":
+		return "completions"
+	case strings.HasPrefix(r.URL.Path, "/v1/"):
+		return "v1_other"
+	default:
+		return "not_found"
+	}
+}
+
+func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec := &statusWriter{ResponseWriter: w}
+	w = rec
+	defer func() { b.metrics.incRequest(handlerLabel(r), requestResult(rec.status)) }()
+
+	switch {
+	case r.URL.Path == "/metrics":
+		// Local, like /healthz: the broker's own metrics never traverse the
+		// upstream, and the upstream's /metrics stays unreachable through here.
+		b.metrics.serveHTTP(w, r)
 	case r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		io.WriteString(w, "ok\n")
@@ -283,6 +387,9 @@ func (b *broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // request. Every early return falls back to the plain proxy: persistence is an
 // optimization, never a precondition for a correct answer.
 func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
+	b.metrics.incInflight()
+	defer b.metrics.decInflight()
+
 	body, ok := readCapped(r)
 	if !ok {
 		log.Printf("warn: %s body unreadable or over %d bytes, proxying without slots", r.URL.Path, maxTxnBodyBytes)
@@ -326,18 +433,41 @@ func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
 	// Slot calls outlive the client: a disconnect must not leave a half-applied
 	// erase or drop a save the server already produced state for.
 	opCtx := context.WithoutCancel(r.Context())
+
+	// Read the live slot's task counter before deciding to restore. Only a server
+	// restart (its counter went backwards) makes a file restore worth having; a
+	// probe failure changes no state and never blocks the request.
+	b.observeSlotTaskLocked(opCtx)
+
 	slotAbs := filepath.Join(b.cfg.slotPath, slot)
-	if _, err := os.Stat(slotAbs); err == nil {
-		if err := b.slotOp(opCtx, actionRestore, slot); err != nil {
-			log.Printf("warn: restore %s failed (%v), erasing the slot and serving cold", slot, err)
-			if e := b.slotOp(opCtx, actionErase, slot); e != nil {
-				log.Printf("warn: erase %s failed: %v", slot, e)
-			}
-			if e := os.Remove(slotAbs); e != nil && !os.IsNotExist(e) {
-				log.Printf("warn: remove %s failed: %v", slot, e)
-			}
+	if !b.pendingRestore[slot] {
+		// The slot is warm: llama.cpp still holds this conversation's prefix in
+		// memory, so a restore would be inert *and* destroy that cache (measured
+		// on the P100: 130 ms -> 44 s of prompt processing). Leave it alone.
+		b.metrics.incRestore("skipped_warm")
+	} else {
+		// One shot: whichever way this goes, the obligation is discharged.
+		delete(b.pendingRestore, slot)
+		if _, err := os.Stat(slotAbs); err != nil {
+			// The file the restart marked is gone (swept, or never saved).
+			b.metrics.incRestore("skipped_no_file")
 		} else {
-			log.Printf("restore %s", slot)
+			restoreStart := time.Now()
+			err := b.slotOp(opCtx, actionRestore, slot)
+			b.metrics.observeRestore(time.Since(restoreStart))
+			if err != nil {
+				b.metrics.incRestore("error")
+				log.Printf("warn: restore %s failed (%v), erasing the slot and serving cold", slot, err)
+				if e := b.slotOp(opCtx, actionErase, slot); e != nil {
+					log.Printf("warn: erase %s failed: %v", slot, e)
+				}
+				if e := os.Remove(slotAbs); e != nil && !os.IsNotExist(e) {
+					log.Printf("warn: remove %s failed: %v", slot, e)
+				}
+			} else {
+				b.metrics.incRestore("ok")
+				log.Printf("restore %s", slot)
+			}
 		}
 	}
 
@@ -352,6 +482,7 @@ func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := b.client.Do(upReq)
 	if err != nil {
+		b.metrics.incUpstreamError("chat")
 		log.Printf("warn: upstream %s failed: %v", r.URL.Path, err)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
@@ -366,16 +497,24 @@ func (b *broker) transactional(w http.ResponseWriter, r *http.Request) {
 	_, copyErr := io.Copy(stream, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		b.metrics.incUpstreamError("chat")
+		b.metrics.incSave("skipped_status")
 		return
 	}
 	if copyErr != nil {
+		b.metrics.incSave("skipped_no_eof")
 		log.Printf("warn: client went away before EOF, not saving %s: %v", slot, copyErr)
 		return
 	}
-	if err := b.slotOp(opCtx, actionSave, slot); err != nil {
-		log.Printf("warn: save %s failed: %v", slot, err)
+	saveStart := time.Now()
+	saveErr := b.slotOp(opCtx, actionSave, slot)
+	b.metrics.observeSave(time.Since(saveStart))
+	if saveErr != nil {
+		b.metrics.incSave("error")
+		log.Printf("warn: save %s failed: %v", slot, saveErr)
 		return
 	}
+	b.metrics.incSave("ok")
 	log.Printf("save %s", slot)
 }
 
@@ -544,27 +683,23 @@ func (b *broker) props(ctx context.Context) (propsFields, bool) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.upstreamURL+"/props", nil)
 	if err != nil {
-		return propsFields{}, false
+		return b.propsFailed(err)
 	}
 	resp, err := b.client.Do(req)
 	if err != nil {
-		log.Printf("warn: /props: %v", err)
-		return propsFields{}, false
+		return b.propsFailed(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Printf("warn: /props: status %d", resp.StatusCode)
-		return propsFields{}, false
+		return b.propsFailed(fmt.Errorf("status %d", resp.StatusCode))
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		log.Printf("warn: /props: read: %v", err)
-		return propsFields{}, false
+		return b.propsFailed(fmt.Errorf("read: %w", err))
 	}
 	var in propsInput
 	if err := json.Unmarshal(raw, &in); err != nil {
-		log.Printf("warn: /props: decode: %v", err)
-		return propsFields{}, false
+		return b.propsFailed(fmt.Errorf("decode: %w", err))
 	}
 
 	fields := propsFields{
@@ -590,6 +725,112 @@ func (b *broker) props(ctx context.Context) (propsFields, bool) {
 	return fields, true
 }
 
+// propsFailed records the upstream failure and returns the empty result, so every
+// failure branch in props stays a single line. A failed fingerprint means the
+// request runs proxied without slots; it is never cached.
+func (b *broker) propsFailed(err error) (propsFields, bool) {
+	b.metrics.incUpstreamError("props")
+	log.Printf("warn: /props: %v", err)
+	return propsFields{}, false
+}
+
+// slotInfo is the slice of /slots this broker reads. Pointers keep an absent field
+// distinguishable from a real zero: a freshly started server's first task really is
+// id_task 0, so a missing id_task must not be mistaken for one.
+type slotInfo struct {
+	ID     *int64 `json:"id"`
+	IDTask *int64 `json:"id_task"`
+}
+
+// observeSlotTaskLocked polls the live slot list and turns a decreasing id_task
+// into a one-shot restore obligation for every slot file on disk.
+//
+// WHY THE DECREASE IS THE SIGNAL — id_task only grows inside one server process,
+// and a restart resets it to a low value. Only a restart loses the in-memory cache
+// the slot files exist to replace; on a warm slot the restore is inert and destroys
+// the cache the server was about to reuse (measured on the P100), so nothing may
+// restore while the counter keeps growing.
+//
+// Every failure path leaves the gate exactly as it was: the probe is an
+// optimization input, never a precondition for answering the request.
+func (b *broker) observeSlotTaskLocked(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, slotProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.upstreamURL+"/slots", nil)
+	if err != nil {
+		log.Printf("warn: /slots probe: %v", err)
+		return
+	}
+	resp, err := b.client.Do(req)
+	if err != nil {
+		b.metrics.incUpstreamError("slots")
+		log.Printf("warn: /slots probe: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		b.metrics.incUpstreamError("slots")
+		log.Printf("warn: /slots probe: status %d", resp.StatusCode)
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		b.metrics.incUpstreamError("slots")
+		log.Printf("warn: /slots probe: read: %v", err)
+		return
+	}
+	var slots []slotInfo
+	if err := json.Unmarshal(raw, &slots); err != nil {
+		b.metrics.incUpstreamError("slots")
+		log.Printf("warn: /slots probe: decode: %v", err)
+		return
+	}
+	var observed *int64
+	for i := range slots {
+		if slots[i].ID != nil && *slots[i].ID == 0 {
+			observed = slots[i].IDTask
+			break
+		}
+	}
+	if observed == nil {
+		// A server whose slot list carries no id_task cannot be watched for
+		// restarts. Warn (the build may have changed) but do not count it as an
+		// upstream error: it would tick on every single request forever.
+		log.Printf("warn: /slots probe: no slot 0 with an id_task in %s", short(raw))
+		return
+	}
+	if prev := b.lastSlotTaskID; prev > 0 && *observed < prev {
+		b.markRestorePendingLocked()
+		b.metrics.incServerRestart()
+		log.Printf("info: serving server restarted (slot 0 id_task %d -> %d), %d slot file(s) owe a one-shot restore",
+			prev, *observed, len(b.pendingRestore))
+	}
+	// Never the maximum: the decrease is the signal, so the observed value is kept
+	// verbatim even when it looks stale.
+	b.lastSlotTaskID = *observed
+}
+
+// markRestorePendingLocked schedules one restore for every slot file the directory
+// currently holds, so each conversation pays for the restart once instead of
+// discovering it on its next request. A directory read failure leaves the existing
+// obligations alone rather than silently dropping them.
+func (b *broker) markRestorePendingLocked() {
+	entries, err := os.ReadDir(b.cfg.slotPath)
+	if err != nil {
+		log.Printf("warn: restart sweep: read %s: %v", b.cfg.slotPath, err)
+		return
+	}
+	pending := make(map[string]bool)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, slotPrefix) || !strings.HasSuffix(name, slotSuffix) {
+			continue
+		}
+		pending[name] = true
+	}
+	b.pendingRestore = pending
+}
+
 // slotOp performs one slot endpoint call. A failure is a transport error, a
 // non-2xx status, or a 2xx body carrying an `error` field — llama.cpp reports a
 // failed restore either way.
@@ -607,6 +848,9 @@ func (b *broker) slotOp(ctx context.Context, action, filename string) error {
 		log.Printf("info: /slots/0?action=%s answered 404, switching to the path form", action)
 		b.slotForm = slotFormPath
 		_, err = b.slotCall(ctx, slotFormPath, action, filename)
+	}
+	if err != nil {
+		b.metrics.incUpstreamError("slots")
 	}
 	return err
 }
@@ -685,7 +929,6 @@ func (b *broker) sweepLocked() {
 		mod  time.Time
 	}
 	var files []slotFile
-	var total int64
 	for _, e := range entries {
 		name := e.Name()
 		// Only slot files are the broker's to reclaim; anything else in the
@@ -703,33 +946,46 @@ func (b *broker) sweepLocked() {
 
 	now := time.Now()
 	kept := files[:0]
+	var total int64
 	for _, f := range files {
 		if age := now.Sub(f.mod); age > b.cfg.ttl {
-			b.removeSlot(f.name, fmt.Sprintf("mtime %s older than ttl %s", age.Truncate(time.Second), b.cfg.ttl))
-			continue
+			if b.removeSlot(f.name, fmt.Sprintf("mtime %s older than ttl %s", age.Truncate(time.Second), b.cfg.ttl)) {
+				b.metrics.incSweepDeleted("ttl")
+				continue
+			}
 		}
 		kept = append(kept, f)
 		total += f.size
 	}
-	if total <= b.cfg.capBytes {
-		return
-	}
-	sort.Slice(kept, func(i, j int) bool { return kept[i].mod.Before(kept[j].mod) })
-	for _, f := range kept {
-		if total <= b.cfg.capBytes {
-			break
+	if total > b.cfg.capBytes {
+		sort.Slice(kept, func(i, j int) bool { return kept[i].mod.Before(kept[j].mod) })
+		remaining := len(kept)
+		for _, f := range kept {
+			if total <= b.cfg.capBytes {
+				break
+			}
+			if b.removeSlot(f.name, fmt.Sprintf("total %d exceeds cap %d", total, b.cfg.capBytes)) {
+				b.metrics.incSweepDeleted("cap")
+				total -= f.size
+				remaining--
+			}
 		}
-		b.removeSlot(f.name, fmt.Sprintf("total %d exceeds cap %d", total, b.cfg.capBytes))
-		total -= f.size
+		kept = kept[:remaining]
 	}
+	// The gauges describe what the directory holds now, which is exactly what the
+	// scan just established — including after a failed removal.
+	b.metrics.setSlotStats(int64(len(kept)), total)
 }
 
-func (b *broker) removeSlot(name, reason string) {
+// removeSlot reports whether the file is actually gone, so a failed removal is not
+// counted as a deletion or subtracted from the size gauges.
+func (b *broker) removeSlot(name, reason string) bool {
 	if err := os.Remove(filepath.Join(b.cfg.slotPath, name)); err != nil {
 		log.Printf("warn: sweep: remove %s: %v", name, err)
-		return
+		return false
 	}
 	log.Printf("sweep: deleted %s (%s)", name, reason)
+	return true
 }
 
 // forwardRequestHeaders copies the end-to-end request headers. The body is

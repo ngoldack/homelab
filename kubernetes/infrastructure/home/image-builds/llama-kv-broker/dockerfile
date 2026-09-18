@@ -24,6 +24,7 @@ FROM golang:1.27-alpine AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 WORKDIR /src
 COPY kubernetes/infrastructure/home/image-builds/llama-kv-broker/main.go ./
+COPY kubernetes/infrastructure/home/image-builds/llama-kv-broker/metrics.go ./
 COPY kubernetes/infrastructure/home/image-builds/llama-kv-broker/go.mod ./
 # A single static binary; -trimpath and -s -w keep build paths and symbols out of
 # the runtime layer.

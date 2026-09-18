@@ -58,7 +58,8 @@ spec:
   replicas: 1
   # Same P100-patched mainline image as the chat service; the embedding endpoint
   # is a llama.cpp server flag, not a different engine.
-  image: registry.ngoldack.de/llama-p100:0.4.0-p100
+  # Pinned: registry.ngoldack.de/llama-p100:0.4.0-p100
+  image: registry.ngoldack.de/llama-p100@sha256:f5839c86e75d832fa538bd8b59715a8ea64dd20d356e2d1e9485b43d3a26aa6d
   # REQUIRED: without the nvidia RuntimeClass the pod schedules onto the GPU node
   # but never gets /dev/nvidia* bind-mounted and runs CPU-only.
   runtimeClassName: nvidia

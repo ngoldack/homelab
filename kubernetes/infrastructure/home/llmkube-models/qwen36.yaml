@@ -52,7 +52,8 @@ spec:
   replicas: 1
   # The mainline+patches P100 image (fleet-verified engine). ik sm60 HEAD is the
   # A/B fallback (see header comment).
-  image: registry.ngoldack.de/llama-p100:0.4.0-p100
+  # Pinned: registry.ngoldack.de/llama-p100:0.4.0-p100
+  image: registry.ngoldack.de/llama-p100@sha256:f5839c86e75d832fa538bd8b59715a8ea64dd20d356e2d1e9485b43d3a26aa6d
   # REQUIRED: without the nvidia RuntimeClass the pod schedules onto the GPU node
   # but never gets /dev/nvidia* bind-mounted and runs CPU-only (the ~1 t/s bug,
   # fixed this session on qwen3-27b).

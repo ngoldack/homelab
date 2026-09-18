@@ -38,10 +38,11 @@ are all silent). Observed at the tag:
 Core + extensions controller, its RBAC, and all four CRDs. **The Router is NOT
 included** — upstream ships it separately in `sandbox-router/deploy/`
 (namespace `agent-sandbox-system`, Service `sandbox-router-svc`, image
-`registry.k8s.io/agent-sandbox/sandbox-router-go:v1.0.2`; note the example
-`deployment.yaml` at the tag still says `:latest` — pin it). See the
-field-reference report produced with this vendoring for exact names/line
-numbers.
+`registry.k8s.io/agent-sandbox/sandbox-router-go:v1.0.2`; the example
+`deployment.yaml` at the tag still says `:latest` — both the Router and the
+controller images are digest-pinned by the patches in `kustomization.yaml`,
+since the vendored files stay untouched). See the field-reference report
+produced with this vendoring for exact names/line numbers.
 
 | Document | Name | Line |
 |---|---|---|

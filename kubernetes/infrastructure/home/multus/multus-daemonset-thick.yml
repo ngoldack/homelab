@@ -2,15 +2,16 @@
 #   deployments/multus-daemonset-thick.yml
 #
 # Local deviations (everything else is upstream verbatim):
-#   1. both `snapshot-thick` image references are pinned to `v4.3.1-thick`
-#      (a mutable snapshot tag has no place in a GitOps tree)
+#   1. both `snapshot-thick` image references are pinned to the `v4.3.1-thick`
+#      digest (a mutable snapshot tag has no place in a GitOps tree)
 #   2. kube-multus resources raised to the Talos-documented values
 #      (requests 200m/100Mi, limits 300m/150Mi) — the upstream 50Mi limit
 #      OOM-kills the primary CNI plugin (multus-cni#1346)
 #   3. an `install-cni-plugins` init container is prepended: Talos ships only
 #      bridge/firewall/flannel/host-local/loopback/portmap, and this cluster's
 #      NetworkAttachmentDefinition needs the `macvlan` + `static` plugins
-#      (arch-aware download from the containernetworking/plugins release)
+#      (arch-aware download from the containernetworking/plugins release), and
+#      its `alpine:3.21` image is digest-pinned as well
 ---
 # Note:
 #   This deployment file is designed for 'quickstart' of multus, easy installation to test it,
@@ -178,7 +179,7 @@ spec:
       serviceAccountName: multus
       containers:
         - name: kube-multus
-          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v4.3.1-thick
+          image: ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:a357a79359b80ddd5f4699117946cacf3b54f5baecf7944535594863e875fc25
           command: [ "/usr/src/multus-cni/bin/multus-daemon" ]
           resources:
             requests:
@@ -229,7 +230,7 @@ spec:
         # Arch-aware so the arm64 Hetzner node installs cleanly too (harmless
         # there — it simply gains plugins it will never use).
         - name: install-cni-plugins
-          image: alpine:3.21
+          image: alpine@sha256:81ec32e1e073303f1591af7725ca32446d44d12907c1f4e2851a95031faaec99
           command:
             - /bin/sh
             - -c
@@ -257,7 +258,7 @@ spec:
               mountPath: /host/opt/cni/bin
               mountPropagation: Bidirectional
         - name: install-multus-binary
-          image: ghcr.io/k8snetworkplumbingwg/multus-cni:v4.3.1-thick
+          image: ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:a357a79359b80ddd5f4699117946cacf3b54f5baecf7944535594863e875fc25
           command:
             - "/usr/src/multus-cni/bin/install_multus"
             - "-d"

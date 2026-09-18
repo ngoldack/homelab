@@ -42,7 +42,8 @@ spec:
         topology.homelab/site: home
       containers:
         - name: buildctl
-          image: moby/buildkit:v0.31.0
+          # Pinned: moby/buildkit:v0.31.0
+          image: moby/buildkit@sha256:a095b3d11ce1a9a05b6064ef515dfca0291ec5bcf2ea8178da8f6461924294e1
           command:
             - buildctl
           args:

@@ -60,7 +60,8 @@ patches:
           spec:
             containers:
               - name: sandbox-router
-                image: registry.k8s.io/agent-sandbox/sandbox-router-go:v1.0.2
+                # Pinned: registry.k8s.io/agent-sandbox/sandbox-router-go:v1.0.2
+                image: registry.k8s.io/agent-sandbox/sandbox-router-go@sha256:b3b5e9ba6aeb15daa1a1a5e0421baf162ecfd3ca80a589f06e2c491c0a59cacc
                 args:
                   - --http-bind-address=:8080
                   - --metrics-bind-address=:9090
@@ -79,3 +80,21 @@ patches:
               - name: router-auth-keys
                 configMap:
                   name: sandbox-router-auth-keys
+  # Controller image: pinned here, not in upstream/ (vendor rule — the vendored
+  # all-in-one stays verbatim). The name is shared with the ServiceAccount,
+  # Service, ClusterRoles and ClusterRoleBindings, so the target needs `kind`.
+  - target:
+      kind: Deployment
+      name: agent-sandbox-controller
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent-sandbox-controller
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent-sandbox-controller
+                # Pinned: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.2
+                image: registry.k8s.io/agent-sandbox/agent-sandbox-controller@sha256:dc700a37ecf4e680a146098a30996f420507e76e83a27dbd293f2b8114b14daa

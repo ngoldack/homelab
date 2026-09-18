@@ -12,9 +12,9 @@ spec:
   containerTemplate:
     image:
       repository: clickhouse/clickhouse-keeper
-      # Aligned with the ClickHouse server tag (clickhouse.yaml) — the chart
-      # pairs keeper "26.4" with server "26.4".
-      tag: "26.4"
+      # Digest of clickhouse/clickhouse-keeper:26.4 — keeper must stay
+      # version-aligned with the ClickHouse server (clickhouse.yaml).
+      hash: "sha256:3e356a2d04518ec4687275c8c0794985a67ab7a1acf0918c1ff2fcfffa1fd5a5"
     resources:
       requests:
         cpu: 100m

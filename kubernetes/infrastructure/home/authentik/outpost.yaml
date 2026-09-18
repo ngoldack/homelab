@@ -50,7 +50,8 @@ spec:
           # outpost-token CronJob (see outpost-token.yaml). Until that Secret
           # exists this pod sits in CreateContainerConfigError; the CronJob
           # converges within 15m, or run it by hand.
-          image: ghcr.io/goauthentik/proxy:2026.8.2
+          # Pinned: ghcr.io/goauthentik/proxy:2026.8.2
+          image: ghcr.io/goauthentik/proxy@sha256:b76e672ad76cbdb30705f242422bec47df903fe9568fac207ba23e9d8713c59e
           envFrom:
             # Static half (AUTHENTIK_HOST / HOST_BROWSER / INSECURE) is a
             # ConfigMap; only the token is secret material, and the cluster

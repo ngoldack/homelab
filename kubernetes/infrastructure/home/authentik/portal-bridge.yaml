@@ -54,7 +54,8 @@ spec:
         topology.homelab/site: home
       containers:
         - name: nginx
-          image: docker.io/library/nginx:1.29-alpine
+          # Pinned: docker.io/library/nginx:1.29-alpine
+          image: docker.io/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
           args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
           volumeMounts:
             - name: conf
@@ -111,7 +112,8 @@ spec:
           effect: NoSchedule
       containers:
         - name: nginx
-          image: docker.io/library/nginx:1.29-alpine
+          # Pinned: docker.io/library/nginx:1.29-alpine
+          image: docker.io/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
           args: ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
           volumeMounts:
             - name: conf

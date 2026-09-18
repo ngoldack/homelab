@@ -39,7 +39,8 @@ spec:
         topology.homelab/site: home
       containers:
         - name: ldap
-          image: ghcr.io/goauthentik/ldap:2026.8.2
+          # Pinned: ghcr.io/goauthentik/ldap:2026.8.2
+          image: ghcr.io/goauthentik/ldap@sha256:570e7663175195b46c9bbf0a22598be533fd1317ef1a97050dd27ba8228de850
           envFrom:
             - configMapRef:
                 name: authentik-outpost-config

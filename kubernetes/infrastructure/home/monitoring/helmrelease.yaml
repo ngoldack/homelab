@@ -203,6 +203,26 @@ spec:
       spec:
         nodeSelector:
           topology.homelab/site: home
+        # External alert delivery. The operator loads the routing tree and
+        # receiver URLs from this Secret (key alertmanager.yaml) instead of
+        # the chart-generated default — which, verified live before this
+        # change, was a config whose only route pointed at the `blackhole`
+        # receiver: every alert was evaluated, routed, and thrown away.
+        # The Secret is defined in alertmanager-config.sops.yaml rather than
+        # inline values because its receiver URLs are capability tokens: an
+        # ntfy topic is readable (and writable) by anyone who knows it, so a
+        # plaintext config in git would publish the cluster's whole alert
+        # stream — namespace names, backup state, failure details — and let
+        # anyone forge the dead-man heartbeat.
+        # The chart stops rendering its own Secret once configSecret is set
+        # (its template is gated on an empty configSecret), so Helm prunes
+        # the old `vmalertmanager-...-victoria-metrics-k8s-stack` Secret on
+        # upgrade. Ordering is not load-bearing: the encrypted Secret's own
+        # `kind` is encrypted too, so kustomize cannot kind-sort it (it lands
+        # ahead of this HelmRelease only alphabetically), and if the operator
+        # ever sees this spec before the Secret exists it records a transient
+        # config error and retries until it does.
+        configSecret: alertmanager-config
 
     # VictoriaLogs: the log half of the stack, declared through the same
     # operator that runs vmsingle (VLSingle/VLAgent CRDs ship in

@@ -1,0 +1,77 @@
+# Alerting-pipeline health: the heartbeat that proves external delivery is
+# alive, and the alert that fires when it is not.
+#
+# Both rules describe the delivery path itself rather than any workload, and
+# they are the two ends of the design in helmrelease.yaml +
+# alertmanager-config.sops.yaml:
+#
+#   Watchdog — permanently firing (vector(1)), deliberately the only alert
+#   here with no `for:` and with severity `none`: nothing pages on it. It
+#   exists to generate a constant stream of notifications for the `deadman`
+#   receiver in alertmanager-config.sops.yaml (child route, group_wait 0s,
+#   repeat_interval 1h). The moment any link breaks — vmalert down, this rule
+#   not loaded, Alertmanager down, routing tree broken, Cilium egress to the
+#   destination gone — the heartbeat stops, and a ping-based destination
+#   (healthchecks.io-style; see the swap instructions in
+#   alertmanager-config.sops.yaml) alarms on the silence. A destination that
+#   only displays messages (ntfy) is the weaker form: the heartbeat is then
+#   evidence you look at, not a page.
+#
+#   AlertmanagerNotificationFailures — the same path observed from inside
+#   Alertmanager. Metric verified against the live Alertmanager v0.34.0 before
+#   this rule was written:
+#       alertmanager_notifications_failed_total
+#   exists with 126 series = the full cross product of 18 integration labels
+#   x 7 reason labels (reason values observed live: authError, clientError,
+#   contextCanceled, contextDeadlineExceeded, other, rateLimited,
+#   serverError), every one of them 0 — no external receiver had ever been
+#   configured, so there is no baseline noise to suppress. With the webhook
+#   receiver live, ANY increase is a real failed delivery (ntfy outage,
+#   revoked/rotated topic, DNS or egress broken). Summing by
+#   integration+reason keeps this to one alert instance per failing
+#   integration instead of one per series.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: alerting-pipeline
+  namespace: monitoring
+spec:
+  groups:
+    - name: alerting-pipeline
+      rules:
+        - alert: Watchdog
+          # Always 1: a synthetic heartbeat, not a measurement. See the file
+          # header for why this alert exists and where it is routed.
+          expr: vector(1)
+          labels:
+            severity: none
+          annotations:
+            summary: "Alerting pipeline heartbeat"
+            description: >-
+              Synthetic always-firing alert. Its repeated arrival at the
+              `deadman` receiver proves rule evaluation, Alertmanager
+              ingestion and the external notification path are all working.
+              If the heartbeat stops, the pipeline is dead somewhere between
+              rule evaluation and the destination.
+        - alert: AlertmanagerNotificationFailures
+          expr: >-
+            sum by (integration, reason) (
+              increase(alertmanager_notifications_failed_total[15m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alertmanager failed to deliver notifications ({{ $labels.integration }})"
+            description: >-
+              {{ $value | humanize }} notification attempt(s) to the
+              {{ $labels.integration }} integration failed in the last 15m
+              (reason: {{ $labels.reason }}). While this is non-zero the
+              pipeline evaluates alerts but does NOT deliver them — it is
+              blind at its last hop, and the Watchdog heartbeat is equally
+              lost. Check the alertmanager pod logs, that the receiver URL in
+              alertmanager-config.sops.yaml is still valid (a rotated ntfy
+              topic or deleted webhook is the usual cause), and that the
+              alertmanager egress allowlist in cilium-allowlist.yaml still
+              permits the destination.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/disaster-recovery.md

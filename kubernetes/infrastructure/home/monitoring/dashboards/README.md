@@ -50,9 +50,27 @@ Sources, all pinned:
                         metrics from llama.cpp server --metrics
   authentik.json        hand-authored (no official dashboard) — django-
                         prometheus process metrics on the :9300 metrics server
+  survivability.json    hand-authored (no official dashboard), uid
+                        homelab-survivability, schemaVersion 39 — the cluster
+                        survivability set: backup ages (talos-backup etcd
+                        CronJob + CNPG/barman last-available-backup per
+                        cluster), minimum certificate validity, node/Flux/
+                        GitOps health, monitoring + alert-delivery self-health
+                        (up, alertmanager notifications/failures, vmalert rule
+                        errors), CNPG WAL archive backlog, and node /var
+                        filesystem pressure. Every panel expression was run
+                        against the live VictoriaMetrics query API before
+                        commit; the numbers observed at that time are recorded
+                        in each panel's description, and two panels at the
+                        bottom document what could NOT be built (Flux 2.9.x
+                        exports neither gotk_reconcile_condition nor
+                        gotk_resource_info, and the unpoller target is down, so
+                        no TrueNAS pool series exist).
 
 Processing applied when vendoring, which must be repeated if these are
-refreshed:
+refreshed (the hand-authored dashboards above follow the same rules — for
+survivability.json the expressions, not the JSON, are the reviewed artefact,
+so any edit must re-run each expression against VictoriaMetrics):
   - `__inputs` / `__requires` stripped. grafana.com exports use these to prompt
     for a datasource at import time; the Grafana sidecar performs no such
     prompt, so a dashboard keeping them imports with every panel unbound.

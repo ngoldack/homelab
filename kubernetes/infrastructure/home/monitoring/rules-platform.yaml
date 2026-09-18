@@ -1,0 +1,432 @@
+# Platform alert pack for the home cluster: certificate lifecycle, Flux
+# reconciliation health, backup-job staleness, node readiness, the
+# internet-facing ingress node's workload allowlist, and the public-ingress
+# probe declared in probe.yaml.
+#
+# House rules (same pattern as rules.yaml):
+#   - every metric/label below was read off the LIVE series via the
+#     VictoriaMetrics query API at implementation time; each rule quotes the
+#     query it rests on and the observed values;
+#   - candidates that could not be verified live are NOT shipped as guessed
+#     rules — they are documented in the "deliberately absent" note below;
+#   - nothing here duplicates the existing groups in rules.yaml
+#     (data-protection, kyverno, tetragon-runtime, crowdsec) or the
+#     delivery/Watchdog rules owned by rules-alerting.yaml.
+#
+# Deliberately absent (verified absent at implementation time — do not add
+# rules for these until the series exist):
+#
+#   GPU: `{__name__=~"nvidia_.*"}`, `{__name__=~".*gpu.*"}`,
+#     `{__name__=~"llmkube_.*"}` and `{__name__=~"llama.*"}` all return zero
+#     series. The llmkube qwen3-27b VMServiceScrape in scrapes.yaml discovers
+#     no ready endpoints while no model pod is scheduled, and the nvidia
+#     device plugin exports no scraped metrics. A GPU alert would evaluate
+#     an empty vector forever, i.e. it could never fire — add GPU rules in
+#     the same change that deploys a scrapeable GPU workload.
+#
+#   Host/infra (Proxmox host memory, TrueNAS pool health): the
+#     homelab-infra-metrics push path (PVE/PBS via InfluxDB line protocol,
+#     TrueNAS via Graphite — see kubernetes/infrastructure/home/
+#     homelab-infra-metrics/INFRA.md) produces NO series yet: `proxmox.*`,
+#     `pbs.*`, `graphite.*`, `unifi.*` and `unpoller.*` are all empty over a
+#     7d lookback. The in-cluster collector that does exist, unpoller, is
+#     crash-looping (up{job="unpoller"}=0; log: controller 10.30.0.1
+#     "429 Too Many Requests" for 32h). Revisit these rules when the INFRA.md
+#     senders are actually configured.
+---
+# Certificates. Source: cert-manager's controller endpoint scraped as
+# job="cert-manager" (10 certificate series + 30 ready-status series live).
+# The family list observed live is exactly: expiration_timestamp_seconds,
+# not_after/not_before_timestamp_seconds, ready_status,
+# renewal_timestamp_seconds, clock_time_seconds(+_gauge), controller_sync_
+# call/error_count, http_acme_client_request_count and its duration
+# _count/_sum. There is NO cert-manager metric that counts renewal
+# *failures* — so "renewal failure" is covered the honest way: a certificate
+# whose issuance/renewal fails flips its Ready condition, and
+# CertificateNotReady alerts on that real series.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: certificates
+  namespace: monitoring
+spec:
+  groups:
+    - name: certificates
+      rules:
+        - alert: CertificateExpirySoon
+          # Rests on: (certmanager_certificate_expiration_timestamp_seconds -
+          # time()) / 86400 — live nearest expiry at implementation time was
+          # 84.16d (buildkit-ca certs buildctl-client/buildkitd-server),
+          # next 86.12d (clickhouse-operator), 86.66d (cnpg barman-cloud),
+          # i.e. every certificate has >80 days left, so this rule is silent
+          # now by design and a firing is a real renewal failure, not noise.
+          # 21 days ~= two ACME renewal windows; cert-manager renews at 2/3
+          # of lifetime (~60d for the 90d LE certs), so <21d means at least
+          # two renewal attempts were missed.
+          expr: >-
+            (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 21
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.name }} expires in under 21 days"
+            description: >-
+              cert-manager Certificate {{ $labels.name }} (issuer
+              {{ $labels.issuer_name }}/{{ $labels.issuer_kind }}, namespace
+              {{ $labels.exported_namespace }}) expires in
+              {{ $value | humanize }} days — under three weeks. Automatic
+              renewal happens at 2/3 of lifetime; if this
+              keeps firing the renewal path is broken (ACME HTTP-01 blocked,
+              issuer credentials stale, webhook down) and dependent
+              endpoints start failing TLS handshakes when the certificate
+              lapses. The namespace label is exported_namespace for
+              namespaced Certificates; cert-manager's own webhook
+              certificates live in the cert-manager namespace. Check
+              `kubectl get certificates -A` and the CertificateRequest
+              status/events, then renew by hand only as a stopgap.
+        - alert: CertificateNotReady
+          # Rests on: certmanager_certificate_ready_status{condition="False"}
+          # == 1 — the ready_status family exists with exactly three
+          # condition values per certificate (True/False/Unknown, 10
+          # certificates); live check `{condition="True"} != 1` and
+          # `{condition="False"} == 1` both returned empty, i.e. all
+          # certificates are currently Ready=True.
+          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate {{ $labels.name }} is not ready"
+            description: >-
+              cert-manager has reported Ready=False for Certificate
+              {{ $labels.name }} (issuer {{ $labels.issuer_name }}) for over
+              an hour: issuance or renewal is failing right now. This is the
+              strongest failure signal in the certificate chain — a
+              certificate that cannot renew will eventually expire and take
+              every dependent endpoint down with it. Check the Certificate's
+              status.conditions[Ready].message and the CertificateRequest
+              events for the underlying error (ACME challenge, DNS-01
+              webhook, CA secret missing).
+---
+# Flux reconciliation health. The metric this pack WANTS does not exist in
+# this deployment: `gotk_reconcile_condition` / `gotk_suspend_status` return
+# zero series — not now and not over a 7d lookback (`count_over_time(...)`),
+# and the raw controller endpoints confirm why: kustomize-controller v1.9.5
+# and helm-controller v1.6.4 (read directly over port-forward) export only
+# gotk_reconcile_duration_seconds and gotk_token_*, no condition metric, so
+# there is NO Kustomization/HelmRelease readiness signal available in this
+# Flux version. The observable failure signal is controller-runtime's per-
+# controller error counter, which these controllers do export and which does
+# move on real failures: observed increase over 24h at implementation time
+# was kustomization=27, helmrelease=1, gitrepository=1 errors (0 in the last
+# 6h). Known limitation, deliberately documented instead of papered over:
+# "dependency not ready" stalls (e.g. the hermes / homelab-infra-metrics
+# Kustomizations sitting Ready=False/DependencyNotReady right now) requeue
+# WITHOUT incrementing errors, so a wedged dependency chain stays invisible
+# here until flux exposes a condition metric again or kube-state-metrics is
+# given a customResourceState config for the Flux CRDs.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: flux-reconcile
+  namespace: monitoring
+spec:
+  groups:
+    - name: flux-reconcile
+      rules:
+        - alert: FluxControllerReconcileErrors
+          # Rests on: sum by (controller) (increase(
+          # controller_runtime_reconcile_errors_total{job="flux-system/
+          # flux-controllers"}[15m])) — the job label is the VMPodScrape's
+          # (namespace/name) from scrapes.yaml; observed controllers:
+          # kustomization, helmrelease, gitrepository, helmrepository,
+          # ocirepository, bucket, helmchart, alert, provider, receiver.
+          # Scoped to the reconcile path that deploys this cluster
+          # (kustomization + helmrelease); source-controller fetch errors
+          # surface as downstream kustomization errors anyway. 15m window +
+          # 15m for means: errors occurring continuously for a quarter of an
+          # hour, which a one-off transient cannot fake.
+          expr: >-
+            sum by (controller) (
+              increase(controller_runtime_reconcile_errors_total{job="flux-system/flux-controllers",controller=~"kustomization|helmrelease"}[15m])
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux {{ $labels.controller }} controller is failing reconciliations"
+            description: >-
+              The Flux {{ $labels.controller }} controller recorded
+              {{ $value | humanize }} reconciliation error(s) over the last
+              15 minutes, continuously for 15 minutes — GitOps is not
+              converging. The per-object metric is not labelled by resource,
+              so find the failing object with
+              `flux get {{ $labels.controller }}s -A` / `kubectl get
+              <kind> -A` and inspect its Ready condition + events; typical
+              causes are a bad manifest rejected by admission, an
+              unreachable chart/source, or a dependency that never becomes
+              ready.
+        - alert: FluxControllerMetricsAbsent
+          # Same absence-guard pattern as BackupMetricsAbsent in rules.yaml:
+          # if the scrape itself dies (VMPodScrape removed, vmagent wedged,
+          # flux labels changed), FluxControllerReconcileErrors goes blind
+          # and the cluster loses all GitOps-failure alerting — the one
+          # thing a GitOps cluster cannot afford to lose silently.
+          expr: absent(controller_runtime_reconcile_errors_total{job="flux-system/flux-controllers"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux controller metrics absent"
+            description: >-
+              No controller_runtime_reconcile_errors_total series for the
+              flux-controllers pod scrape has been seen for 15m: the flux
+              controllers are down, the VMPodScrape in scrapes.yaml broke,
+              or vmagent stopped scraping them. While this lasts,
+              FluxControllerReconcileErrors cannot fire — GitOps failure
+              alerting is blind.
+---
+# Backup-job staleness. talos-backup is the cluster's etcd/Talos-state
+# disaster-recovery path (S3 backups from a CronJob), and its metric source
+# is kube-state-metrics: kube_cronjob_status_last_successful_time.
+# Live state at implementation time: schedule "17 3 * * *", suspend=false,
+# last successful time 1789607850 = 2026-09-17T01:17:30Z (≈30h old while
+# this file was written) because the 2026-09-18 run FAILED (newest job
+# talos-backup-29828237 Failed, 0/1). In other words this rule fires on the
+# cluster's real current state — that is the point of it; the failure is a
+# finding, not a reason to widen the threshold. Other CronJobs exist
+# (langfuse-clickhouse-backup(-prune), outpost-token) — they are out of
+# scope here; the same pattern applies if they need guarding.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: backup-jobs
+  namespace: monitoring
+spec:
+  groups:
+    - name: backup-jobs
+      rules:
+        - alert: TalosBackupStale
+          # Rests on: time() - kube_cronjob_status_last_successful_time
+          # {namespace="talos-backup",cronjob="talos-backup"} — single live
+          # series (value 1789607850 at implementation time). 26h = the
+          # daily schedule + 2h slack for the backup run itself; a value of
+          # 0 (CronJob has never succeeded) also fires, by design.
+          expr: >-
+            time()
+            - kube_cronjob_status_last_successful_time{namespace="talos-backup",cronjob="talos-backup"}
+            > 26 * 3600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Talos/etcd backup has not succeeded for over 26 hours"
+            description: >-
+              The talos-backup CronJob (daily, 03:17 UTC) has not completed
+              successfully for {{ $value | humanizeDuration }}. This is the
+              only recoverable copy of the Talos machine state / etcd
+              backups — every day it fails, the cluster's recovery point
+              drifts further back. Check
+              `kubectl -n talos-backup get jobs`,
+              `kubectl -n talos-backup logs job/<latest>` and the CronJob's
+              last schedule/concurrency settings; fix the failure before the
+              next window so the RPO returns to 24h.
+        - alert: TalosBackupMetricsAbsent
+          # Absence guard, same pattern as BackupMetricsAbsent in rules.yaml:
+          # if the CronJob (or its scrape) disappears — e.g. the
+          # talos-backup Flux Kustomization is removed by mistake — the
+          # staleness rule silently stops evaluating and backups quietly
+          # stop existing.
+          expr: >-
+            absent(kube_cronjob_status_last_successful_time{namespace="talos-backup",cronjob="talos-backup"})
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "talos-backup CronJob metrics absent"
+            description: >-
+              No kube_cronjob_status_last_successful_time series for the
+              talos-backup CronJob has been scraped for an hour: the CronJob
+              was deleted, the talos-backup namespace is gone, or
+              kube-state-metrics stopped reporting. While this lasts,
+              TalosBackupStale is blind and the cluster may be running with
+              no etcd backup at all.
+---
+# Node readiness. kube-state-metrics exports all three status variants of the
+# Ready condition per node (true/false/unknown, 4 nodes x 3 = 12 series
+# live); the active variant carries 1 and the others 0 — verified live:
+# status="true"=1 and status="false"/"unknown"=0 on all four nodes
+# (home-talos-ingress-fsn1, talos-3bi-1fl, talos-919-w9u, talos-bno-yij).
+# A node going NotReady flips its status="true" series to 0 while keeping
+# the series (KSM toggles values, it does not drop them), so `!= 1` is the
+# correct operator here.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: node-health
+  namespace: monitoring
+spec:
+  groups:
+    - name: node-health
+      rules:
+        - alert: NodeNotReady
+          # Rests on: kube_node_status_condition{condition="Ready",
+          # status="true"} — live value 1 on every node at implementation
+          # time (rule silent).
+          expr: kube_node_status_condition{condition="Ready",status="true"} != 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} is not Ready"
+            description: >-
+              Node {{ $labels.node }} has been reporting Ready != true for
+              5 minutes. Workloads on it are being rescheduled or are
+              unreachable; if this is the ingress node the public edge is
+              degraded for every route it announces, if it is a home node
+              check whether its VM/host is down. Inspect
+              `kubectl describe node {{ $labels.node }}` for the condition
+              detail (kubelet stopped posting status vs a genuine node
+              problem).
+---
+# Internet-facing ingress node hygiene. The Hetzner worker
+# (home-talos-ingress-fsn1) terminates public traffic through Cilium
+# Gateway; the point of keeping it dedicated is that its workload set stays
+# a reviewed allowlist — anything else running there is either drift or a
+# containment problem. The allowlist below was derived from the LIVE pod set
+# at implementation time (kube_pod_info{node="home-talos-ingress-fsn1"}),
+# which matched `kubectl get pods -A --field-selector
+# spec.nodeName=home-talos-ingress-fsn1` exactly: the edge SSO stack
+# (authentik-proxy, authentik-server, portal-bridge-cloud), the per-node
+# DaemonSets (cilium, cilium-envoy, kube-multus-ds, node-exporter, vlagent,
+# tetragon, crowdsec-agent). Terminal pods are filtered out by phase so the
+# leftover Succeeded `kube-system/hosttest` pod did not need an entry.
+# The allowlist matches pod OWNERS (kube_pod_owner.owner_kind/owner_name),
+# not pod names, and that is deliberate: pod names are truncated to 63
+# characters, so the chart's node-exporter pod is
+# monitoring-victoria-metrics-k8s-stack-prometheus-node-expow5h4c while its
+# owner_name is the full DaemonSet name
+# monitoring-victoria-metrics-k8s-stack-prometheus-node-exporter — a
+# pod-name-prefix allowlist silently misses it (observed live: that exact
+# false positive during implementation, which is why this rule is written
+# against kube_pod_owner). DaemonSet owner names are stable across restarts;
+# ReplicaSet owner names carry the pod-template hash
+# (authentik-proxy-68845dcc95), so those arms match the stable prefix. A pod
+# with no owner at all (a bare pod, e.g. the leftover Succeeded
+# kube-system/hosttest) is never excluded by these arms — terminal pods are
+# filtered by the phase clause, and a bare *running* pod on the edge node is
+# exactly what this alert is for.
+# Maintenance burden, stated plainly: any legitimate new edge-side workload
+# MUST be added here in the same change, or this alert will fire on it — that
+# friction is the feature (the edge node's workload set is meant to be
+# explicit, never emergent).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: ingress-node
+  namespace: monitoring
+spec:
+  groups:
+    - name: ingress-node
+      rules:
+        - alert: UnexpectedWorkloadOnIngressNode
+          # Rests on the difference between the live pod set on the node and
+          # the owner allowlist below; phase-filtered so only Running/Pending
+          # pods count (kube_pod_info, kube_pod_status_phase and
+          # kube_pod_owner all verified live). The arms were derived from a
+          # live enumeration of the node's pods at implementation time:
+          #   DaemonSet:  cilium, cilium-envoy, kube-multus-ds, tetragon,
+          #               crowdsec-agent, and the chart's two
+          #               (vlagent-monitoring-victoria-metrics-k8s-stack,
+          #               monitoring-victoria-metrics-k8s-stack-prometheus-
+          #               node-exporter)
+          #   ReplicaSet: authentik-proxy-…, authentik-server-…,
+          #               portal-bridge-cloud-…
+          # Evaluating this expression at implementation time returned an
+          # empty vector (no drift), while the same expression pointed at a
+          # home node returns ~60 pods — it has teeth.
+          expr: |-
+            count by (namespace, pod) (
+              kube_pod_info{node="home-talos-ingress-fsn1"}
+            )
+            and on (namespace, pod) (
+              kube_pod_status_phase{phase=~"Running|Pending"} == 1
+            )
+            unless on (namespace, pod) (
+              kube_pod_owner{owner_kind="DaemonSet",owner_name=~"cilium.*|kube-multus-ds|tetragon|crowdsec-agent"}
+              or kube_pod_owner{owner_kind="DaemonSet",owner_name=~".*monitoring-victoria-metrics-k8s-stack.*"}
+              or kube_pod_owner{owner_kind="ReplicaSet",owner_name=~"authentik-proxy-.*|authentik-server-.*"}
+              or kube_pod_owner{owner_kind="ReplicaSet",owner_name=~"portal-bridge-cloud-.*"}
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Unexpected pod {{ $labels.namespace }}/{{ $labels.pod }} on the ingress node"
+            description: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been
+              Running/Pending on home-talos-ingress-fsn1 (the
+              internet-facing Hetzner worker) for 15 minutes without being
+              in this rule's allowlist. Either a workload was pinned/tolerated
+              onto the edge node by accident, or a legitimate new edge
+              workload landed and the allowlist in rules-platform.yaml needs
+              it added in the same change. Treat unexpected pods here as a
+              containment review item: inspect
+              `kubectl -n {{ $labels.namespace }} get pod {{ $labels.pod }} -o yaml`
+              for its scheduling constraints and confirm it belongs on the
+              public edge.
+---
+# Public-ingress probe. probe.yaml declares the VMProbe (blackbox exporter at
+# probe/monitoring/public-ingress) against https://grafana.ngoldack.de/ and
+# https://authentik.ngoldack.de/; the generated series carry
+# instance="<target URL>" and job="probe/monitoring/public-ingress" (verified
+# against the operator's probe config generator, VictoriaMetrics/operator
+# internal/controller/operator/factory/vmscrapes/probe.go). Expected series
+# after the first scrape: probe_success{instance="https://..."} == 1.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: ingress-probe
+  namespace: monitoring
+spec:
+  groups:
+    - name: ingress-probe
+      rules:
+        - alert: PublicIngressProbeFailing
+          # Rests on: probe_success == 0 — produced by the blackbox exporter
+          # behind probe.yaml; a 0 means the target did not answer with an
+          # acceptable HTTP status (or DNS/TLS/connect failed). Probe
+          # targets: https://grafana.ngoldack.de/ (edge-verified live: 302
+          # to authentik login = reachable) and https://authentik.ngoldack.de/.
+          expr: probe_success == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public ingress probe failing for {{ $labels.instance }}"
+            description: >-
+              The blackbox probe of {{ $labels.instance }} has been failing
+              for 5 minutes: the public entry point (Hetzner edge node +
+              Cilium Gateway) is not answering correctly — DNS, TLS, the
+              Gateway listener, the HTTPRoute or the app behind it. Every
+              route the edge fronts is affected the same way; check the
+              Gateway/HTTPRoute status and the backend service before
+              blaming the app.
+        - alert: PublicIngressProbeMetricsAbsent
+          # Absence guard: probe series disappear if the blackbox exporter
+          # pod dies, the VMProbe object is removed, the scrape path breaks
+          # (Cilium policy gap), or vmagent stops scraping it — in all of
+          # which cases PublicIngressProbeFailing cannot fire. Same
+          # blind-spot pattern as BackupMetricsAbsent in rules.yaml.
+          expr: absent(probe_success)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Public ingress probe metrics absent"
+            description: >-
+              No probe_success series has been scraped for 15m: the
+              blackbox-exporter deployment (blackbox-exporter.yaml), the
+              VMProbe object (probe.yaml), the vmagent scrape path or the
+              Cilium allowlist for them is broken. While this lasts, the
+              public edge has no independent reachability check.

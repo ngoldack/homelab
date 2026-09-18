@@ -1,0 +1,2057 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Backups & recovery",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Talos etcd backup age",
+      "description": "Age of the last successful talos-backup run (CronJob talos-backup in ns talos-backup, daily 03:17 Europe/Berlin, uploads an age-encrypted etcd snapshot to Hetzner Object Storage). Metric verified live 2026-09-18T07:17Z: kube_cronjob_status_last_successful_time{cronjob=\"talos-backup\"} = 1789607850 (2026-09-17T01:17:30Z), so the age read 108019s = 30.0h — the 2026-09-18 run had not completed, i.e. the cluster's only etcd backup path is a day stale. Thresholds follow that daily schedule: >26h (93600s) = run is late, >30h (108000s) = the same 30h RPO the CNPG rule BackupTooOld enforces.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 93600
+              },
+              {
+                "color": "red",
+                "value": 108000
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "time() - kube_cronjob_status_last_successful_time{cronjob=\"talos-backup\"}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "CNPG clusters with a fresh (<30h) backup",
+      "description": "Count of CNPG clusters whose most recent available barman backup is younger than 30h. Metric verified live (plugin-barman-cloud v0.15.0; rules.yaml documents this family): barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=\"\"} returned 6 series across 5 clusters at 2026-09-18T07:17Z, and max by (cluster) collapses immich's two replicas. Observed fresh = 3 (langfuse 6440s, hindsight 16374s, authentik 18383s). Green requires all 5 — adding a cluster must raise the green step, otherwise the panel reports healthy with a cluster unprotected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 5
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(time() - max by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=\"\"}) <= 30*3600)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "CNPG clusters stale or never backed up",
+      "description": "Clusters whose newest available backup is older than the 30h RPO, or which have never produced one. Observed 2 at 2026-09-18T07:17Z: immich-database and paperless-database report timestamp 0, so the age computes to ~1.79e9s (~56.8 years) — the honest 'no backup exists yet' encoding rules.yaml documents. The alert BackupTooOld fires on 3 series for the same condition because it evaluates per series and immich-database reports from two pods; this panel counts clusters (2). Any non-zero value is red.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(time() - max by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=\"\"}) > 30*3600)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "CNPG backup age by cluster",
+      "description": "Per-cluster age of the most recent available backup, max over replicas (same series as the two stats). Live 2026-09-18T07:17Z: langfuse-database 6440s, hindsight-database 16374s, authentik-database 18383s, immich-database and paperless-database ~1.79e9s (timestamp 0 = never backed up). Sort descending so the worst cluster sits on top.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "color-text"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 108000
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Age"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "prometheus": true,
+              "service": true,
+              "exported_namespace": true,
+              "alertstate": true,
+              "node": true
+            },
+            "renameByName": {
+              "Value": "Age"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "time() - max by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=\"\"})",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Clusters backed up within 30h (trend)",
+      "description": "Trend of the fresh-backup count above; it must sit at 5. A step down is a cluster that stopped producing backups — the survivability signal an instantaneous number hides.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(time() - max by (cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cluster!=\"\"}) <= 30*3600)",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "fresh clusters"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "WAL segments archived per cluster (6h increase)",
+      "description": "cnpg_collector_pg_wal_archive_status{value=\"done\"} is the core CNPG exporter's count of WAL segments successfully archived; its 6h increase proves the barman-cloud WAL stream is actually flowing per cluster. A flat line means PITR coverage is frozen even while the backup-age gauge looks fine. Live 6h increases 2026-09-18T07:17Z: authentik 1800, hindsight 1068, paperless 519, immich 39, langfuse 34.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum by (cluster) (increase(cnpg_collector_pg_wal_archive_status{value=\"done\"}[6h]))",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Certificates",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Closest certificate expiry",
+      "description": "Minimum remaining validity across every cert-manager Certificate — the tightest cert is what breaks TLS first. certmanager_certificate_expiration_timestamp_seconds verified live (10 series from cert-manager-controller on the :9402 endpoint named tcp-prometheus-servicemonitor). Minimum at 2026-09-18T07:17Z was 7271538s = 84.2 days (buildctl-client / buildkitd-server, Issuer buildkit-ca). Thresholds: 21 days warn, 7 days critical — past that, cert-manager renewals are failing silently.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 604800
+              },
+              {
+                "color": "green",
+                "value": 1814400
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "min(certmanager_certificate_expiration_timestamp_seconds - time())",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Five soonest-expiring certificates",
+      "description": "bottomk(5) of remaining validity with the owning namespace and issuer, so an expiring cert maps to its workload without a second query. Live 2026-09-18T07:17Z: buildctl-client 7271529s, buildkitd-server 7271529s, clickhouse-operator-serving-cert 7440413s, clickhouse-operator-metrics-certs 7440413s, barman-cloud-client 7487011s (~84-87 days each).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 18,
+        "x": 6,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Remaining"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "prometheus": true,
+              "service": true,
+              "exported_namespace": true,
+              "alertstate": true,
+              "node": true
+            },
+            "renameByName": {
+              "Value": "Remaining",
+              "issuer_name": "issuer",
+              "exported_namespace": "namespace"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "bottomk(5, certmanager_certificate_expiration_timestamp_seconds - time())",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Cluster & GitOps health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Nodes Ready",
+      "description": "kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1 counted per node. Live: 4/4 nodes (talos-3bi-1fl, talos-919-w9u, talos-bno-yij, home-talos-ingress-fsn1) at 2026-09-18T07:17Z. Red the moment one drops, because the redundancy this platform has is exactly one node deep in places.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 4
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Nodes not Ready",
+      "description": "Total nodes (kube_node_info) minus the Ready count above — written this way because a filtered count of status=\"false\" is empty when everything is healthy, and an empty panel is indistinguishable from a broken query. Live: 0 at 2026-09-18T07:17Z (4 nodes total, 4 ready).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(kube_node_info) - count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Scrape targets down",
+      "description": "count(up == 0) across every scrape target vmagent owns. Live: 2 at 2026-09-18T07:17Z — job=zot (172.20.5.166:5000) and job=unpoller (172.20.5.174:9130). This is a real, current monitoring blind spot, not a dashboard artefact: unpoller being down is exactly why no TrueNAS/ZFS pool series exist in VictoriaMetrics (see the storage row note at the bottom of this dashboard).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(up == 0)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Flux reconcile errors (1h)",
+      "description": "Sum of controller_runtime_reconcile_errors_total{job=\"flux-system/flux-controllers\"} over 1h — the surviving Flux failure signal on this cluster (see the note panel in this row for why the upstream gotk_reconcile_condition 'not-ready' metric is not usable here). 10 controllers export the counter (alert, bucket, gitrepository, helmchart, helmrelease, helmrepository, kustomization, ocirepository, ...); live increase 2026-09-18T07:17Z was 0 for every one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum(increase(controller_runtime_reconcile_errors_total{job=\"flux-system/flux-controllers\"}[1h]))",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Firing alerts",
+      "description": "count of ALERTS{alertstate=\"firing\"} — vmalert remote-writes its own alert state into VictoriaMetrics, so this is the live rule-evaluation truth, not a configured-rule count. Live: 7 at 2026-09-18T07:17Z (BackupTooOld x3 for immich/paperless never-backed-up clusters, KyvernoPolicyViolations x4 in audit mode). The breakdown by alertname is the next panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count(ALERTS{alertstate=\"firing\"})",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Monitoring stack targets up",
+      "description": "Sum of up{} over the five self-monitoring jobs, by their live job labels: vmsingle (1), vmalert (1), vmagent (1), vmalertmanager (1) and vlagent (4 — DaemonSet on all four nodes) = 8 observed at 2026-09-18T07:17Z. This is the 'can I even see the cluster' panel: if the scrape/alerting chain dies, every other panel on this dashboard keeps showing its last known value, which is why the sum is pinned green at exactly 8.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 8
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum(up{job=~\"vmsingle-monitoring-victoria-metrics-k8s-stack|vmalert-monitoring-victoria-metrics-k8s-stack|vmagent-monitoring-victoria-metrics-k8s-stack|vmalertmanager-monitoring-victoria-metrics-k8s-stack|monitoring/vlagent-monitoring-victoria-metrics-k8s-stack\"})",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Down scrape targets",
+      "description": "Every up == 0 series, with job/instance so it can be chased down. Live 2026-09-18T07:17Z: job=zot (172.20.5.166:5000, registry metrics endpoint) and job=unpoller (172.20.5.174:9130, ns unpoller). Both have existed long enough to be a standing gap rather than a restart blip — the zot series matters because the registry is the only image source for first-party images, and unpoller is the only producer of TrueNAS pool capacity data.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Value"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "pod": true,
+              "prometheus": true,
+              "service": true
+            },
+            "renameByName": {
+              "Value": "Up"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "up == 0",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Flux controller reconcile errors (1h increase)",
+      "description": "Per-controller error increase (controller_runtime_reconcile_errors_total, job flux-system/flux-controllers). Live 2026-09-18T07:17Z: all 10 controllers (kustomization, helmrelease, helmchart, helmrepository, gitrepository, ocirepository, bucket, alert, ...) read 0 over 1h. This replaces the upstream gotk_reconcile_condition-based 'not ready' panel that cannot work here (see the note panel in this row).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum by (controller) (increase(controller_runtime_reconcile_errors_total{job=\"flux-system/flux-controllers\"}[1h]))",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "{{controller}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Flux-managed resources by kind",
+      "description": "count by (kind) of gotk_reconcile_duration_seconds_count — proves the reconcile loop is actually running over the whole GitOps graph (a controller stuck with no reconciles would show nothing here). Live 2026-09-18T07:17Z: Kustomization 36, HelmRelease 30, HelmChart 30, HelmRepository 22, GitRepository 1 = 119 series. After a git push, the counts move; a count that silently drops means objects were deleted, not reconciled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Resources"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "prometheus": true
+            },
+            "renameByName": {
+              "Value": "Resources"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count by (kind) (gotk_reconcile_duration_seconds_count)",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "text",
+      "title": "Flux readiness: why this row has no 'not ready' count",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "The Flux control-plane dashboard vendored as `dashboards/flux.json`, and every upstream `KustomizationNotReady`-style rule, key off `gotk_reconcile_condition{type=\"Ready\",status=\"False\"}`. **That metric does not exist on this cluster any more.** Verified two ways on 2026-09-18:\n\n* the VictoriaMetrics query API returns **no series** for either `gotk_reconcile_condition` or its replacement `gotk_resource_info` (the pod scrape `flux-controllers` has no relabeling that could drop them, and its other `gotk_*` families arrive fine);\n* `curl` of kustomize-controller's own `/metrics` (port-forward to pod port 8080) greps to **0 matches** for both names — the deployed controllers (kustomize-controller v1.9.5, helm-controller v1.6.4, source-controller v1.9.5, notification-controller v1.9.4, i.e. Flux 2.9.x) export only `gotk_reconcile_duration_seconds_*` and `gotk_token_*`.\n\nSo readiness is read indirectly here instead of invented: reconcile-error counters (this row), managed-resource counts per kind (GitOps graph is live), and the **Firing alerts** stat above, which counts vmalert's own rule output. When a controller version ships a working readiness metric, replace this note with a `count(... == 0)` panel and delete the guesswork.",
+        "mode": "markdown"
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Monitoring & alerting self-health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Monitoring stack components (up)",
+      "description": "The five self-monitoring jobs behind every other panel on this dashboard, by their live job labels. Live 2026-09-18T07:17Z: `vmsingle-monitoring-victoria-metrics-k8s-stack` 1, `vmalert-monitoring-victoria-metrics-k8s-stack` 1, `vmagent-monitoring-victoria-metrics-k8s-stack` 1, `vmalertmanager-monitoring-victoria-metrics-k8s-stack` 1, `monitoring/vlagent-monitoring-victoria-metrics-k8s-stack` 4 (VictoriaLogs agent DaemonSet on all four nodes). Eight rows of 1 is the healthy state; anything at 0 means the observability chain has a hole and the rest of this dashboard is stale.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Value"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "namespace": true,
+              "prometheus": true,
+              "service": true
+            },
+            "renameByName": {
+              "Value": "Up"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "up{job=~\"vmsingle-monitoring-victoria-metrics-k8s-stack|vmalert-monitoring-victoria-metrics-k8s-stack|vmagent-monitoring-victoria-metrics-k8s-stack|vmalertmanager-monitoring-victoria-metrics-k8s-stack|monitoring/vlagent-monitoring-victoria-metrics-k8s-stack\"}",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Alertmanager notifications vs failures (6h increase)",
+      "description": "Sent (alertmanager_notifications_total) versus failed (alertmanager_notifications_failed_total) per integration. Live 2026-09-18T07:17Z: **every integration reads 0 on both**, i.e. Alertmanager has never delivered a notification in the retention window even though the receiver is configured (the failure series carry integration=\"discord\" plus the Alertmanager-internal integrations that always exist). That is the gap this dashboard exists to expose: rules fire (see the Firing alerts panel) but nothing leaves the cluster. Once the Phase-1 external delivery + Watchdog dead-man switch land, the sent line must be non-zero — a flat zero on a survivability dashboard means alerts are being lost silently.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum by (integration) (increase(alertmanager_notifications_total[6h]))",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "{{integration}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum by (integration) (increase(alertmanager_notifications_failed_total[6h]))",
+          "refId": "B",
+          "range": true,
+          "legendFormat": "FAILED {{integration}}"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Firing alerts by name",
+      "description": "ALERTS{alertstate=\"firing\"} grouped by alertname — vmalert writes its own evaluation results into VictoriaMetrics, so this is live rule state. Live 2026-09-18T07:17Z: BackupTooOld 3 (immich-database x2 replicas + paperless-database, all with timestamp 0 = never backed up) and KyvernoPolicyViolations 4 (admission audit, still admitted). A name disappearing without the cause being fixed means the rule stopped being evaluated, not that the problem went away.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Firing"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "alertstate": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "prometheus": true,
+              "service": true
+            },
+            "renameByName": {
+              "Value": "Firing"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "count by (alertname) (ALERTS{alertstate=\"firing\"})",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "vmalert rule evaluation errors (1h)",
+      "description": "sum(increase(vmalert_alerting_rules_errors_total[1h])) — a rule that fails to evaluate is an alert that cannot fire, which is worse than a noisy one. Live 2026-09-18T07:17Z: 0 (series present, so the metric is real; `vmalert_recording_rules_errors_total` does not exist on this vmalert build and was deliberately not used). Pair with the component-up table: vmalert up + 0 errors = alerting is genuinely working.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "sum(increase(vmalert_alerting_rules_errors_total[1h]))",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "Data protection & storage",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "panels": []
+    },
+    {
+      "id": 28,
+      "type": "table",
+      "title": "CNPG WAL archive backlog (segments awaiting archive)",
+      "description": "max by (cluster) of cnpg_collector_pg_wal_archive_status{value=\"ready\"} — WAL segments written but not yet uploaded to object storage. This is the metric the WALArchivingStalled rule alerts on at >20 for 30m. Live 2026-09-18T07:17Z: 0 for all five clusters (authentik, hindsight, immich, langfuse, paperless), i.e. no archiving stall. Cells turn red at 20 to match the rule rather than at an invented threshold.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "color-text"
+            },
+            "filterable": false,
+            "inspect": false
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Value"
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "pod": true,
+              "prometheus": true,
+              "service": true,
+              "exported_namespace": true,
+              "alertstate": true,
+              "node": true
+            },
+            "renameByName": {
+              "Value": "Ready segments"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "max by (cluster) (cnpg_collector_pg_wal_archive_status{cluster!=\"\",value=\"ready\"})",
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "WAL backlog by cluster (ready segments)",
+      "description": "The same backlog over time. It should hug zero; a rising staircase is the precursor to the WALArchivingStalled alert and to a PITR gap, and it is visible here before the 30m `for:` window elapses.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "max by (cluster) (cnpg_collector_pg_wal_archive_status{cluster!=\"\",value=\"ready\"})",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Max node filesystem used (%)",
+      "description": "Highest used percentage across the real block devices the nodes expose. Live 2026-09-18T07:17Z: 80.08% — the /var xfs volume on instance 10.30.0.23:9100 (the other three read 80.08 / 63.89 / 25.56 / 13.23%). Thresholds 85% warn / 95% critical: on Talos /var holds the kubelet state and containerd image store, so filling it evicts pods and stops image pulls before the disk is actually full.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "max((1 - node_filesystem_avail_bytes{device!~\"rootfs|tmpfs|none\", fstype!~\"tmpfs|ramfs|rootfs|overlay\"} / node_filesystem_size_bytes{device!~\"rootfs|tmpfs|none\", fstype!~\"tmpfs|ramfs|rootfs|overlay\"}) * 100)",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Node /var filesystem used (%)",
+      "description": "Per-node used percentage of the xfs /var volume (device /dev/sda4 on every node), the only writable filesystem node-exporter reports at a useful mountpoint. Live 2026-09-18T07:17Z: 10.30.0.23 = 80.08% and climbing, 10.30.0.22 = 63.89%, 10.30.0.10 = 25.56%, 2.28.31.116 = 13.23%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "VictoriaMetrics"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 18,
+        "x": 6,
+        "y": 54
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "VictoriaMetrics"
+          },
+          "expr": "(1 - node_filesystem_avail_bytes{device!~\"rootfs|tmpfs|none\", fstype!~\"tmpfs|ramfs|rootfs|overlay\"} / node_filesystem_size_bytes{device!~\"rootfs|tmpfs|none\", fstype!~\"tmpfs|ramfs|rootfs|overlay\"}) * 100",
+          "refId": "A",
+          "range": true,
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "text",
+      "title": "Storage pressure: why there is no TrueNAS pool panel",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "The plan called for TrueNAS pool capacity/health from the unpoller exporter. **No such series exist in this deployment**, verified live 2026-09-18:\n\n* `{__name__=~\"unpoller.*\"}` returns nothing, and the exporter target itself is down — `up == 0` for job=unpoller, instance 172.20.5.174:9130 (see the Down scrape targets panel in the Cluster health row);\n* `{__name__=~\".*zfs.*|.*pool.*\"}` matches only unrelated application series (hindsight_db_pool_*, cilium_operator_lbipam_conflicting_pools) — there is no ZFS/pool exporter scraped by this stack.\n\nRather than ship a panel whose every query is empty, this row uses the node-exporter `/var` series, which is the storage pressure the *cluster* can actually observe. TrueNAS pool capacity stays an unmonitored local failure domain until unpoller is restored — at which point the panel is added from its then-live metric names, never guessed.",
+        "mode": "markdown"
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "homelab",
+    "survivability"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Cluster survivability",
+  "uid": "homelab-survivability",
+  "version": 1,
+  "weekStart": ""
+}

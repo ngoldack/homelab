@@ -18,6 +18,22 @@ resources:
   # CNPG data-protection alerting (WAL archiving + PITR RPO) as VMRule CRs,
   # same dependency on monitoring-crds as the pod/service scrapes above.
   - rules.yaml
+  # Alerting pipeline itself: the Alertmanager routing tree and receiver
+  # capability URLs (SOPS Secret, loaded via alertmanager.spec.configSecret in
+  # helmrelease.yaml) plus the VMRule that proves the pipeline end to end —
+  # the Watchdog heartbeat the external dead-man destination expects, and an
+  # alert on the notification-failure counters themselves.
+  - alertmanager-config.sops.yaml
+  - rules-alerting.yaml
+  # Platform alert-rule pack (certificate expiry, Flux controller errors,
+  # talos-backup staleness, node health, cloud-ingress-node hygiene) and the
+  # in-cluster probe of the public edge: the blackbox exporter, the policy
+  # that lets it be probed and reach the internet, and the VMProbe that makes
+  # vmagent scrape it. Expressions carry their live-verified evidence inline,
+  # same convention as rules.yaml.
+  - rules-platform.yaml
+  - blackbox-exporter.yaml
+  - probe.yaml
 
 # One ConfigMap per vendored dashboard. The Grafana sidecar (enabled in
 # helmrelease.yaml) watches every namespace for ConfigMaps carrying
@@ -229,6 +245,20 @@ configMapGenerator:
   - name: grafana-dashboard-crowdsec
     namespace: monitoring
     files: [dashboards/crowdsec.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+
+  # Hand-authored: the one screen to open when something feels wrong —
+  # backup ages, certificate expiry, Flux controller errors, node readiness,
+  # monitoring self-health, CNPG WAL backlog and storage pressure. Panel
+  # expressions are the reviewed artefact for hand-authored dashboards (see
+  # dashboards/README.md).
+  - name: grafana-dashboard-survivability
+    namespace: monitoring
+    files: [dashboards/survivability.json]
     options:
       labels:
         grafana_dashboard: "1"

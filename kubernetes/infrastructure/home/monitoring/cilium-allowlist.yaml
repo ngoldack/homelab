@@ -271,3 +271,62 @@ spec:
         - ports:
             - port: "9100"
               protocol: TCP
+---
+# Alertmanager's external delivery path, and the only workload in this
+# namespace with a reason to reach the public internet.
+#
+# The scrapers allowlist above already selects vmalertmanager matching on
+# this same app.kubernetes.io/name (the pod shares the scrape domain's
+# in-namespace, API-server and DNS rules), but that policy deliberately
+# carries no `toEntities: world` egress — so until this policy existed the
+# deny-all baseline in cilium-default-deny.yaml made every off-cluster
+# destination unreachable and the external receivers configured in
+# alertmanager-config.sops.yaml could never be contacted. This is a separate
+# CNP rather than a rule inside the scrapers allowlist because a rule there
+# would grant world egress to every workload that policy selects (vmagent,
+# vmsingle, vlsingle, the operator, ...): only Alertmanager posts alerts to
+# third-party endpoints, so only Alertmanager gets the exemption.
+#
+# Labels read off the live pod before writing this:
+#   app.kubernetes.io/name=vmalertmanager
+#   app.kubernetes.io/instance=monitoring-victoria-metrics-k8s-stack
+#   managed-by=vm-operator (not matchable as a stable key, so not used)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: monitoring-alertmanager-allowlist
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmalertmanager
+      app.kubernetes.io/instance: monitoring-victoria-metrics-k8s-stack
+  egress:
+    # DNS first: without it the webhook URLs cannot even be resolved.
+    # Repeated from the scrapers allowlist so this policy is self-contained
+    # (Cilium unions all policies selecting the endpoint, so the duplicate
+    # rule is redundant but harmless).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Alert delivery to the external receivers (the ntfy topics in
+    # alertmanager-config.sops.yaml). 443 is the live path; 80 is included
+    # for the redirect hop a receiver may answer with — without it that
+    # redirect fails and the delivery shows up as a failed notification
+    # rather than a delivered one. The port set, not the peer, is the bound:
+    # this pod can POST nothing but HTTP(S) off-cluster.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP

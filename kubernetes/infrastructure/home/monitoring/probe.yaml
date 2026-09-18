@@ -1,0 +1,61 @@
+# Public-ingress probe. The cluster's only public entry point is the Cilium
+# Gateway on the Hetzner edge node; this object is the synthetic (black-box)
+# user that asks "is https://<public host>/ answering" from inside the
+# cluster every 30s, so an outage is detected without a human noticing.
+#
+# Targets, both fronted by the same Gateway:
+#   https://grafana.ngoldack.de/    — the user-facing dashboard UI (SSO via
+#     authentik; verified reachable from outside the cluster: 302 to the
+#     authentik login).
+#   https://authentik.ngoldack.de/  — the identity provider every edge
+#     route's login depends on; a break here is the highest-blast-radius
+#     edge failure there is.
+# Both are probed with module http_2xx (the blackbox exporter's built-in
+# module: follows the redirect chain, so the check ends on the SSO login
+# page's 200 rather than on the 302).
+#
+# Why a static target list: the routes are Cilium HTTPRoutes attached to a
+# Gateway, and VMProbe's dynamic discovery roles only know Service, Ingress,
+# Pod and Node objects (checked against the live CRD and the operator's
+# probe generator) — an ingress-role probe would find nothing to probe. The
+# two hostnames are stable by design, so they are written down here; adding
+# a public host means adding one line here (and that is the reviewable
+# artifact the plan asked for).
+#
+# Mechanics (from VictoriaMetrics/operator
+# internal/controller/operator/factory/vmscrapes/probe.go, operator v0.74.1
+# as deployed): vmagent scrapes the prober URL with params
+# module=http_2xx&target=<url>, relabels instance=<target url> and
+# __address__=<prober url>, and names the job probe/<namespace>/<name> —
+# so the resulting series are
+#   probe_success{job="probe/monitoring/public-ingress", instance="https://grafana.ngoldack.de/"}
+# plus probe_duration_seconds / probe_http_* / probe_ssl_earliest_cert_expiry.
+# vmagent picks this up with no extra wiring: it runs with
+# selectAllByDefault: true (monitoring/helmrelease.yaml).
+#
+# Requires blackbox-exporter.yaml (the prober, in this namespace). The alert
+# pair that consumes these series lives in rules-platform.yaml (group
+# ingress-probe): PublicIngressProbeFailing on probe_success == 0 and
+# PublicIngressProbeMetricsAbsent on absent(probe_success).
+#
+# Post-deploy confirmation (orchestrator):
+#   curl -s 'http://<victoria-metrics>/api/v1/query?query=probe_success'
+#   → expect one series per target with value 1
+#   kubectl -n monitoring get vmprobe public-ingress -o jsonpath='{.status}'
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: public-ingress
+  namespace: monitoring
+spec:
+  interval: 30s
+  # The blackbox exporter's default module; explicit so a future config
+  # change cannot silently re-point the probes at another prober module.
+  module: http_2xx
+  vmProberSpec:
+    url: http://blackbox-exporter.monitoring.svc.cluster.local:9115
+  targets:
+    static:
+      targets:
+        - https://grafana.ngoldack.de/
+        - https://authentik.ngoldack.de/

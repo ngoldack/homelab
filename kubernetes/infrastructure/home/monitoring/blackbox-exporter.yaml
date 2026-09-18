@@ -1,0 +1,143 @@
+# Blackbox exporter for the public-ingress probe (probe.yaml). Why this
+# exists: every public route terminates on the Hetzner edge node behind the
+# Cilium Gateway, but nothing measured "does https://<public host>/ actually
+# answer" — a broken Gateway listener, HTTPRoute or backend would stay
+# invisible until a human noticed, and the cert-manager rules only cover the
+# certificate half of the path. This exporter performs the HTTP probes; the
+# VMProbe object in probe.yaml defines the targets and points vmagent at it.
+#
+# Image: prom/blackbox-exporter v0.28.0, digest-pinned to the multi-arch
+# INDEX (docker buildx imagetools inspect == skopeo inspect --raw | sha256sum
+# = sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc,
+# manifest list with linux/amd64 + linux/arm64 + ...) — the cluster is
+# mixed-arch (amd64 home nodes, arm64 Hetzner worker), so the index digest is
+# the correct pin; the runtime picks the matching manifest.
+#
+# Config: the image's built-in /etc/blackbox_exporter/config.yml (module
+# http_2xx: follows redirects, ip4 preferred) — deliberately no ConfigMap, so
+# there is no config file to drift or to reload; the probe targets live in
+# probe.yaml where the alert they feed is documented.
+#
+# PSA restricted / Kyverno (same shape as github-runner/deployment.yaml):
+# runAsNonRoot with the image's own nobody uid 65534, seccomp RuntimeDefault,
+# no privilege escalation, ALL capabilities dropped, readOnlyRootFilesystem
+# (the exporter writes nothing to disk), and no ServiceAccount token (it
+# makes no API calls). Health endpoints verified against the pinned source
+# (prometheus/blackbox_exporter v0.28.0 main.go): /-/healthy exists;
+# /-/ready does NOT — both probes therefore use /-/healthy.
+#
+# Network policy: kept beside the workload because it is part of making the
+# probe work. monitoring-default-deny (cilium-default-deny.yaml) plus
+# monitoring-intra-namespace-allow (security-baseline) already allow the
+# vmagent -> :9115 scrape and DNS, so NO port needs adding to
+# monitoring/cilium-allowlist.yaml; what is missing is kubelet health probes
+# and the exporter's own egress to the public HTTPS targets, and both are
+# added here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blackbox-exporter
+    spec:
+      automountServiceAccountToken: false
+      # Home site, like the rest of the monitoring stack: vmagent runs there,
+      # so the scrape stays in one failure domain, and the probe measures the
+      # home egress path to the public edge (the path a home user takes).
+      nodeSelector:
+        topology.homelab/site: home
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: blackbox-exporter
+          image: docker.io/prom/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+          ports:
+            - name: http
+              containerPort: 9115
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# ClusterIP only: the exporter is reached by the in-cluster vmagent and by
+# nothing else, so it is not exposed through the Gateway or a LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+spec:
+  selector:
+    app.kubernetes.io/name: blackbox-exporter
+  ports:
+    - name: http
+      port: 9115
+      targetPort: http
+      protocol: TCP
+---
+# The only two hops the namespace-wide policies do not already cover: kubelet
+# health probes (the `health` entity — every other monitoring workload names
+# it too) and the exporter's own HTTPS egress to the public probe targets
+# (the `world` entity, same shape as the grafana allowlist's 443 rule).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: blackbox-exporter-allowlist
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  ingress:
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - {port: "9115", protocol: TCP}
+  egress:
+    # DNS for the probe target hostnames (grafana/authentik.ngoldack.de).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+    # The public edge answers on 443; the probe is exactly the internet path
+    # being measured, so this egress has to exist.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

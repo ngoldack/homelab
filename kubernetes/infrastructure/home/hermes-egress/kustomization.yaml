@@ -1,0 +1,25 @@
+# hermes-egress — the egress guard Kustomization (plan Phase 3).
+#
+# Order matters: namespace first (every reference below assumes it exists),
+# then the policy ConfigMap + HMAC Secret (the authorizer mounts/reads them),
+# then RBAC (the reaper's SA must exist before its Deployment mounts it), then
+# the services, then Cilium last — the default-deny baseline locks the
+# namespace's traffic and references nothing, so it can never apply ahead of
+# its dependencies (repo pattern from hermes-sandbox/kustomization.yaml).
+#
+# The authorizer + reaper images are pinned by digest after their build Jobs
+# run (image-builds/hermes-egress-authorizer.yaml,
+# image-builds/hermes-egress-reaper.yaml); until then the manifests carry a
+# tag+digest placeholder comment and this Kustomization is NOT wired into
+# kubernetes/clusters/home (see README "Wiring").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - policy-configmap.yaml
+  - secret.sops.yaml
+  - rbac.yaml
+  - authorizer.yaml
+  - reaper.yaml
+  - envoy.yaml
+  - cilium-policy.yaml

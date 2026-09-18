@@ -514,3 +514,81 @@ spec:
               - key: "{{ request.object.spec.sandboxTemplateRef.name || 'none' }}"
                 operator: AllNotIn
                 value: [none, hermes-core, hermes-offline, hermes-go]
+
+---
+# hermes-session-quarantine — plan Unit 3.4. Reports (Audit; the Enforce flip
+# is a deliberate follow-up, same posture as every policy above) sessions the
+# egress reaper has quarantined: a deny or kill through the hermes-egress
+# guard escalates to a signed event, the reaper writes the session's hash into
+# the hermes-quarantine ConfigMap (hermes-egress/README.md, quarantine path),
+# and this policy matches every new Sandbox/SandboxClaim carrying that hash.
+#
+# CONTEXT: the ConfigMap lookup hermes-sandbox/hermes-quarantine. The reaper
+# CREATES that (initially empty) ConfigMap AT STARTUP (hermes-egress README),
+# so a missing ConfigMap means the reaper is not running — exactly the state
+# where fail-open would silently skip quarantine.
+#
+# failurePolicy: Fail — fail-closed BY DESIGN: with the context lookup
+# unavailable (reaper down, ConfigMap gone), Kyverno treats every matched
+# admission as a policy failure. In Audit mode that keeps reporting instead of
+# silently passing; when this flips to Enforce, new claims are REJECTED while
+# the reaper is down rather than admitted unquarantined. A missing ConfigMap
+# is the same condition as a reaper outage — never a pass.
+#
+# apiGroups are exactly the kinds the hermes-sandbox-profile-allowlist policy
+# above matches (grounded in the vendored agent-sandbox upstream CRDs:
+# SandboxClaim extensions.agents.x-k8s.io/v1beta1, Sandbox
+# agents.x-k8s.io/v1beta1). Kyverno resolves these kinds at evaluation time;
+# the same not-ready window note as the policy above applies.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: hermes-session-quarantine
+  annotations:
+    policies.kyverno.io/title: Flag quarantined Hermes sandbox sessions
+    policies.kyverno.io/category: Hermes sandbox
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  # Fail-closed on the context lookup (see header): a reaper outage must
+  # surface as policy failures, never as silent passes.
+  failurePolicy: Fail
+  rules:
+    - name: quarantined-session-hash
+      match:
+        any:
+          - resources:
+              kinds:
+                - agents.x-k8s.io/v1beta1/Sandbox
+                - extensions.agents.x-k8s.io/v1beta1/SandboxClaim
+              namespaces:
+                - hermes-sandbox
+      context:
+        - name: quarantine
+          configMap:
+            name: hermes-quarantine
+            namespace: hermes-sandbox
+      validate:
+        message: >-
+          Session is quarantined by the hermes-egress reaper (hermes-quarantine
+          ConfigMap): egress violations (allowlist denials / instant-kill
+          targets) escalated to a kill event. Clearing requires the documented
+          key deletion (hermes-egress/README.md, "Clearing a quarantine") —
+          false positives affect only one session.
+        deny:
+          conditions:
+            any:
+              # The claim's own label (stamped by the plugin at claim create)
+              # OR the pod-side passthrough label the claim carries for its
+              # pods (spec.additionalPodMetadata.labels). Either matching the
+              # quarantine ledger flags the admission — the pod gets the label
+              # from the claim, so checking both is checking the session once.
+              - key: "{{ request.object.metadata.labels.\"workload.hermes.io/session-hash\" || 'none' }}"
+                operator: AllIn
+                value: "{{ quarantine.data.keys(@) | sort(@) }}"
+              - key: >-
+                  {{ request.object.spec.additionalPodMetadata.labels."workload.hermes.io/session-hash" || 'none' }}
+                operator: AllIn
+                value: "{{ quarantine.data.keys(@) | sort(@) }}"

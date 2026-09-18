@@ -76,6 +76,16 @@ spec:
               value: http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080
             - name: AGENT_SANDBOX_ROUTER_TOKEN_FILE
               value: /opt/data/router-token
+            # Egress guard identity (Phase 3): the plugin mints the
+            # Proxy-Authorization token (v1.<expiry>.<profile>.<mac>) from
+            # these raw bytes — the SAME value the hermes-egress
+            # authorizer/reaper verify against (a copy lives in both
+            # namespaces: egress-hmac in hermes-egress, this key in
+            # hermes-secret). File (not env) so the value never appears in
+            # pod specs or `kubectl describe`. Unset/unreadable => commands
+            # run with no proxy env (loud ConfigError on a broken mount).
+            - name: AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE
+              value: /opt/data/egress-hmac
             # Enforce the sandboxed backend even if config.yaml is later
             # rewritten by the app (TERMINAL_ENV is the hard override).
             - name: TERMINAL_ENV
@@ -192,6 +202,10 @@ spec:
               mountPath: /opt/data/router-token
               subPath: token
               readOnly: true
+            - name: egress-hmac
+              mountPath: /opt/data/egress-hmac
+              subPath: EGRESS_HMAC_SECRET
+              readOnly: true
             - name: tmp
               mountPath: /tmp
         # Pod-local relay in front of the three Synthetic-tier base_urls. It
@@ -299,6 +313,12 @@ spec:
             items:
               - key: AGENT_SANDBOX_ROUTER_TOKEN
                 path: token
+        - name: egress-hmac
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: EGRESS_HMAC_SECRET
+                path: EGRESS_HMAC_SECRET
         - name: relay-script
           configMap:
             name: hermes-stream-relay

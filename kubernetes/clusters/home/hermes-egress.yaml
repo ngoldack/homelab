@@ -1,0 +1,53 @@
+# hermes-egress — the Envoy forward proxy + deterministic egress authorizer +
+# sandbox-reaper that mediate every outbound connection from Hermes sandboxes
+# (Phase 3 egress guard). Sandbox pods may only reach the proxy (Cilium), the
+# authorizer decides per-profile allowlists from the pod->claim->session-hash
+# chain, and the reaper quarantines sessions (Kyverno denies re-claims) after
+# policy violations. wait:true + Deployment healthChecks: Flux must not report
+# Ready until all three components answer their readiness probes — the guard
+# is fail-closed, so a half-deployed guard would silently strand sandboxes.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: hermes-egress
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/hermes-egress
+  prune: true
+  wait: true
+  healthChecks:
+    # Names must match the Deployments in hermes-egress/*.yaml exactly: a
+    # wrong name makes Flux wait forever as not-Ready with no error surfaced.
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: hermes-egress-proxy
+      namespace: hermes-egress
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: egress-authorizer
+      namespace: hermes-egress
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: sandbox-reaper
+      namespace: hermes-egress
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    # The sandbox namespace + the CNP egress tightening that routes sandbox
+    # traffic here.
+    - name: hermes-sandbox
+    # The ClusterPolicies (quarantine gate) live in the policies Kustomization.
+    - name: kyverno-policies
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

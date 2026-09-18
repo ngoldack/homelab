@@ -1,0 +1,53 @@
+# RBAC for the egress guard — plan Unit 3.3. Verbs are exactly the ones the
+# REAPER code path calls (reaper.py + k8sapi.py), verified against the module:
+#
+#   * extensions.agents.x-k8s.io/v1beta1 sandboxclaims: get, list, delete
+#     (list_claims by the workload.hermes.io/session-hash label; delete_claim
+#     carries a UID precondition).
+#   * core configmaps: get, create, update RESTRICTED to resourceNames
+#     [hermes-quarantine] (get + create_configmap for the startup ledger,
+#     replace_configmap for the quarantine write; nothing else writable).
+#
+# NO pods/sandboxes verbs: the identity contract binds an event to cluster
+# objects through the CLAIM LABEL, not through a pod-IP lookup (no code path
+# calls get_sandbox/list_pods), so the grant is not carried "for later".
+#
+# NO authorizer RBAC at all: the authorizer is deliberately stateless about
+# identity (token-only, no Kubernetes API call — authorizer.py docstring) and
+# its Deployment mounts no ServiceAccount token.
+#
+# The reaper Role lives in hermes-sandbox (the objects it touches); its
+# ServiceAccount lives in hermes-egress.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-reaper
+  namespace: hermes-egress
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-reaper-claims
+  namespace: hermes-sandbox
+rules:
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["hermes-quarantine"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-reaper-claims
+  namespace: hermes-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-reaper
+    namespace: hermes-egress
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-reaper-claims

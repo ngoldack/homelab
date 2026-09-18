@@ -1,0 +1,19 @@
+# hermes-egress — the egress guard namespace (plan Phase 3).
+#
+# Sits BETWEEN hermes-sandbox and the internet: sandboxes talk to the
+# hermes-egress forward proxy (hermes-egress:3128) and nothing else; the proxy
+# decides via the egress-authorizer whether a CONNECT reaches the world.
+#
+# PSA restricted: every workload here runs non-root, no escalation, dropped
+# caps, RuntimeDefault seccomp. The namespace label is the enforcement layer
+# (see kyverno-policies/policies.yaml header: PSA carries pod hardening while
+# Kyverno stays audit-only), matching every other namespace this repo ships
+# (hermes-sandbox/namespace.yaml is the same label set).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-egress
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

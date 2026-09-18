@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import artifacts as artifacts_mod
+from . import egress
 from . import files as files_mod
 from .config import (
     STDIN_AUTO,
@@ -56,6 +57,7 @@ from .errors import (
     SandboxCommandError,
     SandboxCreateError,
     SandboxCreateTimeoutError,
+    SessionQuarantinedError,
     SandboxFileSizeError,
     SandboxTimeoutError,
     SandboxTransportError,
@@ -82,6 +84,29 @@ _CAPACITY_EXHAUSTED = (
     "retry after the running session finishes"
 )
 
+# Substrings Kyverno's hermes-session-quarantine denial carries: the policy
+# name (policies.kyverno.io/title) and the quarantine ledger it reads. An
+# admission denial that mentions BOTH is the quarantine mapping condition —
+# cheap, and matched on the ERROR TEXT because the SDK raises opaque
+# exceptions for admission failures (no typed admission error to inspect).
+_QUARANTINE_MARKERS = (
+    "hermes-session-quarantine",
+    "hermes-quarantine",
+)
+
+
+def _is_quarantine_denial(exc: BaseException) -> bool:
+    """True when an admission denial flags the session as quarantined.
+
+    Matched on the error text, case-insensitive, because the python SDK
+    surfaces admission failures as opaque exceptions whose only stable
+    content is the apiserver's own message. A false match is impossible in
+    practice: both markers are this repo's own names, and an unrelated
+    failure never mentions them together.
+    """
+    text = str(exc).lower()
+    return all(marker in text for marker in _QUARANTINE_MARKERS)
+
 
 class AgentSandboxEnvironment:
     """A single task-scoped sandbox; creates its claim lazily on first command."""
@@ -105,6 +130,12 @@ class AgentSandboxEnvironment:
         self._claim_name: Optional[str] = None
         self._sandbox_name: Optional[str] = None
         self._sandbox_uid: Optional[str] = None
+        # Stable session identity (egress guard): minted lazily at the first
+        # claim create, stamped as the claim's session-hash label and carried
+        # into the proxy token. Survives claim recycles (the SAME session
+        # keeps ONE hash across _fresh_claim), so a quarantine by the reaper
+        # catches every claim this environment ever created.
+        self._session_hash: Optional[str] = None
         self._created_at: Optional[float] = None
         self._last_use: float = time.monotonic()
         self._closed = False
@@ -155,7 +186,17 @@ class AgentSandboxEnvironment:
                 self.task_id, self.config.namespace, self.config.template
             )
             try:
-                self._claims.create_claim(claim_name)
+                # Stable session identity: minted once per environment, stamped
+                # as the workload.hermes.io/session-hash label on the claim
+                # (the controller propagates it to the sandbox + pods). The
+                # egress reaper keys quarantine + claim deletion on this label
+                # and Kyverno's hermes-session-quarantine policy matches it.
+                if self._session_hash is None:
+                    self._session_hash = egress.mint_session_hash()
+                self._claims.create_claim(
+                    claim_name,
+                    pod_labels={egress.SESSION_HASH_LABEL: self._session_hash},
+                )
                 self._claim_name = claim_name
                 sandbox_name = self._claims.wait_ready(
                     claim_name, self.config.create_timeout_seconds
@@ -171,7 +212,18 @@ class AgentSandboxEnvironment:
                 raise SandboxCreateTimeoutError(
                     f"{exc} (claim {claim_name}: {detail})"
                 ) from exc
-            except Exception:
+            except Exception as exc:
+                # The admission-denial mapping (Unit 3.4): Kyverno's
+                # hermes-session-quarantine policy denies re-claims for a
+                # quarantined session; its denial names the policy + the
+                # quarantine ConfigMap. Map it to the PERMANENT error type so
+                # Hermes never recycles or retries — every retry fails the
+                # same way until the quarantine key is cleared.
+                if _is_quarantine_denial(exc):
+                    self._teardown_sandbox()
+                    raise SessionQuarantinedError(
+                        egress.quarantine_error_text(self._session_hash or "")
+                    ) from exc
                 # Never leave a half-adopted claim or a held capacity slot:
                 # delete it and reset so a subsequent command re-creates.
                 self._teardown_sandbox()
@@ -184,10 +236,40 @@ class AgentSandboxEnvironment:
                     self.config, self.config.load_token()
                 )
             self._transport.attach(sandbox_name, self._sandbox_uid, pod_ip)
+            # Egress identity (Unit 3.5): apply the proxy env for EVERY
+            # command on this claim. The token is minted fresh here (expiry =
+            # now + TTL, so a recycled claim re-mints with a later expiry);
+            # the session hash is stable for the environment's life. An unset
+            # HMAC knob submits no env (Cilium still confines the guest).
+            self._apply_egress_env()
             log.info(
-                "Sandbox %s adopted claim %s (uid=%s)",
-                sandbox_name, claim_name, self._sandbox_uid,
+                "Sandbox %s adopted claim %s (uid=%s, session-hash=%s)",
+                sandbox_name, claim_name, self._sandbox_uid, self._session_hash,
             )
+
+    def _apply_egress_env(self) -> None:
+        """Set (or clear) the per-process proxy env on the adopted transport."""
+        set_env = getattr(self._transport, "set_command_env", None)
+        if set_env is None:
+            # A transport without env plumbing (tests' guest emulator, future
+            # alternate connectors): submit no env rather than crash — the
+            # sandboxd ProcessConfig.env_vars field is the only enforcement
+            # surface here, and a connector that lacks it cannot deliver env
+            # anyway.
+            return
+        secret = self.config.load_egress_secret()
+        if secret is None or self._session_hash is None:
+            # A claim without identity submits NO env: the guest's own
+            # defaults apply (Cilium confines egress to DNS-only).
+            set_env(None)
+            return
+        env = egress.proxy_env(
+            self.config,
+            self._session_hash,
+            self.config.egress_profile,
+            secret,
+        )
+        set_env(env)
 
     def _claim_status_detail(self, claim_name: str) -> str:
         """Best-effort ``status.conditions`` digest for a claim that never bound.
@@ -264,8 +346,14 @@ class AgentSandboxEnvironment:
                     self._transport.close()
                 except Exception:  # noqa: BLE001
                     pass
-            if self._claim_name is None:
-                self._release_capacity()
+                # A recycled claim must not inherit the previous adoption's
+                # proxy env: clear it here; the next adoption re-applies with
+                # a fresh token. getattr-safe: a transport without env
+                # plumbing (test emulators, alternate connectors) submits no
+                # env by construction.
+                set_env = getattr(self._transport, "set_command_env", None)
+                if set_env is not None:
+                    set_env(None)
 
     def _cancel_remote(self) -> None:
         """Cancel the remote process for real: tear the sandbox down so the

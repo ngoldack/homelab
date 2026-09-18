@@ -410,6 +410,7 @@ class SandboxTransport:
         self._kid = kid
         self._target: Optional[SandboxTarget] = None
         self._connector = SdkCommandConnector(config)
+        self._command_env: Optional[Dict[str, str]] = None
 
     def attach(self, sandbox_name: str, sandbox_uid: str, pod_ip: str) -> None:
         target = SandboxTarget(self.config.namespace, sandbox_name, sandbox_uid, _SANDBOX_REST_PORT)
@@ -425,11 +426,24 @@ class SandboxTransport:
         self._connector.attach(sandbox_name, pod_ip)
 
     # ---- exec (direct gRPC to the adopted sandbox's ProcessService) ----
+    # Per-process env applied to EVERY command this facade submits (the egress
+    # guard's proxy identity; set by the environment at claim adoption, cleared
+    # at teardown). Empty/None submits no env_vars: the guest's own defaults
+    # apply.
+    def set_command_env(self, env: Optional[Dict[str, str]]) -> None:
+        self._command_env = dict(env) if env else None
+
     def run(self, command: str, timeout: int) -> Tuple[str, str, int]:
         """Run *command* with a per-request timeout; returns (stdout, stderr, exit_code)."""
         if self._target is None or self._connector is None:
             raise SandboxTransportError("transport not attached to a sandbox")
         try:
+            if self._command_env:
+                return self._connector.run_command(
+                    command, timeout, env=self._command_env
+                )
+            # No env set: submit WITHOUT the env kwarg, so alternate/test
+            # connectors with the original two-arg signature keep working.
             return self._connector.run_command(command, timeout)
         except SandboxCommandError:
             # Already classified (including SandboxTimeoutError): re-raise so
@@ -504,6 +518,12 @@ class SandboxTransport:
         if self._target is None or self._connector is None:
             raise SandboxTransportError("transport not attached to a sandbox")
         try:
+            if self._command_env:
+                return self._connector.run_with_stdin(
+                    command, payload, timeout, env=self._command_env
+                )
+            # No env set: submit WITHOUT the env kwarg (same alternate-
+            # connector contract as run()).
             return self._connector.run_with_stdin(command, payload, timeout)
         except AgentSandboxError:
             # Already classified (path confinement, unsupported RPC, process
@@ -606,16 +626,22 @@ class SdkCommandConnector:
             self._stub = process_pb2_grpc.ProcessServiceStub(self._channel)
         return self._stub
 
-    def run_command(self, command: str, timeout: int) -> Tuple[str, str, int]:
+    def run_command(
+        self, command: str, timeout: int, env: Optional[Dict[str, str]] = None
+    ) -> Tuple[str, str, int]:
         import grpc
         from k8s_agent_sandbox.commands._process_stubs import process_pb2
 
         stub = self._ensure_grpc()
+        config = process_pb2.ProcessConfig(command=["/bin/sh", "-c", command])
+        if env:
+            # sandboxd v1.0.2's ProcessConfig.env_vars is a string map
+            # (verified live against the pinned stubs) applied per process.
+            for key, value in env.items():
+                config.env_vars[key] = value
         try:
             response = stub.Execute(
-                process_pb2.ExecuteRequest(
-                    config=process_pb2.ProcessConfig(command=["/bin/sh", "-c", command])
-                ),
+                process_pb2.ExecuteRequest(config=config),
                 timeout=timeout,
             )
         except grpc.RpcError as exc:
@@ -743,7 +769,11 @@ class SdkCommandConnector:
             raise SandboxTransportError(f"file delete failed: {exc}")
 
     def run_with_stdin(
-        self, command: str, payload: bytes, timeout: int
+        self,
+        command: str,
+        payload: bytes,
+        timeout: int,
+        env: Optional[Dict[str, str]] = None,
     ) -> Tuple[str, str, int]:
         """Execute *command* with *payload* on stdin via Start + WriteStdin.
 
@@ -760,7 +790,7 @@ class SdkCommandConnector:
         stub = self._ensure_grpc()
         try:
             return drive_start_with_stdin(
-                stub, process_pb2, empty_pb2, command, payload, timeout
+                stub, process_pb2, empty_pb2, command, payload, timeout, env=env
             )
         except grpc.RpcError as exc:
             _translate_rpc_error(exc, timeout)
@@ -958,6 +988,7 @@ def drive_start_with_stdin(
     *,
     chunk_bytes: int = STDIN_CHUNK_BYTES,
     clock: Any = time.monotonic,
+    env: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, str, int]:
     """Run *command* with *payload* on stdin; return (stdout, stderr, exit_code).
 
@@ -974,6 +1005,9 @@ def drive_start_with_stdin(
     request = pb2.StartRequest(
         config=pb2.ProcessConfig(command=["/bin/sh", "-c", command])
     )
+    if env:
+        for key, value in env.items():
+            request.config.env_vars[key] = value
     stream = stub.Start(request, timeout=timeout)
     deadline = clock() + timeout
     stdout = bytearray()

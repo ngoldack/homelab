@@ -1,0 +1,104 @@
+# hermes-egress policy — plan Unit 3.2, the file policy.py:load_policy consumes
+# (env EGRESS_POLICY_FILE, default /etc/egress/policy.json; ConfigMap named
+# egress-authorizer-policy per the guard's docstring, key policy.json).
+#
+# Schema (validated by load_policy — unknown keys are PolicyError, fail-fast):
+#   {version: str, profiles: {<profile>: {allow: [{host, ports[]}], budget_bytes?}},
+#    kill_cidrs?: [CIDR], kill_exact?: [IP]}
+# AllowEntry host semantics (policy.py AllowEntry.matches): an entry starting
+# with "." matches the bare name and any subdomain suffix; otherwise EXACT host
+# only. Hosts are compared lowercase with a trailing dot stripped. Hostnames are
+# never resolved by the authorizer — an IP-literal target is instead evaluated
+# against kill_cidrs/kill_exact FIRST (policy.py kill_reason), so allowlisting
+# an IP is impossible and the management plane stays unreachable by value, not
+# by omission (BUILTIN_KILL_CIDRS covers RFC1918/loopback/link-local/CGNAT and
+# the IPv6 counterparts; this file adds the cluster's own ranges).
+#
+# Per-profile allowlists (fixed profile vocabulary: core, offline, python, go,
+# node, web):
+#   offline  — NO allow entries: the profile promises it fetches nothing, so
+#              every CONNECT through the proxy is denied for it.
+#   core     — the shared dependency baseline: the package indices a session
+#              of any profile cannot avoid touching. Widening needs a
+#              why-comment and a version bump.
+#   python   — PyPI + files.pythonhosted (the actual wheel CDN) on 443.
+#   go       — the Go module proxy chain: proxy.golang.org (module proxy) and
+#              sum.golang.org (checksum DB). The Go toolchain dials
+#              proxy.golang.org only for module downloads.
+#   node     — registry.npmjs.org (+ the registry.npmjs.com legacy alias).
+#   web      — same baseline as core (no dedicated promise yet).
+#
+# kill_cidrs: the cluster's own pod/service ranges (terraform.tfvars: pod_cidr
+# 172.20.0.0/16, service_cidr 172.21.0.0/16). Node/Proxmox/management VLANs are
+# inside RFC1918 ranges the builtin set already kills.
+#
+# Byte budgets: advisory tripwires, not the primary control — real byte
+# accounting needs an Envoy-side reporter, and the authorizer consumes the
+# x-egress-bytes hint only when one is supplied (README). Budgets are set far
+# above any legitimate dependency fetch.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-authorizer-policy
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: egress-authorizer
+data:
+  policy.json: |
+    {
+      "version": "2026-09-18.1",
+      "profiles": {
+        "offline": {
+          "allow": [],
+          "budget_bytes": 1048576
+        },
+        "core": {
+          "allow": [
+            {"host": "pypi.org", "ports": [443]},
+            {"host": "files.pythonhosted.org", "ports": [443]},
+            {"host": "proxy.golang.org", "ports": [443]},
+            {"host": "sum.golang.org", "ports": [443]},
+            {"host": "registry.npmjs.org", "ports": [443]}
+          ],
+          "budget_bytes": 536870912
+        },
+        "python": {
+          "allow": [
+            {"host": "pypi.org", "ports": [443]},
+            {"host": "files.pythonhosted.org", "ports": [443]}
+          ],
+          "budget_bytes": 1073741824
+        },
+        "go": {
+          "allow": [
+            {"host": "proxy.golang.org", "ports": [443]},
+            {"host": "sum.golang.org", "ports": [443]}
+          ],
+          "budget_bytes": 1073741824
+        },
+        "node": {
+          "allow": [
+            {"host": "registry.npmjs.org", "ports": [443]},
+            {"host": "registry.npmjs.com", "ports": [443]}
+          ],
+          "budget_bytes": 1073741824
+        },
+        "web": {
+          "allow": [
+            {"host": "pypi.org", "ports": [443]},
+            {"host": "files.pythonhosted.org", "ports": [443]},
+            {"host": "proxy.golang.org", "ports": [443]},
+            {"host": "sum.golang.org", "ports": [443]},
+            {"host": "registry.npmjs.org", "ports": [443]}
+          ],
+          "budget_bytes": 1073741824
+        }
+      },
+      "kill_cidrs": [
+        "172.20.0.0/16",
+        "172.21.0.0/16"
+      ],
+      "kill_exact": [
+        "169.254.169.254"
+      ]
+    }

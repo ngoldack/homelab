@@ -1,0 +1,185 @@
+# hermes-egress Cilium policy — default-deny + the allowlist carved by
+# failure mode. Same pattern as hermes-sandbox/cilium-policy.yaml: the FIRST
+# rule selecting an endpoint flips it to default-deny for the matching
+# direction; the allow docs carve out exactly the traffic each workload emits
+# and accepts. Every allow rule below comments its FAILURE MODE — what breaks
+# when this rule is wrong (missing: fail-closed; too wide: a bypass).
+#
+# FQDN rules are INERT on this cluster (no transparent DNS proxy — documented
+# in hermes-sandbox/cilium-policy.yaml): every rule here is toEndpoints /
+# toCIDR by identity or value, never dnsName.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-egress-default-deny
+  namespace: hermes-egress
+spec:
+  description: >-
+    Deny-all baseline for the guard namespace: nothing reaches the proxy or
+    the authorizer/reaper except the carved allowlist below.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+# Ingress: the ONLY callers of the guard. Sandboxes emit CONNECT to :3128 and
+# nothing else reaches the authorizer/reaper — the authorizer's /check is
+# called by the PROXY (same namespace), not by a sandbox; /events is called by
+# the authorizer, never by a sandbox.
+#
+# FAILURE MODES:
+#   * Missing the 3128 rule: every sandbox CONNECT fails at TCP level
+#     (fail-closed — safe, but egress guard is dead until fixed).
+#   * Widening to the authorizer/reaper from hermes-sandbox: a sandbox could
+#     POST /check directly (identity theft against another session's Basic
+#     token) or POST /events (forge quarantine against an arbitrary session).
+#     That is why the authorizer/reaper ingress rule admits ONLY same-
+#     namespace pods, and never hermes-sandbox.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-egress-ingress
+  namespace: hermes-egress
+spec:
+  description: >-
+    Ingress allowlist: sandboxes -> proxy 3128 only; authorizer/reaper admit
+    same-namespace pods only (proxy -> authorizer /check, authorizer ->
+    reaper /events).
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    # Sandboxes -> proxy :3128. Identity match on the pod labels the
+    # hermes-sandbox Cilium class docs stamp (workload.hermes.io/profile) —
+    # NOT on the namespace alone (PSA constrains HOW a pod runs, never WHICH
+    # workloads exist, so the namespace label does not narrow the peer set;
+    # repo pattern from hermes-sandbox/cilium-policy.yaml ingress).
+    # FAILURE MODE if missing: proxy unreachable, egress dead (fail-closed).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: core
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: offline
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: python
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: go
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: node
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+            workload.hermes.io/profile: web
+      toPorts:
+        - ports:
+            - port: "3128"
+              protocol: TCP
+    # Same-namespace control plane: proxy -> authorizer /check, authorizer ->
+    # reaper /events, probes. FAILURE MODE if missing: the guard cannot make
+    # decisions (proxy answers 403 fail-closed, the authorizer cannot report
+    # events) — safe but dead; widening this beyond hermes-egress would let
+    # foreign workloads forge quarantine events.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-egress
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Egress: what the guard itself may emit.
+#
+# proxy -> world 80/443: the ONE datapath allowance. FAILURE MODES: missing =
+# every allowed CONNECT tunnels to a dead end (fail-closed); widened beyond
+# 80/443 = the guard would proxy arbitrary ports (e.g. 22, 5432) for an
+# allowlisted host — the authorizer gates hosts, this gate keeps the port set
+# boring. It cannot be narrowed below this without breaking every fetch.
+#
+# authorizer -> reaper 8080: the event path. FAILURE MODE: missing = signed
+# events cannot be delivered (quarantine silently never happens — the strike
+# counter still escalates the response, but no claim dies; Phase-1's
+# egress deny/quarantine counter alerts on the gap).
+#
+# authorizer/reaper -> kube-apiserver + DNS: the identity corroboration + the
+# headless Service DNS. FAILURE MODE: missing = the reaper cannot map
+# source_ip -> claim -> session-hash, so it must deny fail-closed (no
+# quarantine); the authorizer cannot resolve the reaper's DNS. Widened beyond
+# kube-apiserver:443 = the guard's credentials could reach arbitrary cluster
+# services.
+#
+# Everything else (other pods, other services, node/management CIDRs) is
+# default-deny: a compromised guard pod cannot pivot to the cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-egress-egress
+  namespace: hermes-egress
+spec:
+  description: >-
+    Egress allowlist: proxy -> world 80/443 (the tunnel), authorizer ->
+    reaper 8080 (events), authorizer+reaper -> kube-apiserver 443 + 6443 and
+    cluster DNS 53 (identity corroboration + service resolution).
+  endpointSelector:
+    matchLabels: {}
+  egress:
+    # The tunnel: proxy -> world on 80/443 only. toEntities: world covers any
+    # non-cluster destination; toPorts keeps the port set boring.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    # Authorizer -> reaper: signed events. Same-namespace Service, admitted
+    # by the k8s: virtual label + the reaper's real label.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-egress
+            app.kubernetes.io/name: sandbox-reaper
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # kube-apiserver for the REAPER: it lists/deletes SandboxClaims and writes
+    # the quarantine ConfigMap. The namespace-wide rule also covers the
+    # authorizer pod, but the authorizer makes NO Kubernetes API call by
+    # design (token-only identity, no SA token mounted) — the rule's real
+    # consumer is the reaper.
+    #
+    # WHY toEntities and not toEndpoints: the apiserver is a host-network
+    # static process, identified in ipcache by the reserved kube-apiserver
+    # identity (verified on this cluster: 10.30.0.10 -> identity 7), so a
+    # toEndpoints + label selector can never match it — the same shadowing
+    # lesson as the 50000-port incident in
+    # ../../talos-backup/cilium-allowlist.yaml. WHY 6443 as well as 443: the
+    # in-cluster kubernetes VIP:443 DNATs to the node's :6443 and policy
+    # evaluates the post-translation backend. FAILURE MODE: missing = the
+    # reaper cannot delete a quarantined claim (silent containment failure).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # Cluster DNS: the authorizer resolves the reaper Service, the reaper
+    # resolves the apiserver. FAILURE MODE: missing = the guard cannot resolve
+    # its own dependencies (fail-closed, alerts fire on the dead-man rule).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

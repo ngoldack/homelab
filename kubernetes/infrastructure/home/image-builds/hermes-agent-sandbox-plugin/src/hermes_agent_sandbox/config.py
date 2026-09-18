@@ -185,6 +185,21 @@ class AgentSandboxConfig:
     process_log_tail_bytes: int = 65536
     process_stop_grace_seconds: int = 5
 
+    # ---- egress guard (Phase 3, Unit 3.5) ----
+    # Mounted file holding the raw HMAC secret (hermes-egress/secret.sops.yaml,
+    # key EGRESS_HMAC_SECRET — the same bytes the authorizer verifies against).
+    # Empty disables proxy identity entirely: commands run with no proxy env
+    # (Cilium still confines the sandbox to DNS-only, so nothing is opened).
+    egress_hmac_secret_file: str = ""
+    # Proxy token TTL: minted at claim create with expiry = now + ttl. Must
+    # exceed the claim lifetime cap (max_lifetime_seconds, default 4 h) so a
+    # token never expires mid-session; the guard accepts up to 24 h.
+    egress_token_ttl_seconds: int = 86400
+    # The profile the proxy identity carries (token vocabulary: the fixed
+    # profile set). Defaults to the backend's template's profile — the plugin
+    # never reads it from a caller.
+    egress_profile: str = "go"
+
     token_file_path: Path = field(init=False, repr=False)
     token_loaded: Optional[bytes] = field(init=False, repr=False, default=None)
 
@@ -228,6 +243,30 @@ class AgentSandboxConfig:
         if not isinstance(self.queue_max_queued, int) or self.queue_max_queued < 0:
             raise ConfigError(
                 f"queue_max_queued must be a non-negative integer, got {self.queue_max_queued!r}"
+            )
+        # The token must outlive the claim: an expiry inside the claim lifetime
+        # would answer 403 token-expired mid-session (fail-closed, but a
+        # self-inflicted outage). The guard accepts up to 24 h; a TTL above
+        # that would be rejected by its EGRESS_TOKEN_MAX_TTL_S.
+        if self.egress_token_ttl_seconds < self.max_lifetime_seconds:
+            raise ConfigError(
+                "egress_token_ttl_seconds must not be shorter than "
+                f"max_lifetime_seconds ({self.egress_token_ttl_seconds} < "
+                f"{self.max_lifetime_seconds}): the token would expire "
+                "mid-session"
+            )
+        if self.egress_token_ttl_seconds > 86400:
+            raise ConfigError(
+                "egress_token_ttl_seconds must not exceed 86400 (the guard's "
+                f"EGRESS_TOKEN_MAX_TTL_S), got {self.egress_token_ttl_seconds}"
+            )
+        # The profile rides the HMAC: an unknown profile answers 403
+        # profile-unknown for every request (fail-closed), so a typo is caught
+        # here where it is loud, not at first request.
+        if self.egress_profile not in PROFILE_NAMES:
+            raise ConfigError(
+                f"egress_profile must be one of {', '.join(PROFILE_NAMES)}, "
+                f"got {self.egress_profile!r}"
             )
         if self.stdin_mode not in STDIN_MODES:
             raise ConfigError(
@@ -286,6 +325,33 @@ class AgentSandboxConfig:
                 "if the Secret uses `stringData`, base64-encode a 32-byte seed"
             )
         object.__setattr__(self, "token_loaded", data)
+        return data
+
+    def load_egress_secret(self) -> Optional[bytes]:
+        """Read the raw egress HMAC secret; None when the knob is unset.
+
+        Empty or missing disables proxy identity (commands run with no proxy
+        env; Cilium still confines the sandbox), but a CONFIGURED file that
+        fails to read or is empty is a ConfigError — a misconfigured mount
+        must be loud, not a silent DNS-only downgrade. The value is the raw
+        secret bytes the hermes-egress guard's auth.py HMACs with; no base64
+        unwrap (the Secret ships `stringData`, matching the router-token
+        mount pattern).
+        """
+        if not self.egress_hmac_secret_file:
+            return None
+
+        try:
+            data = Path(self.egress_hmac_secret_file).read_bytes().strip()
+        except OSError as exc:
+            raise ConfigError(
+                f"AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE configured but unreadable: {exc}"
+            ) from exc
+        if not data:
+            raise ConfigError(
+                "AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE is empty: mount the "
+                "hermes-egress egress-hmac Secret's EGRESS_HMAC_SECRET key"
+            )
         return data
 
     def resolve_gateway_id(self) -> str:
@@ -453,6 +519,22 @@ def from_env(environ: Optional[dict] = None) -> AgentSandboxConfig:
             "AGENT_SANDBOX_PROCESS_STOP_GRACE_SECONDS",
             env.get("AGENT_SANDBOX_PROCESS_STOP_GRACE_SECONDS"),
             5,
+        ),
+        # ---- egress guard (Phase 3, Unit 3.5) ----
+        egress_hmac_secret_file=_parse_str(
+            "AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE",
+            env.get("AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE"),
+            "",
+        ),
+        egress_token_ttl_seconds=_parse_int(
+            "AGENT_SANDBOX_EGRESS_TOKEN_TTL_SECONDS",
+            env.get("AGENT_SANDBOX_EGRESS_TOKEN_TTL_SECONDS"),
+            86400,
+        ),
+        egress_profile=_parse_str(
+            "AGENT_SANDBOX_EGRESS_PROFILE",
+            env.get("AGENT_SANDBOX_EGRESS_PROFILE"),
+            "go",
         ),
         gateway_id=env.get("AGENT_SANDBOX_GATEWAY_ID", "").strip(),
     )

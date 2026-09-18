@@ -1,0 +1,159 @@
+# egress-authorizer — plan Unit 3.2. The deterministic ext_authz decision point
+# (image-builds/hermes-egress-guard/src/egress_guard/authorizer.py: POST /check,
+# GET /healthz, both on :8080 by default). It makes NO network call except the
+# signed event POST to the reaper, and NO Kubernetes API call at all (identity
+# is the HMAC token only), so the egress its Cilium allowlist admits for this
+# namespace is consumed by: this pod -> reaper:8080 (events) + cluster DNS.
+# The namespace-wide kube-apiserver rule in cilium-policy.yaml exists for the
+# REAPER (claim list/delete + quarantine ConfigMap); the authorizer is granted
+# no API RBAC and mounts no ServiceAccount token.
+#
+# Image: ONE guard image, TWO services selected by the module path passed as
+# argv (egress_guard/__init__.py). Tag + PENDING-digest comment:
+# the build Job (image-builds/hermes-egress-authorizer.yaml) records the
+# manifest digest; the image line below is pinned to it after that build.
+#
+# Env vars are exactly the ones authorizer.py:main reads (config.py env_*
+# helpers fail-fast on a missing required value or unparseable integer — a
+# wrong key is a CrashLoopBackOff, never a silent misconfiguration).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-authorizer
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: egress-authorizer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: egress-authorizer
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: egress-authorizer
+    spec:
+      # The authorizer NEVER touches the Kubernetes API (its identity comes
+      # from the HMAC token, not from pod labels), so it mounts no SA token:
+      # a compromised authorizer has no cluster credentials to abuse.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: authorizer
+          # digest: pinned after build (buildctl via image-builds/hermes-egress-authorizer.yaml;
+          # until then the tag alone would violate the repo pin rule, so this
+          # manifest is NOT Flux-wired until the digest line lands — see README).
+          image: registry.ngoldack.de/hermes-egress-guard:0.1.0-16569d2
+          # digest: PENDING build — the build context is the remote git tree
+          # (image-builds convention: --opt=context=<remote>#SHA>), and this
+          # worktree is uncommitted by assignment (no commit/push), so the
+          # digest cannot be produced in this run. Placeholder comment per
+          # contract; pin from the next buildctl run after the context lands.
+          # argv dispatch: the image entrypoint imports this module and calls
+          # main(). There is no EGRESS_ROLE env — the module path IS the
+          # selector, so a wrong/missing arg fails loudly at startup.
+          args: ["egress_guard.authorizer"]
+          env:
+            # The HMAC secret: identity + event signing material. Mounted from
+            # the SOPS-encrypted egress-hmac Secret (secret.sops.yaml) — the
+            # same key material the Hermes gateway and the reaper consume, so
+            # the minter, verifier and signer agree byte-for-byte.
+            - name: EGRESS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: egress-hmac
+                  key: EGRESS_HMAC_SECRET
+            # Policy file: the ConfigMap above (policy-configmap.yaml).
+            - name: EGRESS_POLICY_FILE
+              value: /etc/egress/policy.json
+            # Strikes: 3 denies inside 60 s => quarantine (plan contract).
+            - name: EGRESS_STRIKE_THRESHOLD
+              value: "3"
+            - name: EGRESS_STRIKE_WINDOW_S
+              value: "60"
+            # Reaper endpoint for signed events (authorizer.DEFAULT_REAPER_URL
+            # is this same in-cluster address).
+            - name: EGRESS_REAPER_URL
+              value: http://sandbox-reaper.hermes-egress.svc.cluster.local:8080/events
+            # Token window: mints live ≤24 h, verify accepts ±60 s skew. The
+            # plugin mints at claim-create with the same max TTL, so a token
+            # never expires mid-session (sessions are ≤4 h by claim lifetime).
+            - name: EGRESS_TOKEN_SKEW_S
+              value: "60"
+            - name: EGRESS_TOKEN_MAX_TTL_S
+              value: "86400"
+            - name: EGRESS_LISTEN_PORT
+              value: "8080"
+            - name: EGRESS_MAX_SESSIONS
+              value: "4096"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          ports:
+            - name: check
+              containerPort: 8080
+              protocol: TCP
+          # /healthz answers 200 with the policy version + profile set —
+          # a healthy answer proves the policy file loaded (a bad policy is a
+          # startup abort, so a ready pod always has a parseable policy).
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/egress
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: policy
+          configMap:
+            name: egress-authorizer-policy
+        - name: tmp
+          emptyDir: {}
+---
+# Service egress-authorizer:8080 — the fixed contract endpoint (POST /check →
+# 200 allow / 403 deny+strike / 403 + x-egress-kill: 1).
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-authorizer
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: egress-authorizer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: egress-authorizer
+  ports:
+    - name: check
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

@@ -1,0 +1,301 @@
+# hermes-egress forward proxy — plan Unit 3.1.
+#
+# Envoy in explicit forward-proxy mode: the sandbox's HTTP_PROXY points at
+# hermes-egress.hermes-egress.svc.cluster.local:3128, every request is gated by
+# an HTTP ext_authz callout to the egress-authorizer (POST /check) and a deny
+# NEVER reaches a network peer. The proxy propagates nothing it decides on:
+# identity lives in the Proxy-Authorization header (v1 HMAC token, see
+# README.md), and the sandbox's own IP is what the authorizer's
+# attributes.source.address carries (the one attribute the sandbox cannot
+# forge, because Cilium delivers the packet).
+#
+# Base image config conventions follow the agentgateway dir
+# (kubernetes/infrastructure/home/agentgateway/): workload-holding ConfigMap in
+# the app namespace, digest-pinned image ref, RollingUpdate maxSurge 0,
+# maxUnavailable 0.
+#
+# Image: envoyproxy/envoy v1.36.0, multi-arch index digest resolved from the
+# Docker Hub registry API (auth.docker.io token flow, 2026-09-18) — the same
+# method the hermes-agent-sandbox-plugin Dockerfile documents for its base.
+# The digest pin is mandatory (repo rule: no mutable tag alone).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-egress-envoy
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: hermes-egress
+    app.kubernetes.io/component: forward-proxy
+data:
+  envoy.yaml: |
+    node:
+      id: hermes-egress-proxy
+      cluster: hermes-egress
+    admin:
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 9901
+    static_resources:
+      listeners:
+        # The one public listener: the explicit forward proxy on :3128.
+        - name: forward-proxy
+          address:
+            socket_address:
+              address: 0.0.0.0
+              port_value: 3128
+          per_connection_buffer_limit_bytes: 32768
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: egress_proxy
+                    codec_type: AUTO
+                    use_remote_address: true
+                    # Stream CONNECT bodies and upstream bytes: a forward proxy
+                    # is a long-lived byte pump, and buffering whole tunnel
+                    # payloads would cap every piped transfer at the HCM buffer.
+                    stream_idle_timeout: 300s
+                    request_timeout: 0s
+                    common_http_protocol_options:
+                      idle_timeout: 300s
+                    # Byte ceiling per request body on the proxy path. A CONNECT
+                    # carries no body, and upstream tunnel bytes are not
+                    # buffered here, so this caps only HTTP request/response
+                    # header blocks — the ceiling stops an unbounded header
+                    # allocation on a public-ish listener.
+                    max_request_headers_kb: 16
+                    http_filters:
+                      # 1) ext_authz — the ONLY decision point. A deny/kill
+                      #    here answers the client directly and the request
+                      #    never reaches a network peer. deny_status_override
+                      #    maps the authorizer's own JSON error body through
+                      #    unchanged (the authorizer's response carries the
+                      #    decision headers; Envoy must not mask it with its
+                      #    own canned 403 body).
+                      - name: envoy.filters.http.ext_authz
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                          transport_api_version: V3
+                          http_service:
+                            server_uri:
+                              uri: http://egress-authorizer.hermes-egress.svc.cluster.local:8080
+                              cluster: egress-authorizer
+                              timeout: 1s
+                            # AuthorizationRequest: keep the callout minimal —
+                            # the password carries the HMAC token, so it must
+                            # ride the callout. source.address is added by the
+                            # network layer (see authorization_response below);
+                            # the sandbox-supplied headers stay sandbox-owned.
+                            authorization_request:
+                              allowed_headers:
+                                patterns:
+                                  - exact: proxy-authorization
+                                  - exact: authorization
+                            authorization_response:
+                              allowed_upstream_headers:
+                                patterns:
+                                  - exact: x-egress-session
+                                  - exact: x-egress-profile
+                              # The deny path: the authorizer's 403 (decision
+                              # JSON + x-egress-* headers) is what the client
+                              # sees, not Envoy's own body.
+                              allowed_client_headers:
+                                patterns:
+                                  - exact: x-egress-decision
+                                  - exact: x-egress-reason
+                                  - exact: x-egress-strikes
+                                  - exact: x-egress-policy-version
+                                  - exact: x-egress-session
+                                  - exact: x-egress-profile
+                                  - exact: x-egress-kill
+                            # The CheckRequest's source.address is the sandbox
+                            # pod IP (use_remote_address). It is the identity
+                            # corroboration channel: the authorizer maps
+                            # pod IP -> pod -> SandboxClaim -> session-hash
+                            # label via the Kubernetes API when it can, and
+                            # NEVER trusts the sandbox-supplied identity.
+                            include_peer_certificate: false
+                      # 2) The router: only requests the ext_authz filter
+                      #    ALLOWED reach this point — a deny was already
+                      #    answered by the authorizer's 403 and never routed.
+                      #    Cluster selection lives in route_config below (the
+                      #    egress-tunnel ORIGINAL_DST cluster, addressed per
+                      #    connection by the host:port the CONNECT named).
+                    route_config:
+                      # The forward-proxy route: every request (CONNECT or
+                      # absolute-form HTTP) tunnels through the egress-tunnel
+                      # cluster. The router upgrade_config declares CONNECT as
+                      # a supported upgrade so the tunnel pump engages; the
+                      # ext_authz filter BEFORE this point has already gated
+                      # the decision.
+                      virtual_hosts:
+                        - name: egress
+                          domains: ["*"]
+                          routes:
+                            - match:
+                                prefix: "/"
+                              route:
+                                cluster: egress-tunnel
+                                # Tunnels are long-lived: no per-request timeout
+                                # (the idle windows bound them instead).
+                                timeout: 0s
+                              # CONNECT upgrade: the forward-proxy path. The
+                              # authorizer saw and approved the request before
+                              # this upgrade engages.
+                              upgrade_configs:
+                                - upgrade_type: CONNECT
+                                  connect_config:
+                                    allow_post: false
+      clusters:
+        # Upstream tunnel cluster for ALLOWED traffic: addressed by the
+        # ORIGINAL destination (host:port the CONNECT asked for), so the proxy
+        # never resolves, caches or pins a name — the sandbox resolves
+        # hostnames itself (cluster DNS is its only other egress), and the
+        # authorizer's exact-host allowlist stays authoritative.
+        # DNS-rebinding defence stays with Cilium + the authorizer, not here.
+        - name: egress-tunnel
+          connect_timeout: 10s
+          type: ORIGINAL_DST
+          # Cluster is addressed per connection by the ORIGINAL destination,
+          # not by DNS.
+          lb_policy: CLUSTER_PROVIDED
+          # Long-lived tunnels: no idle connection-pool churn. The idle
+          # windows live on the HCM and the listener; the cluster adds no
+          # extra cap on top.
+          common_lb_config:
+            healthy_panic_threshold:
+              value: 0
+        # The authorizer cluster: the one internal dependency. Fail-closed:
+        # when the authorizer is down, the ext_authz filter fails CLOSED and
+        # answers 403 (see http_filters note) — a dead authorizer means NO
+        # egress, never open egress.
+        - name: egress-authorizer
+          connect_timeout: 1s
+          type: STRICT_DNS
+          # Headless-style DNS over the cluster: the Service is ClusterIP, so
+          # one stable VIP is correct and DNS churn is not a concern.
+          load_assignment:
+            cluster_name: egress-authorizer
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: egress-authorizer.hermes-egress.svc.cluster.local
+                          port_value: 8080
+          # 1s cap on the whole callout: a slow authorizer must delay the
+          # sandbox's request minimally, and the fail-closed default answers
+          # the client while the callout is still in flight.
+          dns_lookup_family: V4_ONLY
+---
+# Deployment: one replica, PSA-restricted shape (non-root uid 10001, drop ALL,
+# no escalation, read-only rootfs, RuntimeDefault seccomp), RollingUpdate
+# maxSurge 0 per repo convention.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-egress-proxy
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: hermes-egress
+    app.kubernetes.io/component: forward-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-egress
+      app.kubernetes.io/component: forward-proxy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-egress
+        app.kubernetes.io/component: forward-proxy
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy
+          image: docker.io/envoyproxy/envoy:v1.36.0@sha256:d62f60a74cd9631b28bb3f538788ccff201b226975179de4265b0d75fc347e90
+          args:
+            # The vendored config: no bootstrap fetch, no admin override.
+            - --config-yaml
+            - /etc/egress/envoy.yaml
+            - --log-level
+            - warning
+            - --service-cluster
+            - hermes-egress
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Envoy needs no write surface: /tmp is its only scratch.
+            readOnlyRootFilesystem: true
+          ports:
+            - name: proxy
+              containerPort: 3128
+              protocol: TCP
+            - name: admin
+              containerPort: 9901
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9901
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /server_info
+              port: 9901
+            periodSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: config
+              mountPath: /etc/egress
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: hermes-egress-envoy
+        - name: tmp
+          emptyDir: {}
+---
+# Service hermes-egress:3128 — the address the sandbox's HTTP_PROXY points at.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-egress
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: hermes-egress
+    app.kubernetes.io/component: forward-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes-egress
+    app.kubernetes.io/component: forward-proxy
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: 3128
+      protocol: TCP

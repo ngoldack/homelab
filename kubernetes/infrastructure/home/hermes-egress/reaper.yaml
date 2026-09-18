@@ -1,0 +1,141 @@
+# sandbox-reaper — plan Unit 3.3. Consumes the authorizer's HMAC-signed
+# violation events (POST /events), verifies the pod->Sandbox->SandboxClaim->
+# session-hash chain via the Kubernetes API, writes the hermes-quarantine
+# ConfigMap (key = session hash; value = reason/strikes/TTL), deletes the
+# session's SandboxClaim with a UID precondition, and exports
+# hermes_quarantine_total / hermes_egress_denied_total on :8080.
+#
+# The reaper source landed as k8sapi.py (REST client: sandboxclaims
+# get/list/delete with UID preconditions, sandboxes get, ConfigMaps
+# get/create/replace restricted to resourceNames hermes-quarantine) — the
+# reaper service itself (role reaper, POST /events + GET /healthz) is part of
+# the same guard image selected by the module path passed as argv
+# (egress_guard.reaper — egress_guard/__init__.py).
+#
+# Env vars from k8sapi.client_from_env + the shared config plumbing: the
+# Kubernetes API facts are defaults pointing at the in-cluster endpoint, so
+# only the security-critical knobs are pinned here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-reaper
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: sandbox-reaper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-reaper
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sandbox-reaper
+    spec:
+      # The reaper NEEDS the Kubernetes API: claim deletion is the kill path.
+      # Its SA (rbac.yaml) is namespaced-read claims/sandboxes + ConfigMap CRUD
+      # restricted to the hermes-quarantine name + claim deletion — nothing
+      # cluster-scoped.
+      serviceAccountName: sandbox-reaper
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reaper
+          # digest: pinned after build (buildctl via image-builds/hermes-egress-reaper.yaml).
+          image: registry.ngoldack.de/hermes-egress-guard:0.1.1-16569d2
+          # digest: PENDING build (build-hermes-egress-reaper-16569d2) — see authorizer.yaml
+          # placeholder rationale: uncommitted worktree context cannot produce a
+          # digest in this run; pin from the next buildctl run.
+          # argv dispatch: the image entrypoint imports this module and calls
+          # main(). There is no EGRESS_ROLE env — the module path IS the
+          # selector, so a wrong/missing arg fails loudly at startup.
+          args: ["egress_guard.reaper"]
+          env:
+            # Same HMAC secret as the authorizer: the reaper verifies the
+            # x-egress-signature over the raw event bytes (auth.verify_event)
+            # and never parses an unverified body.
+            - name: EGRESS_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: egress-hmac
+                  key: EGRESS_HMAC_SECRET
+            # Kubernetes API facts (k8sapi.client_from_env defaults — in-cluster
+            # endpoint + the CRD group/versions the vendored upstream manifests
+            # document). Pinned explicitly so a default drift is a loud diff.
+            - name: EGRESS_K8S_API
+              value: https://kubernetes.default.svc
+            - name: EGRESS_CLAIM_API
+              value: extensions.agents.x-k8s.io/v1beta1
+            - name: EGRESS_SANDBOX_API
+              value: agents.x-k8s.io/v1beta1
+            # Quarantine bookkeeping: the ConfigMap (namespace hermes-sandbox)
+            # whose keys are quarantined session hashes (Kyverno reads it —
+            # kyverno-policies/policies.yaml hermes-session-quarantine).
+            - name: EGRESS_QUARANTINE_NAMESPACE
+              value: hermes-sandbox
+            - name: EGRESS_QUARANTINE_CONFIGMAP
+              value: hermes-quarantine
+            - name: EGRESS_LISTEN_PORT
+              value: "8080"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          ports:
+            - name: events
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Service sandbox-reaper:8080 — the fixed contract endpoint (POST /events,
+# GET /healthz). ClusterIP only: events arrive from the authorizer pod, never
+# from a sandbox.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-reaper
+  namespace: hermes-egress
+  labels:
+    app.kubernetes.io/name: sandbox-reaper
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sandbox-reaper
+  ports:
+    - name: events
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

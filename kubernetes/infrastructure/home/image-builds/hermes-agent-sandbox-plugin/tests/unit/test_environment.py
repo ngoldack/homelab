@@ -31,8 +31,10 @@ class FakeClaims:
         self.conditions = conditions or []
         self.fail_delete = fail_delete
 
-    def create_claim(self, name):
+    def create_claim(self, name, pod_labels=None):
         self.created.append(name)
+        if pod_labels:
+            self.created_labels = pod_labels
 
     def wait_ready(self, name, timeout):
         self.waited.append((name, timeout))
@@ -60,6 +62,12 @@ class FakeTransport:
         self.cancelled = 0
         self.closed = 0
         self.runs = []
+        # Egress env plumbing (Phase 3): recorded like runs so tests can
+        # assert on what commands carried.
+        self.env = None
+
+    def set_command_env(self, env):
+        self.env = env
 
     def attach(self, name, uid, pod_ip):
         self.attached.append((name, uid, pod_ip))
@@ -72,8 +80,10 @@ class FakeTransport:
             raise SandboxCommandError(f"{remote_path!r} not found in the sandbox")
         return b"file-bytes-" + remote_path.encode()
 
-    def run(self, command, timeout):
+    def run(self, command, timeout, env=None):
         self.runs.append((command, timeout))
+        if env is not None:
+            self.env = env
         for key, value in self.script.items():
             if key in command:
                 return value
@@ -212,9 +222,9 @@ def test_two_threads_on_one_environment_create_one_claim(tmp_path):
     claims = FakeClaims()
     real_create = claims.create_claim
 
-    def slow_create(name):
+    def slow_create(name, pod_labels=None):
         time.sleep(0.05)  # widen the window both threads race into
-        real_create(name)
+        real_create(name, pod_labels=pod_labels)
 
     claims.create_claim = slow_create
     transport = FakeTransport()

@@ -1,0 +1,69 @@
+# Build the egress guard AUTHORIZER service image (hermes-egress-guard
+# sources; the authorizer service is selected at runtime by the module path
+# passed as argv; plan Unit 3.2).
+#
+# The guard image is ONE image for both services (authorizer + reaper). Both
+# Jobs assemble the same sources with different output names; the running
+# process picks its role from argv (egress_guard.authorizer |
+# egress_guard.reaper), never from an env var. This Job pushes the authorizer
+# tag; hermes-egress-reaper.yaml pushes the reaper tag.
+#
+# OUTPUT: this Job records the digest of the image it BUILT. Last built digest:
+#   (pending — first build; the hermes-egress/authorizer.yaml image line carries
+#   a pin-after-build comment until this Job runs and the digest lands)
+# Re-record the digest here and re-pin hermes-egress/authorizer.yaml after
+# every rebuild.
+#
+# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
+# tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-hermes-egress-authorizer-16569d2
+  namespace: buildkit
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1800
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+        - name: buildctl
+          image: moby/buildkit:v0.31.0
+          command:
+            - buildctl
+          args:
+            - --addr=tcp://buildkitd:1234
+            - --tlscacert=/certs/ca.crt
+            - --tlscert=/certs/tls.crt
+            - --tlskey=/certs/tls.key
+            - build
+            - --frontend=dockerfile.v0
+            - --opt=context=https://github.com/ngoldack/homelab.git#16569d2
+            - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile
+            - --output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-16569d2,push=true
+            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max
+            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache
+            - --progress=plain
+          env:
+            - name: DOCKER_CONFIG
+              value: /docker
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: docker
+              mountPath: /docker
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: buildctl-client-tls
+        - name: docker
+          secret:
+            secretName: registry-credentials
+            items:
+              - key: .dockerconfigjson
+                path: config.json

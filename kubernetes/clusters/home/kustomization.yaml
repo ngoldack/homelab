@@ -55,6 +55,10 @@ resources:
   - agent-sandbox.yaml
   - hermes-sandbox.yaml
   - hermes.yaml
+  # Hermes egress guard: Envoy forward proxy + authorizer + reaper mediating
+  # sandbox internet access (CRD-free raw manifests; depends on the sandbox
+  # namespace it polices and the Kyverno policies enforcing quarantine).
+  - hermes-egress.yaml
   # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
   - homelab-infra-metrics.yaml
   # Multus secondary-CNI meta-plugin: prerequisite for the media namespace's

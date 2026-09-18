@@ -46,13 +46,23 @@ spec:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: talos-backup
     # The Kubernetes API (entity, control-plane VIP, in-cluster Service CIDR —
-    # all three addressing forms are live in this cluster).
+    # all three addressing forms are live in this cluster). The apid port
+    # rides here too: the etcd-snapshot dial to default/talos resolves to the
+    # control-plane node IP, which ipcache maps to the kube-apiserver identity
+    # (verified in the 2026-09-18 cilium-agent ipcache on talos-919-w9u), and
+    # toCIDRSet rules NEVER match a destination carrying a reserved identity
+    # — the dedicated 50000 CIDR rules this replaces were therefore inert,
+    # which is what kept talos-backup-29828237 (and every run after the
+    # 2026-09-17
+    # default-deny rollout) failing with "dial tcp 172.21.96.111:50000:
+    # i/o timeout". Matching the entity by ports is the working form.
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
+            - {port: "50000", protocol: TCP}
     - toCIDRSet:
         - cidr: 10.30.0.10/32
       toPorts:
@@ -65,31 +75,13 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
-    # The Talos API (apid, TCP 50000) — the etcd-snapshot path itself, and the
-    # one egress this namespace needs that is not HTTP(S). Two addressing
-    # forms for the same reason as the 443/6443 pair above: the ClusterIP
-    # (default/talos, provider=talos.dev, endpoint slice talos-ipv4 ->
-    # 10.30.0.10:50000) is what the talosconfig dials, while Cilium evaluates
-    # the post-service-translation backend address.
-    #
-    # Why this rule exists at all: the 2026-09-17 zero-trust rollout listed
-    # 443/6443 for the apiserver forms but not 50000, and the 2026-09-18
-    # 01:17 UTC backup run then failed 95s after starting with
-    #   failed to take etcd snapshot: ... dial tcp 172.21.96.111:50000:
-    #   i/o timeout
-    # (job talos-backup-29828237, BackoffLimitExceeded; reproduced by hand
-    # before this fix). The cluster had no fresh etcd backup until the
-    # TalosBackupStale alert in ../monitoring/rules-platform.yaml surfaced it.
-    - toCIDRSet:
-        - cidr: 172.21.0.0/16
-      toPorts:
-        - ports:
-            - {port: "50000", protocol: TCP}
-    - toCIDRSet:
-        - cidr: 10.30.0.10/32
-      toPorts:
-        - ports:
-            - {port: "50000", protocol: TCP}
+    # (Historic note, kept for the record: dedicated 50000 toCIDRSet entries
+    # for 172.21.0.0/16 and 10.30.0.10/32 were shipped on 2026-09-17/18 but
+    # were proven inert at the datapath level — the service-VIP dial NATs to
+    # the node IP, which ipcache maps to the reserved kube-apiserver identity,
+    # and toCIDRSet never matches a destination carrying a reserved identity.
+    # The job talos-backup-29828237 failure above is fully explained by that
+    # shadowing, which is why the port moved into the toEntities rule.)
     # The Hetzner S3-compatible object storage backend.
     - toEntities:
         - world

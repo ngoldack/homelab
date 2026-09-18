@@ -92,5 +92,20 @@ class SandboxArtifactTooLargeError(SandboxArtifactError, SandboxFileSizeError):
     """An artifact exceeds the configured byte cap."""
 
 
+
 class SandboxArtifactExpiredError(SandboxArtifactError):
     """The artifact id is unknown or its TTL has passed."""
+
+
+class SessionQuarantinedError(AgentSandboxError):
+    """The session is PERMANENTLY quarantined by the hermes-egress reaper
+    (plan Unit 3.4).
+
+    Distinct from :class:`SandboxCreateError`: a quarantine is never
+    transient. The reaper wrote the session's hash into the
+    ``hermes-quarantine`` ConfigMap and deleted its claims; Kyverno's
+    hermes-session-quarantine policy denies re-claims for that hash. Hermes
+    surfaces this to the user as a permanent quarantine error and must NOT
+    recycle the environment or retry claim creation — every retry fails the
+    same way until the documented quarantine-clear procedure runs.
+    """

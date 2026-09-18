@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: runner
-          image: registry.ngoldack.de/github-runner@sha256:373373088d361e3560ec20c81641a602ab8d47aff967cd3398ca841aae564aff
+          image: registry.ngoldack.de/github-runner@sha256:c824f807b37e42d9413961c65259821fb8938d67dd43abd2b66e2f0c8ef7762a
           env:
             - name: RUNNER_REPO_URL
               value: https://github.com/ngoldack/homelab

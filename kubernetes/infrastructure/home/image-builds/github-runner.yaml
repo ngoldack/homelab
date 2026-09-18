@@ -11,6 +11,10 @@
 # which is why this Job needs no `--opt=context=...git#<sha>` pin and can be
 # committed in the same change as the files it builds.
 #
+# OUTPUT: registry.ngoldack.de/github-runner:2 =
+#   sha256:c824f807b37e42d9413961c65259821fb8938d67dd43abd2b66e2f0c8ef7762a
+# pinned in kubernetes/infrastructure/home/github-runner/deployment.yaml.
+#
 # RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag,
 # and the base digests in github-runner/dockerfile together; Flux prunes the
 # old Job. -2 added kubectl (the upstream runner image has none and the

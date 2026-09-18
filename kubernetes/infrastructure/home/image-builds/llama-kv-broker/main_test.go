@@ -53,18 +53,43 @@ type stubUpstream struct {
 	inferStarted   chan struct{}
 	startedOnce    sync.Once
 	gateOnce       sync.Once
+
+	// idTask is the serving server's slot task counter as the /slots probe sees
+	// it. idTaskAuto keeps it growing, i.e. a server that has not restarted; a
+	// test that wants a restart turns that off and drops the value below the last
+	// one it reported.
+	idTask       int64
+	idTaskAuto   bool
+	slotListSeen int
 }
 
 func newStubUpstream(t *testing.T) *stubUpstream {
 	t.Helper()
-	s := &stubUpstream{slotDir: t.TempDir(), chatStatus: http.StatusOK}
+	s := &stubUpstream{slotDir: t.TempDir(), chatStatus: http.StatusOK, idTask: 40, idTaskAuto: true}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/props", s.handleProps)
+	mux.HandleFunc("/slots", s.handleSlotList)
 	mux.HandleFunc("/slots/", s.handleSlots)
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
 	s.srv = httptest.NewServer(mux)
 	t.Cleanup(s.srv.Close)
 	return s
+}
+
+// handleSlotList mirrors the live `GET /slots`: one slot whose id_task is the
+// server's per-process task counter, which resets on a restart. It is deliberately
+// NOT recorded in the call log — it is a probe, not part of the
+// restore->infer->save contract the exact call-order assertions describe.
+func (s *stubUpstream) handleSlotList(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.idTaskAuto {
+		s.idTask++
+	}
+	task := s.idTask
+	s.slotListSeen++
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `[{"id":0,"id_task":%d,"n_ctx":32768}]`, task)
 }
 
 func (s *stubUpstream) handleProps(w http.ResponseWriter, r *http.Request) {
@@ -95,9 +120,18 @@ func (s *stubUpstream) handleSlots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.calls = append(s.calls, action+":"+payload.Filename)
 	fail, errBody := s.restoreFail, s.restoreErrBody
 	s.mu.Unlock()
+
+	// The call is recorded only once the side effect has landed: a test that sees
+	// it in the log can then rely on the named file already existing (or already
+	// being gone), which is what keeps every file assertion deterministic instead
+	// of racing the write.
+	defer func() {
+		s.mu.Lock()
+		s.calls = append(s.calls, action+":"+payload.Filename)
+		s.mu.Unlock()
+	}()
 
 	path := filepath.Join(s.slotDir, payload.Filename)
 	switch action {
@@ -179,6 +213,90 @@ func (s *stubUpstream) callLog() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.calls...)
+}
+
+func (s *stubUpstream) slotListCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slotListSeen
+}
+
+// countAction counts the recorded calls of one action, so a test can name the
+// regression it guards ("no restore happened") instead of only diffing the log.
+func countAction(calls []string, action string) int {
+	n := 0
+	for _, c := range calls {
+		if strings.HasPrefix(c, action+":") {
+			n++
+		}
+	}
+	return n
+}
+
+// metricsBody fetches the broker's own exposition through the front server.
+func metricsBody(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	resp, err := srv.Client().Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /metrics: status %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("GET /metrics: Content-Type %q, want text/plain", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("GET /metrics: read: %v", err)
+	}
+	return string(body)
+}
+
+// settledMetricsBody fetches the exposition once the broker has finished the
+// bookkeeping it performs after the client already saw EOF (the save counters and
+// the request counter are written then), so exact-value assertions are not racy.
+func settledMetricsBody(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	time.Sleep(graceAfterResponse)
+	return metricsBody(t, srv)
+}
+
+// mustHaveMetricLine asserts an exact sample line, value included: pre-seeded zero
+// series make a family-name substring check tautological.
+func mustHaveMetricLine(t *testing.T, body, line string) {
+	t.Helper()
+	if !strings.Contains(body, line+"\n") {
+		t.Fatalf("metrics body has no %q line:\n%s", line, body)
+	}
+}
+
+// expectedMetricFamilies is the whole exposition contract, in render order.
+var expectedMetricFamilies = []string{
+	"kv_broker_build_info",
+	"kv_broker_inflight_transactions",
+	"kv_broker_requests_total",
+	"kv_broker_restore_seconds",
+	"kv_broker_restore_total",
+	"kv_broker_save_seconds",
+	"kv_broker_save_total",
+	"kv_broker_server_restarts_total",
+	"kv_broker_slot_bytes",
+	"kv_broker_slot_files",
+	"kv_broker_sweep_deleted_total",
+	"kv_broker_upstream_errors_total",
+}
+
+// metricFamilies lists the families in exposition order, which must be sorted.
+func metricFamilies(body string) []string {
+	var families []string
+	for _, line := range strings.Split(body, "\n") {
+		if rest, ok := strings.CutPrefix(line, "# TYPE "); ok {
+			families = append(families, strings.Fields(rest)[0])
+		}
+	}
+	return families
 }
 
 func (s *stubUpstream) reset() {
@@ -353,15 +471,11 @@ func TestSessionKeyStableAndInvalidatedOnConfigChange(t *testing.T) {
 	}
 	assertCalls(t, st.callLog(), []string{"infer", "infer:body-written", actionSave + ":" + first})
 
-	// Same conversation, same spec: same file, and it is restored first.
+	// Same conversation, same spec: the same file, and — the server never
+	// restarted — it is left alone rather than restored over the live cache.
 	st.reset()
 	postOK(t, srv, "/v1/chat/completions", "session-a", chatRequestBody)
-	waitForCalls(t, st, []string{
-		actionRestore + ":" + first,
-		"infer",
-		"infer:body-written",
-		actionSave + ":" + first,
-	})
+	waitForCalls(t, st, []string{"infer", "infer:body-written", actionSave + ":" + first})
 
 	// A different conversation neither restores nor reuses that file.
 	st.reset()
@@ -408,21 +522,136 @@ func TestColdStartNoRestoreAndSaveAfterEOF(t *testing.T) {
 	}
 }
 
-func TestWarmRestoresBeforeForwardAndSavesAfter(t *testing.T) {
+// TestWarmSlotSkipsRestore is the regression guard for the bug this gate exists
+// for: restoring on a warm slot is not only useless (the file restore is inert on
+// this build) but actively destroys the in-process cache, 130 ms -> 44 s of prompt
+// processing. Two identical requests against a server whose task counter only ever
+// grows must therefore touch the slot exactly zero times beyond the save.
+func TestWarmSlotSkipsRestore(t *testing.T) {
 	st := newStubUpstream(t)
 	_, srv := newTestBroker(t, st, nil)
 
-	postOK(t, srv, "/v1/chat/completions", "warm-session", chatRequestBody)
+	postOK(t, srv, "/v1/chat/completions", "warm-gate", chatRequestBody)
 	name := waitForSave(t, st)
+	if _, err := os.Stat(filepath.Join(st.slotDir, name)); err != nil {
+		t.Fatalf("slot file not written by the first request: %v", err)
+	}
 
 	st.reset()
-	postOK(t, srv, "/v1/chat/completions", "warm-session", chatRequestBody)
+	postOK(t, srv, "/v1/chat/completions", "warm-gate", chatRequestBody)
+	waitForCalls(t, st, []string{"infer", "infer:body-written", actionSave + ":" + name})
+	if got := countAction(st.callLog(), actionRestore); got != 0 {
+		t.Fatalf("warm slot was restored %d time(s), want 0: %v", got, st.callLog())
+	}
+	if st.slotListCount() < 2 {
+		t.Fatalf("/slots was probed %d time(s), want one per transactional request", st.slotListCount())
+	}
+	mustHaveMetricLine(t, metricsBody(t, srv), `kv_broker_restore_total{result="skipped_warm"} 2`)
+}
+
+// TestRestoreOnceAfterServerRestart covers the only case where restoring is both
+// necessary and useful: the serving process restarted, so its in-memory KV is gone
+// while the slot file is still on disk.
+func TestRestoreOnceAfterServerRestart(t *testing.T) {
+	st := newStubUpstream(t)
+	_, srv := newTestBroker(t, st, nil)
+
+	postOK(t, srv, "/v1/chat/completions", "restart-gate", chatRequestBody)
+	name := waitForSave(t, st)
+
+	// The server came back: id_task restarts low while the slot file survives.
+	st.configure(func(s *stubUpstream) { s.idTask, s.idTaskAuto = 1, false })
+	st.reset()
+	postOK(t, srv, "/v1/chat/completions", "restart-gate", chatRequestBody)
 	waitForCalls(t, st, []string{
 		actionRestore + ":" + name,
 		"infer",
 		"infer:body-written",
 		actionSave + ":" + name,
 	})
+	body := metricsBody(t, srv)
+	mustHaveMetricLine(t, body, "kv_broker_server_restarts_total 1")
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="ok"} 1`)
+
+	// One shot: the restored slot is warm again, so the next request leaves it be.
+	st.configure(func(s *stubUpstream) { s.idTaskAuto = true })
+	st.reset()
+	postOK(t, srv, "/v1/chat/completions", "restart-gate", chatRequestBody)
+	waitForCalls(t, st, []string{"infer", "infer:body-written", actionSave + ":" + name})
+	if got := countAction(st.callLog(), actionRestore); got != 0 {
+		t.Fatalf("the request after the post-restart one restored again (%d): %v", got, st.callLog())
+	}
+	mustHaveMetricLine(t, metricsBody(t, srv), "kv_broker_server_restarts_total 1")
+}
+
+// TestMetricsEndpoint pins the whole exposition contract: the family set and its
+// order, HELP/TYPE presence, the histogram bucket layout, and the counter values a
+// completed and a failed request leave behind.
+func TestMetricsEndpoint(t *testing.T) {
+	st := newStubUpstream(t)
+	_, srv := newTestBroker(t, st, nil)
+
+	body := metricsBody(t, srv)
+	families := metricFamilies(body)
+	if !reflect.DeepEqual(families, expectedMetricFamilies) {
+		t.Fatalf("metric families:\n got %v\nwant %v", families, expectedMetricFamilies)
+	}
+	t.Logf("emitted metric families (%d): %s", len(families), strings.Join(families, " "))
+	for _, family := range families {
+		if !strings.Contains(body, "# HELP "+family+" ") {
+			t.Fatalf("family %s has no HELP line:\n%s", family, body)
+		}
+	}
+	for _, le := range []string{"0.005", "0.01", "0.025", "0.05", "0.1", "0.25", "0.5", "1", "2.5", "5", "10", "+Inf"} {
+		if !strings.Contains(body, `kv_broker_save_seconds_bucket{le="`+le+`"}`) {
+			t.Fatalf("save histogram has no le=%s bucket:\n%s", le, body)
+		}
+	}
+	mustHaveMetricLine(t, body, `kv_broker_build_info{version="3"} 1`)
+	mustHaveMetricLine(t, body, "kv_broker_slot_files 0")
+
+	// A 2xx completion saves its slot: the request and the save are both ok, and
+	// the save latency was observed.
+	postOK(t, srv, "/v1/chat/completions", "metrics-session", chatRequestBody)
+	waitForSave(t, st)
+	body = settledMetricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_save_total{result="ok"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_requests_total{handler="chat_completions",result="ok"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_warm"} 1`)
+	mustHaveMetricLine(t, body, "kv_broker_save_seconds_count 1")
+	mustHaveMetricLine(t, body, `kv_broker_save_seconds_bucket{le="+Inf"} 1`)
+
+	// A failing upstream is never saved, and the reason is exported.
+	st.configure(func(s *stubUpstream) { s.chatStatus = http.StatusInternalServerError })
+	if status, _, err := doPost(srv, "/v1/chat/completions", "metrics-session", chatRequestBody); err != nil || status != http.StatusInternalServerError {
+		t.Fatalf("failing request: status %d err %v", status, err)
+	}
+	body = settledMetricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_save_total{result="skipped_status"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_upstream_errors_total{kind="chat"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_requests_total{handler="chat_completions",result="error"} 1`)
+
+	// The plain streaming proxy is instrumented too: /v1/models is not a
+	// completion, and the stub does not serve it, so it lands as a proxied
+	// upstream error under the v1_other handler.
+	if resp, err := srv.Client().Get(srv.URL + "/v1/models"); err != nil {
+		t.Fatalf("GET /v1/models: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+	body = settledMetricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_upstream_errors_total{kind="proxy"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_requests_total{handler="v1_other",result="error"} 1`)
+
+	// The metrics surface is counted like any other route, and never forwarded
+	// upstream — this is the fifth scrape, so it renders the four before it.
+	body = settledMetricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_requests_total{handler="metrics",result="ok"} 4`)
+	for _, c := range st.callLog() {
+		if strings.Contains(c, "metrics") {
+			t.Fatalf("the /metrics scrape was forwarded upstream: %v", st.callLog())
+		}
+	}
 }
 
 func TestRestoreFailureErasesAndServesCold(t *testing.T) {
@@ -443,6 +672,9 @@ func TestRestoreFailureErasesAndServesCold(t *testing.T) {
 			st.configure(func(s *stubUpstream) {
 				s.restoreFail = tc.httpStatus
 				s.restoreErrBody = !tc.httpStatus
+				// A restore is only attempted after a restart, so the failure path
+				// needs one: the server reports a lower id_task than before.
+				s.idTask, s.idTaskAuto = 1, false
 			})
 			st.reset()
 			postOK(t, srv, "/v1/chat/completions", "restore-session", chatRequestBody)
@@ -532,12 +764,11 @@ func TestConcurrentSameSessionSerialized(t *testing.T) {
 	// once both saves have landed.
 	name := waitForSave(t, st)
 	// The second transaction can only start after the first one saved, so it is
-	// the warm one and the interleaving is fully determined.
+	// the warm one: it reuses the live cache (no restore) and re-saves its slot.
 	waitForCalls(t, st, []string{
 		"infer",
 		"infer:body-written",
 		actionSave + ":" + name,
-		actionRestore + ":" + name,
 		"infer",
 		"infer:body-written",
 		actionSave + ":" + name,
@@ -547,7 +778,7 @@ func TestConcurrentSameSessionSerialized(t *testing.T) {
 func TestSweeper(t *testing.T) {
 	t.Run("ttl_delete", func(t *testing.T) {
 		st := newStubUpstream(t)
-		b, _ := newTestBroker(t, st, func(c *config) { c.ttl = time.Hour })
+		b, srv := newTestBroker(t, st, func(c *config) { c.ttl = time.Hour })
 		expired := writeSlot(t, st.slotDir, "slot-00000000000000000001.bin", "kv")
 		fresh := writeSlot(t, st.slotDir, "slot-00000000000000000002.bin", "kv")
 		other := filepath.Join(st.slotDir, "keep.txt")
@@ -569,12 +800,16 @@ func TestSweeper(t *testing.T) {
 				t.Fatalf("%s was removed by the sweep: %v", path, err)
 			}
 		}
+		body := metricsBody(t, srv)
+		mustHaveMetricLine(t, body, `kv_broker_sweep_deleted_total{reason="ttl"} 1`)
+		mustHaveMetricLine(t, body, "kv_broker_slot_files 1")
+		mustHaveMetricLine(t, body, "kv_broker_slot_bytes 2")
 	})
 
 	t.Run("cap_evicts_oldest_first", func(t *testing.T) {
 		st := newStubUpstream(t)
 		// 10 bytes of cap against three 8-byte slots: only the newest fits.
-		b, _ := newTestBroker(t, st, func(c *config) { c.capBytes = 10 })
+		b, srv := newTestBroker(t, st, func(c *config) { c.capBytes = 10 })
 		oldest := writeSlot(t, st.slotDir, "slot-00000000000000000001.bin", "01234567")
 		middle := writeSlot(t, st.slotDir, "slot-00000000000000000002.bin", "01234567")
 		newest := writeSlot(t, st.slotDir, "slot-00000000000000000003.bin", "01234567")
@@ -596,6 +831,10 @@ func TestSweeper(t *testing.T) {
 		if _, err := os.Stat(newest); err != nil {
 			t.Fatalf("newest slot was evicted: %v", err)
 		}
+		body := metricsBody(t, srv)
+		mustHaveMetricLine(t, body, `kv_broker_sweep_deleted_total{reason="cap"} 2`)
+		mustHaveMetricLine(t, body, "kv_broker_slot_files 1")
+		mustHaveMetricLine(t, body, "kv_broker_slot_bytes 8")
 	})
 
 	t.Run("in_flight_session_is_not_deleted", func(t *testing.T) {

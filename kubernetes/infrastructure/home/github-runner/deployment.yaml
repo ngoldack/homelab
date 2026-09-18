@@ -1,0 +1,79 @@
+# The repo's CI runner. One replica, registered for ngoldack/homelab only, and
+# ephemeral: the entrypoint registers this pod, runs exactly one job, and the
+# process exits, so the kubelet starts a fresh registration for the next job.
+#
+# The image has no tag fallback on purpose: digest pinning is what makes the
+# rebuilt-image flow (image-builds/github-runner.yaml) auditable. Update this
+# digest and the Job's tag together.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner
+  namespace: github-runner
+spec:
+  replicas: 1
+  # One runner identity per repo: only ever one pod registering this name.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: github-runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: github-runner
+    spec:
+      # The workflow's flux/kubectl calls run as this ServiceAccount; rbac.yaml
+      # binds it to a flux-system Role allowing reconciliation and nothing else.
+      serviceAccountName: ci-runner
+      # Home site only, like the image-build Jobs: the cluster also has a 2 GiB
+      # Hetzner worker, which has no business running CI.
+      nodeSelector:
+        topology.homelab/site: home
+      securityContext:
+        runAsNonRoot: true
+        # 1001 is the uid the upstream actions-runner image's `runner` user has
+        # and the uid the image's own USER line sets.
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: registry.ngoldack.de/github-runner@sha256:373373088d361e3560ec20c81641a602ab8d47aff967cd3398ca841aae564aff
+          env:
+            - name: RUNNER_REPO_URL
+              value: https://github.com/ngoldack/homelab
+            - name: RUNNER_REPO_SLUG
+              value: ngoldack/homelab
+            # Custom label only: config.sh adds self-hosted, Linux and X64 by
+            # itself, and the workflow selects on [self-hosted, homelab].
+            - name: RUNNER_LABELS
+              value: homelab
+            - name: RUNNER_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: github-runner
+                  key: access-token
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # readOnlyRootFilesystem must stay false: config.sh writes .runner,
+          # _temp and _diag next to the runner install under /home/runner.
+          volumeMounts:
+            - name: work
+              mountPath: /home/runner/_work
+      volumes:
+        # A fresh workspace per job; the ephemeral runner needs no state kept
+        # between them, and this keeps job scratch space off the node's disk.
+        - name: work
+          emptyDir: {}

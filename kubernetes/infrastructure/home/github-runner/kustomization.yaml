@@ -7,3 +7,4 @@ resources:
   - serviceaccount.yaml
   - rbac.yaml
   - secret.sops.yaml
+  - deployment.yaml

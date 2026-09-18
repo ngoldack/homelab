@@ -25,11 +25,18 @@ spec:
         - ports:
             - {port: "4317", protocol: TCP}
             - {port: "4318", protocol: TCP}
-    # The Hermes gateway is the only in-cluster :80 client of the proxy
-    # (config.yaml: base_url http://agentgateway.agentgateway.svc.cluster.local:80/v1).
+    # In-cluster :80 clients of the proxy: hermes (config.yaml base_url
+    # http://agentgateway.../v1) and hindsight (helmrelease base_url
+    # .../v1/synthetic-gpt-oss).
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hindsight
       toPorts:
         - ports:
             - {port: "80", protocol: TCP}

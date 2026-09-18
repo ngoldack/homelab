@@ -571,7 +571,11 @@ repository only) on every push to `main`, and performs the `flux reconcile`
 that used to be typed by hand: it forces a fetch of the GitRepository,
 reconciles the root Kustomization, nudges every child, then waits for all of
 them to be Ready — so a merge converges in seconds instead of waiting out the
-10m poll interval, and fails loudly if reconciliation does not converge.
+10m poll interval, and fails loudly if reconciliation does not converge. The
+wait is not a bare Ready check: it first waits for kustomize-controller to
+handle *this run's* reconcile request (the `requestedAt` annotation echoed into
+`status.lastHandledReconcileAt`), because an already-Ready Kustomization would
+otherwise satisfy a Ready check before the new revision was ever applied.
 Trigger it by merging, or manually with
 `gh workflow run flux-reconcile.yml`.
 
@@ -579,7 +583,15 @@ Because the runner lives in the cluster, no laptop needs a kubeconfig. Its
 ServiceAccount (`ci-runner`) may only patch Flux objects in `flux-system`, and
 the workflow deliberately does not run on pull requests: the runner has
 cluster-side authority and a readable PAT, so untrusted code must never execute
-on it. The former GitHub Actions etcd-backup workflow is gone; see "Talos etcd
+on it.
+
+That PAT is a fine-grained token under `Administration: Read and write` in
+`kubernetes/infrastructure/home/github-runner/secret.sops.yaml`; it expires
+2026-12-17. The day it does, the runner stops registering (a CrashLoop with
+"no registration token returned by GitHub") until the Secret is updated —
+`task sops:edit FILE=kubernetes/infrastructure/home/github-runner/secret.sops.yaml`
+and then `kubectl -n github-runner delete pod -l app.kubernetes.io/name=github-runner`.
+The former GitHub Actions etcd-backup workflow is gone; see "Talos etcd
 backups".
 
 Common workflows are wrapped in the Taskfile (`task --list`):

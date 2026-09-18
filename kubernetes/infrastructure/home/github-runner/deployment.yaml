@@ -51,6 +51,12 @@ spec:
             # itself, and the workflow selects on [self-hosted, homelab].
             - name: RUNNER_LABELS
               value: homelab
+            # The upstream image sets no HOME and the runtime injects none, yet
+            # the workflow writes "$HOME/.kube/config" and both CLIs read it
+            # from there — pin it to the runner user's home instead of relying
+            # on the runner process's own guess.
+            - name: HOME
+              value: /home/runner
             - name: RUNNER_PAT
               valueFrom:
                 secretKeyRef:

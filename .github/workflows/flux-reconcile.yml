@@ -62,9 +62,22 @@ jobs:
         run: flux reconcile kustomization flux-system -n flux-system
 
       - name: Nudge every child Kustomization
+        run: |
+          REQUESTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "REQUESTED_AT=$REQUESTED_AT" >> "$GITHUB_ENV"
+          kubectl annotate kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all \
+            "reconcile.fluxcd.io/requestedAt=$REQUESTED_AT" --overwrite
+
+      # A Kustomization that is already Ready stays Ready until its own
+      # reconcile starts, so waiting on Ready alone can pass while this run's
+      # request has not been handled at all — a green run that proves nothing.
+      # Wait for kustomize-controller to echo the annotation written above
+      # (it copies the value verbatim into status.lastHandledReconcileAt)
+      # before trusting the Ready condition at all.
+      - name: Wait until this run's reconcile request has been handled
         run: >-
-          kubectl annotate kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
-          "reconcile.fluxcd.io/requestedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
+          kubectl wait kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
+          --for=jsonpath='{.status.lastHandledReconcileAt}'="$REQUESTED_AT" --timeout=15m
 
       - name: Wait for every Kustomization to be Ready
         run: >-

@@ -124,17 +124,19 @@ spec:
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
       replicaCount: 2
-      # Memory raised 2026-09-18: the worker OOM-killed (exit 137) during
-      # sentence_transformers model load under the old 2Gi limit when both
-      # replicas restarted simultaneously. 3Gi covers the load spike.
-      # covers the load spike; cpu burst stays capped at 1000m.
+      # Memory raised twice on 2026-09-18: first to 3Gi (OOM during
+      # sentence_transformers load), then to 5Gi — after the outage backlog
+      # re-fired, each worker claimed up to 20 retained tasks per poll and
+      # OOM-killed (exit 137) ~5s after starting the polling loop, with
+      # connection verification already passed. The api (4Gi) drains the
+      # same queue without OOM; 5Gi covers the burst. cpu stays 1000m.
       resources:
         requests:
           cpu: 200m
           memory: 512Mi
         limits:
           cpu: 1000m
-          memory: 3Gi
+          memory: 5Gi
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact

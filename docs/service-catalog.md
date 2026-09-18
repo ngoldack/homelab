@@ -76,17 +76,42 @@ placeholder for a guess.
   authentik destructive restore). `immich`, `hindsight` and `paperless` have the
   same Barman path and the same ≤60 s WAL bound but no measured RTO yet —
   `[unverified]`.
-- **etcd encryption at rest**: no `cluster.secretboxEncryptionSecret` is
-  declared in `tofu/home/*.tf` at this revision; treat "secrets are encrypted in
-  etcd" as `[unverified]` until that is confirmed (Phase 5.1 work in flight).
+- **Base backups after the 2026-09-16 cluster re-creations**: `immich` and
+  `paperless` produced no daily base backup on 09-17/09-18 even though their
+  `ScheduledBackup` ticked (`lastScheduleTime` advanced), and every completed
+  `Backup` object they still hold predates the re-creation, so it is worthless
+  to the current cluster. Their barman sidecars logged
+  `dial tcp 172.21.0.1:443: connect: connection refused` — the in-cluster
+  API VIP — i.e. the failures line up with the control-plane reboot window, not
+  with a backup configuration defect (`immich`'s Barman conditions read
+  `ContinuousArchiving=True`, `LastBackupSucceeded=True`). On-demand base
+  backups triggered on 2026-09-18 completed within a minute for both clusters,
+  so the path works; the open item is the control-plane instability that makes
+  a schedule tick miss, plus the fact that no catch-up exists.
+- **etcd encryption at rest: verified configured.** `cluster.secretboxEncryptionSecret`
+  is not written in `tofu/home/*.tf` — Talos *generates* it (`talos_machine_secrets`,
+  `prevent_destroy = true`) and it lives in the encrypted OpenTofu state. The
+  apiserver runs with `--encryption-provider-config` and a `secretbox` provider
+  over `secrets`; a marker Secret was written, an etcd snapshot taken, and the
+  marker was absent from the snapshot while every stored secret carried the
+  `k8s:enc:secretbox:v1:` prefix — a plaintext control in the same snapshot
+  proved the scan could see values that were not encrypted (2026-09-18 drill).
+  ConfigMaps and CRs remain plaintext in etcd by design; etcd snapshots are
+  themselves age-encrypted by `talos-backup`.
 - **ClickHouse / keeper / SeaweedFS snapshots** are configured as storage
   classes but not adopted by the bound PVCs (immutable `storageClassName`);
   recreating those volumes is the published prerequisite.
-- **External alert delivery** is configured (SOPS Alertmanager config with ntfy
-  receivers plus a Watchdog dead-man heartbeat) and only `vmalertmanager` is
-  allowed egress to reach them — but zero notifications had been delivered in
-  the retention window as of the 2026-09-18T07:17Z dashboard data point.
-  Treat the delivery path as proven-by-configuration, not by observation.
+- **External alert delivery: verified by observation.** Alertmanager routes to
+  ntfy through SOPS config, and delivery was measured on 2026-09-18: alert
+  notifications (BackupTooOld, KyvernoPolicyViolations, ContainerRestartLoop,
+  PublicIngressProbeFailing, TalosBackupStale) arrived, and the Watchdog
+  dead-man heartbeat arrived on its hourly cadence (five heartbeats in six
+  hours, 65-minute gaps). Earlier reads that showed no deliveries were taken
+  during the control-plane incident window, before the current Alertmanager
+  pod existed — the delivery path is proven, not merely configured. The
+  remaining weakness is the *receiver*: an ntfy topic is evidence a human
+  looks at, not a page; a ping-based check URL is the stronger form (the
+  config file documents the swap).
 - **No Kubernetes API audit policy** exists (Talos default, nothing set in
   `tofu/home/`), so `pod-security.kubernetes.io/audit` labels and Kyverno
   PolicyReports are the only PSA drift signals.

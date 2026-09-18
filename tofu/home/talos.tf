@@ -2,29 +2,6 @@ locals {
   controlplane_instances = { for name, node in var.nodes : name => node if node.talos_role == "controlplane" }
   worker_instances       = { for name, node in var.nodes : name => node if node.talos_role == "worker" }
 
-  # Tailscale, same ExtensionServiceConfig shape tofu/cloud uses for its
-  # nodes — lets the etcd-backup GitHub Actions job reach a node's Talos API
-  # over the tailnet from a GitHub-hosted runner. Only applied to nodes that
-  # actually carry the siderolabs/tailscale extension (see each node's
-  # `extensions` in terraform.tfvars), gated below rather than unconditional.
-  tailscale_config_patch = yamlencode({
-    apiVersion = "v1alpha1"
-    kind       = "ExtensionServiceConfig"
-    name       = "tailscale"
-    environment = [
-      "TS_AUTHKEY=${local.secrets["tailscale_auth_key"]}",
-      # ClusterMesh underlay (Phase 3): advertise this cluster's pod/service/
-      # node CIDRs into the tailnet so Cilium's own VXLAN traffic to cloud
-      # routes transparently over Tailscale, with no Cilium-side
-      # tailscale-awareness. cp-main is home's only tailscale-joined node
-      # (see the extensions gate below), so it's the subnet router for all
-      # three. --accept-routes so this node can in turn reach cloud's
-      # advertised routes. Requires one-time manual approval in the
-      # Tailscale admin console (same category as device approval).
-      "TS_EXTRA_ARGS=--advertise-routes=${var.pod_cidr},${var.service_cidr},10.30.0.0/24 --accept-routes",
-    ]
-  })
-
   # Storage-client paths that truenas-csi's node DaemonSet hostPath-mounts.
   #
   # Talos runs kubelet as its own containerized process, isolated from the
@@ -238,9 +215,6 @@ data "talos_machine_configuration" "controlplane" {
         }
       }),
     ],
-    contains(var.nodes[keys(local.controlplane_instances)[0]].extensions, "siderolabs/tailscale") ? [
-      local.tailscale_config_patch
-    ] : [],
     # No machine.install.extensions patch: that field has had no effect
     # since Talos 1.10 (kept only so pre-1.10 configs still validate).
     # var.talos_default_extensions is instead baked into the boot image

@@ -368,8 +368,8 @@ spec:
       plugins:
         - victoriametrics-logs-datasource
       # No Ingress/HTTPRoute. Reaching this is an unresolved decision — the
-      # standing policy is Tailscale-only for internal services and never
-      # exposing home addresses, and attaching it to the public Cilium Gateway
+      # standing policy keeps internal services off the public edge rather
+      # than exposing home addresses, and attaching it to the public Cilium Gateway
       # would put a credentialed UI on the internet. Until that is settled,
       # access is via `kubectl -n monitoring port-forward svc/<grafana> 3000`.
       ingress:

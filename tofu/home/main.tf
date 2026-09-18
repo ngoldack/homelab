@@ -217,11 +217,12 @@ locals {
       # an empty/irrelevant interface instead.
       #
       # It also reports addresses from EVERY interface the guest runs —
-      # cilium_host's 172.20.x/w32 and, on nodes running the tailscale
-      # extension (cp-main), the 100.100.x CGNAT address. Taking the first
-      # non-loopback entry pointed `node` at 100.100.108.66 and every apply
-      # hung dialing an address no operator host can route (observed live,
-      # 2026-09-16). Prefer an address inside the node's own cluster subnet
+      # cilium_host's 172.20.x/w32 among them, and, while cp-main still ran
+      # the tailscale extension, its 100.100.x CGNAT address. Taking the first
+      # non-loopback entry once pointed `node` at 100.100.108.66 and every
+      # apply hung dialing an address no operator host can route (observed
+      # live, 2026-09-16). Prefer an address inside the node's own cluster
+      # subnet
       # (the static IP's /24) first; fall back to first-non-loopback.
       current_ip = coalesce(
         try([

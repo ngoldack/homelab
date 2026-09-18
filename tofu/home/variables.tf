@@ -434,7 +434,7 @@ variable "cloud_nodes" {
     # snapshot vocabulary is "x86"/"arm" — converted in ingress.tf.
     arch = optional(string, "arm64")
     # Extra Talos system extensions on top of the ingress baseline. The
-    # baseline is deliberately tiny (tailscale only): this node has no
+    # baseline is empty and deliberately tiny: this node has no
     # Proxmox guest agent, no NVIDIA/i915, and no NFS/iSCSI/NVMe clients,
     # because truenas-csi must never run here (its node DaemonSet tolerates
     # everything and hostPath-mounts /).

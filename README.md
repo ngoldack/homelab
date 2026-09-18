@@ -71,7 +71,6 @@ its former ingress role is now the LAN VIP described above.
 - access to the Proxmox host, for the LAN nodes
 - a Hetzner Cloud account + API token, for the ingress worker, Object
   Storage (state + etcd backups) and the public DNS zone
-- a Tailscale account + auth key, as the out-of-band admin path
 - `yamllint` (optional; used by `task lint:yaml`)
 
 ## Network layout
@@ -191,7 +190,7 @@ exactly `cpu_cores` host cores (e.g. `cpu_cores = 6` with
 The Hetzner ingress worker is a member of the same cluster, so there is
 only one set of pod/service CIDRs — cross-site traffic rides Talos KubeSpan
 (WireGuard) underneath. Its public IP serves the KubeSpan mesh and the
-Tailscale admin path only; service traffic terminates on the LAN VIP (see
+service traffic terminates on the LAN VIP (see
 "Ingress").
 
 ## Secret handling
@@ -289,7 +288,7 @@ remaining recipients with
 `tofu/home/secret.sops.yaml` holds, in one place: the state-encryption
 passphrase, the Hetzner Object Storage keys (the root owns both its state
 bucket and the etcd-backup bucket — see "Remote encrypted state" and
-"Talos etcd backups"), the Tailscale auth key, the HCloud API token (ingress
+"Talos etcd backups"), the HCloud API token (ingress
 worker + DNS credentials), the Cilium WireGuard API CA, the Proxmox API
 token and root@pam password, `home_talosconfig` (see "Talos etcd backups"),
 and `talos_backup_age_private_key` — the private half of the age identity
@@ -474,10 +473,10 @@ than taints.
   machine secrets/configs, an Image-Factory-built boot image per node's
   resolved extension set, the Gateway API CRDs, Cilium (see "Flux
   bootstrap"), and both Object Storage buckets (state + etcd backups).
-  Four distinct extension sets are in play — a shared base, base + `i915`
-  for the media worker, base + the NVIDIA driver/toolkit for the AI worker,
-  and a minimal tailscale-only set for the ingress worker — so each node
-  boots the smallest image that serves it.
+  Three distinct extension sets are in play — a shared base, base + `i915`
+  for the media worker, and base + the NVIDIA driver/toolkit for the AI
+  worker (the ingress worker adds nothing to the base) — so each node boots
+  the smallest image that serves it.
 - **Flux-owned**: everything else — cert-manager + the Hetzner DNS webhook,
   the `network` namespace (public Gateway on the LAN VIP, LB-IPAM pool,
   L2 announcements, wildcard Certificate), external-dns, the NVIDIA device
@@ -876,7 +875,7 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
 ### Bootstrap order
 
 1. Populate `tofu/home/secret.sops.yaml`: state passphrase, Object Storage
-   keys, `hcloud_api_token`, `tailscale_auth_key`, the Proxmox API token and
+   keys, `hcloud_api_token`, the Proxmox API token and
    root@pam password (see "Secret handling" and "Talos etcd backups").
 2. Add the same Hetzner Cloud API token to the `cert-manager` and `network`
    encrypted Secrets (see the table in "Secret handling") — reuse
@@ -971,8 +970,8 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   `NoSchedule`-tainted node nothing depends on): the firewall's public 443
   rule and its "sole public entry point" comment in `ingress.tf` predate
   hostNetwork being turned off — nothing binds that port any more; and
-  `cp-main` still carries `siderolabs/tailscale` for the retired GitHub
-  Actions backup job, which is now just an admin path. The two old
+  `cp-main` carried `siderolabs/tailscale` for the retired GitHub Actions
+  backup job; that extension was removed on 2026-09-18. The two old
   `cloud-*` Object Storage buckets (state + etcd backups, both verifiably
   empty) were also left in place: deletion is irreversible and they cost
   nothing.
@@ -997,10 +996,3 @@ Console or `aws s3api put-bucket-lifecycle-configuration`.
   `NodeApplyController` patch was rejected — check
   `talosctl -n <ip> logs controller-runtime | grep NodeApplyController`
   (should be quiet when no taints are configured).
-- **A new tailnet device needs manual approval before it's reachable at
-  all.** Every node running the `siderolabs/tailscale` extension (the
-  Hetzner ingress worker, and `cp-main`) sits in `ext-tailscale`'s
-  restart-forever loop — `talosctl -n <ip> logs ext-tailscale` shows
-  `machineAuthorized=false`, `NeedsMachineAuth` — until you approve it in the
-  Tailscale admin console. This is unrelated to whether the auth key itself
-  is valid; it happens on every first join, cluster rebuild included.

@@ -13,11 +13,12 @@
 #
 # RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag,
 # and the base digests in github-runner/dockerfile together; Flux prunes the
-# old Job.
+# old Job. -2 added kubectl (the upstream runner image has none and the
+# workflow's annotate/wait steps need it).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-github-runner-1
+  name: build-github-runner-2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -51,7 +52,7 @@ spec:
             - --opt=dockerfilekey=dockerfile
             # Pushes to the cluster's own Zot (../registry/), same TLS setup as
             # the other images in this directory.
-            - --output=type=image,name=registry.ngoldack.de/github-runner:1,push=true
+            - --output=type=image,name=registry.ngoldack.de/github-runner:2,push=true
             # export and import MUST name the same ref, or nothing is reused.
             - --export-cache=type=registry,ref=registry.ngoldack.de/github-runner:buildcache,mode=max
             - --import-cache=type=registry,ref=registry.ngoldack.de/github-runner:buildcache

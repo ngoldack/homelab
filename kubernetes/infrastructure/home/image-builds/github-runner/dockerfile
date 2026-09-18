@@ -39,6 +39,11 @@ FROM ghcr.io/actions/actions-runner@sha256:e5496277be5d09bc968b3d64911b74e219ac4
 # entrypoint registers this pod as an ephemeral repo-scoped runner and then
 # runs exactly one job.
 COPY --from=flux /usr/local/bin/flux /usr/local/bin/flux
+# The workflow's annotate/wait steps are kubectl commands, and the upstream
+# runner image ships no kubectl at all (learned the hard way: the first
+# production run died at `kubectl: command not found`). The flux-cli image
+# carries the kubectl it was released against.
+COPY --from=flux /usr/local/bin/kubectl /usr/local/bin/kubectl
 # A ConfigMap-mounted file is 0644, so bash is the interpreter: the kernel
 # cannot execute it as a program.
 COPY runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh

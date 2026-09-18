@@ -1,0 +1,65 @@
+# Drill-only StorageClasses.
+#
+# Every application class in ../truenas-csi/storageclasses.yaml is deliberately
+# `reclaimPolicy: Retain` + `forceDelete: "false"`: dynamic provisioning may
+# add or expand data but must never delete a PVC-backed share without explicit
+# human action. A drill volume is a throwaway copy of a database, so Retain
+# would leak one ZFS dataset on the NAS per drill run, forever — which is
+# precisely what "clean up so storage does not accumulate" rules out. These two
+# classes are the narrow, documented exception the drills use.
+#
+# Differences from the application classes, and nothing else:
+#   reclaimPolicy: Delete   deleting the drill PVC is what frees the volume.
+#   forceDelete: "true"     tells the driver deletion is intended (the class
+#                           default is non-destructive).
+#
+# Both point at the GENERIC dataset parents (`fast/k8s/nvmeof`, `fast/k8s/nfs`)
+# rather than any per-app parent. The driver derives the leaf as `pvc-<uid>`
+# from the CSI volume name (pkg/driver/controller.go, see the layout note in
+# ../truenas-csi/storageclasses.yaml), so a drill volume is always a sibling of
+# application volumes and can never address one of them: DeleteVolume is called
+# with the drill PV's own volume handle, i.e. its own leaf. Using the generic
+# parents also avoids provisioning a drill zvol inside a per-app dataset whose
+# quota is sized for the live database.
+#
+# Referenced only by the drill-managed Clusters (cronjob-*.yaml); nothing else
+# in the repo uses them. nvmeof for the clusters whose application class is
+# nvmeof-backed (immich, paperless, langfuse), NFS for the NFS-backed pair
+# (hindsight, authentik), so the drill exercises the same substrate as the
+# database it is proving.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof"
+  compression: "LZ4"
+  volblocksize: "16K"
+  forceDelete: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs"
+  compression: "LZ4"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

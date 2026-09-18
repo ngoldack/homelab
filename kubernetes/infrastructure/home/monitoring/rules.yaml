@@ -260,3 +260,107 @@ spec:
               authentik pod logs mounted from /var/log/pods) is reading
               nothing. Parsers and scenarios cannot fire without input, so
               brute-force detection is effectively off.
+---
+# Automated CNPG restore drills (kubernetes/infrastructure/home/
+# cnpg-restore-drills/). These series are PUSHED by the drill CronJobs to
+# vmsingle's /api/v1/import/prometheus — the same URL vmagent writes to, and
+# unauthenticated — so the labels are the drill's own (app="immich", …) rather
+# than a scrape relabeling of a pod label:
+#
+#   cnpg_restore_drill_success                        1/0, pushed by every run
+#   cnpg_restore_drill_last_run_timestamp_seconds     pushed by every run
+#   cnpg_restore_drill_last_success_timestamp_seconds pushed ONLY on success
+#
+# Because a drill runs monthly, the last sample is the current state for the
+# rest of the month: sampled rules (BackupTooOld-style) would go stale in
+# between, which is exactly why these are pushed samples and not scrape targets.
+#
+# Deliberately absent: a "the restored data is N seconds old" rule. The obvious
+# candidate, pg_last_xact_replay_timestamp(), returns NULL on a promoted CNPG
+# instance (verified live on the recovered authentik cluster on 2026-09-18), so
+# it could never evaluate; backup freshness is already covered by BackupTooOld,
+# WALArchivingStalled and BackupMetricsAbsent above.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: restore-drills
+  namespace: monitoring
+spec:
+  groups:
+    - name: restore-drills
+      rules:
+        - alert: RestoreDrillFailed
+          # The metric is pushed once per run with no expiry, so this fires
+          # when the most recent run for an app FAILED and stays firing until a
+          # run succeeds — the correct reading: the cluster's restorability is
+          # unproven until a drill proves it again. A failed drill is not a
+          # backup problem (that is BackupTooOld's job), it is a problem with
+          # the restore path itself: a backup that cannot be turned back into a
+          # running database is not a backup.
+          expr: >-
+            max by (app) (cnpg_restore_drill_success) == 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Restore drill failed for {{ $labels.app }}"
+            description: >-
+              The last scheduled restore drill for {{ $labels.app }} failed
+              (cnpg_restore_drill_success == 0). Read
+              `kubectl -n cnpg-restore-drills logs job/<failed job>` — the run
+              logs its failure reason, then the drill cluster's conditions and
+              the recovery pod's logs (recovery pods have no postgres
+              container). The drill cleans up after itself, so re-running it by
+              hand costs one cronjob-created Job:
+              `kubectl -n cnpg-restore-drills create job --from=cronjob/cnpg-restore-drill-{{ $labels.app }} <name>`.
+              Until a run passes, this cluster is in the state the review called
+              out: backups exist, restores are unproven. Drill contract:
+              kubernetes/infrastructure/home/cnpg-restore-drills/README.md.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/disaster-recovery.md
+        - alert: RestoreDrillStale
+          # 32 days = one monthly cycle (the drills run on the 1st) plus slack,
+          # so a single missed or failed month is visible instead of silently
+          # absorbed. Silent at first deployment until the first manual runs —
+          # see RestoreDrillMetricsAbsent below for that window.
+          expr: >-
+            (time() - max by (app) (cnpg_restore_drill_last_success_timestamp_seconds))
+            > 32 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No successful restore drill for {{ $labels.app }} in over 32 days"
+            description: >-
+              The newest successful drill for {{ $labels.app }} is
+              {{ $value | humanizeDuration }} old (more than 32 days, i.e. more
+              than one monthly cycle). Check that the CronJob still exists and
+              is not suspended (`kubectl -n cnpg-restore-drills get cronjob`),
+              that its Jobs are not piling up as Failed, and whether the metric
+              push is reaching vmsingle. The cluster's restore path is
+              unverified while this fires: docs/data-protection.md carries the
+              last hand-measured RTO for the two clusters that have one, and
+              docs/service-catalog.md marks the rest [unverified].
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/disaster-recovery.md
+        - alert: RestoreDrillMetricsAbsent
+          # Companion to the two rules above, in the style of
+          # BackupMetricsAbsent: without it a total absence of series would make
+          # RestoreDrillStale and RestoreDrillFailed evaluate an empty vector
+          # forever, i.e. they could never fire. This is also the alert that
+          # fires between the merge of the drills and the first manual run, and
+          # again if the series ever ages out of retention (3 months).
+          expr: absent(cnpg_restore_drill_last_success_timestamp_seconds)
+          for: 12h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No CNPG restore-drill metric has ever been reported"
+            description: >-
+              cnpg_restore_drill_last_success_timestamp_seconds is absent for
+              12h: no drill has ever reported a success (expected until the
+              first manual runs documented in
+              kubernetes/infrastructure/home/cnpg-restore-drills/README.md), the
+              metric push no longer reaches vmsingle, or the samples aged out
+              of retention (3 months without a successful drill). While this
+              fires, RestoreDrillStale and RestoreDrillFailed are blind —
+              restore coverage is unverifiable rather than merely stale.
+            runbook_url: https://github.com/ngoldack/homelab/blob/main/docs/disaster-recovery.md

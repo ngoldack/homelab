@@ -1,0 +1,115 @@
+# Restore drill for paperless-ngx's Postgres (paperless/paperless-database).
+#
+# Invariant: `django_migrations` >= 1 (MIN_LEDGER_ROWS), i.e. the restore
+# carries the full Django migration history of paperless-ngx — 242 rows live
+# on 2026-09-18 over 74 public tables. `documents_document` (Django app
+# `documents`, model `Document`) is read and reported as a metric.
+#
+# Why no data assertion: the document table is genuinely EMPTY in this
+# deployment (0 rows, verified live — the durable documents live on the media
+# PVC and none have been ingested yet), so asserting rows > 0 would fail for
+# the wrong reason. The ledger proves schema completeness, which is what the
+# backup is the source of truth for; when documents do arrive, the
+# cnpg_restore_drill_rows{app="paperless",table="documents_document"} series
+# will start tracking the count without any change here.
+#
+# Cadence: monthly, 04:40 UTC on the 1st (see cronjob-immich.yaml for the
+# staggering rationale).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-paperless
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: paperless
+spec:
+  schedule: "40 4 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: paperless
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-paperless
+          automountServiceAccountToken: true
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (see cronjob-immich.yaml).
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: paperless
+                - name: SRC_NS
+                  value: paperless
+                - name: SRC_CLUSTER
+                  value: paperless-database
+                - name: DRILL_NS
+                  value: paperless-drill
+                - name: DRILL_CLUSTER
+                  value: paperless-drill-database
+                - name: PGDATABASE
+                  value: paperless
+                - name: RECOVERY_OWNER
+                  value: paperless
+                - name: LEDGER_TABLE
+                  value: django_migrations
+                - name: DOMAIN_TABLE
+                  value: documents_document
+                - name: DOMAIN_MIN_ROWS
+                  value: "0"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nvmeof-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 10Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

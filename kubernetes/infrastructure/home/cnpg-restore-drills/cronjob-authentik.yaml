@@ -1,0 +1,123 @@
+# Restore drill for authentik's Postgres (authentik/authentik-database).
+#
+# Invariant: `django_migrations` >= 1 (776 rows live — the exact number
+# docs/data-protection.md records as verified intact after the 2026-09-15
+# destructive restore) AND `authentik_core_user` >= 1 (DOMAIN_MIN_ROWS=1;
+# 15 live users). With a single-instance IdP, a restore that produced an empty
+# user table is indistinguishable from an outage.
+#
+# Deliberate asymmetry — RECOVERY_OWNER is NOT set for this drill, and that is
+# the whole point of the difference from the other four:
+#   * authentik's real database is named `authentik` (230 public tables); its
+#     `app` database is the empty CNPG default that the production cluster
+#     carries anyway.
+#   * the production cluster's own restore runs WITHOUT
+#     `bootstrap.recovery.database`/`owner` (see ../authentik/postgres.yaml),
+#     and that spec is the one proven in a live destructive drill.
+#   * so the drill mirrors it exactly: with an empty RECOVERY_OWNER the script
+#     omits both fields and CNPG applies its defaults, while the invariant
+#     query still targets the real database explicitly (`-d authentik`),
+#     because it authenticates as `postgres` over the local socket and does
+#     not depend on CNPG's default application database at all.
+#
+# Storage class is the NFS drill class: this database runs on NFS upstream
+# (truenas-fast-nfs-authentik-database) since the accepted storage-class
+# migration.
+#
+# Cadence: monthly, 06:40 UTC on the 1st (see cronjob-immich.yaml).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-authentik
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: authentik
+spec:
+  schedule: "40 6 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: authentik
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-authentik
+          automountServiceAccountToken: true
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (see cronjob-immich.yaml).
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: authentik
+                - name: SRC_NS
+                  value: authentik
+                - name: SRC_CLUSTER
+                  value: authentik-database
+                - name: DRILL_NS
+                  value: authentik-drill
+                - name: DRILL_CLUSTER
+                  value: authentik-drill-database
+                - name: PGDATABASE
+                  value: authentik
+                - name: LEDGER_TABLE
+                  value: django_migrations
+                - name: DOMAIN_TABLE
+                  value: authentik_core_user
+                - name: DOMAIN_MIN_ROWS
+                  value: "1"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nfs-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 5Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

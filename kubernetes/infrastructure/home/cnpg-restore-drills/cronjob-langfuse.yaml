@@ -1,0 +1,119 @@
+# Restore drill for langfuse's Postgres (langfuse/langfuse-database).
+#
+# Invariant: `_prisma_migrations` >= 1 (438 rows live on 2026-09-18 over 75
+# public tables) AND `projects` >= 1 (DOMAIN_MIN_ROWS=1; 1 live project).
+#
+# Why both: langfuse's Postgres schema is Prisma-managed, so the
+# `_prisma_migrations` ledger is the schema-completeness proof — the same
+# table Prisma itself uses to refuse a schema it does not recognise. `projects`
+# is the root of langfuse's object graph (users, api_keys, models, prices,
+# dashboards all hang off it), so a restore that lost the project row would be
+# useless even with an intact schema. Note that langfuse's traces and
+# observations are NOT here — they live in ClickHouse, which this drill
+# deliberately does not cover (see the ClickHouse backup CronJob in
+# ../langfuse/clickhouse-backup.yaml and the note in the drill README).
+#
+# A prior manual PITR clone of this cluster is on record in
+# docs/data-protection.md (drill 1, 2026-09-15, 123 s RTO). This drill repeats
+# the restore monthly, unattended, against the latest backup instead of a
+# chosen PITR target.
+#
+# Cadence: monthly, 06:00 UTC on the 1st (see cronjob-immich.yaml).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-langfuse
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: langfuse
+spec:
+  schedule: "0 6 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: langfuse
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-langfuse
+          automountServiceAccountToken: true
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (see cronjob-immich.yaml).
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: langfuse
+                - name: SRC_NS
+                  value: langfuse
+                - name: SRC_CLUSTER
+                  value: langfuse-database
+                - name: DRILL_NS
+                  value: langfuse-drill
+                - name: DRILL_CLUSTER
+                  value: langfuse-drill-database
+                - name: PGDATABASE
+                  value: langfuse
+                - name: RECOVERY_OWNER
+                  value: langfuse
+                - name: LEDGER_TABLE
+                  value: _prisma_migrations
+                - name: DOMAIN_TABLE
+                  value: projects
+                - name: DOMAIN_MIN_ROWS
+                  value: "1"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nvmeof-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 10Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

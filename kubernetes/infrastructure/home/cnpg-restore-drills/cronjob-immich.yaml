@@ -1,0 +1,133 @@
+# Restore drill for immich's Postgres (immich/immich-database).
+#
+# Invariant: `kysely_migrations` >= 1 (MIN_LEDGER_ROWS), i.e. the restore
+# carries a complete, migrated immich schema — 96 rows live on 2026-09-18.
+# `asset` is read as well and reported as a metric, but not asserted on.
+#
+# Why the ledger, and why `asset` rather than `assets`: immich 2.x moved to
+# Kysely and its public tables are lower-case singular (live schema: activity,
+# album, asset, asset_exif, asset_face, …, geodata_places, kysely_migrations).
+# The TypeORM-era `assets` table no longer exists, and `asset` itself is
+# EMPTY in this deployment (0 rows, verified live) — so a "rows > 0" rule on it
+# would fail on a legitimately empty photo library while proving nothing. The
+# migration ledger is the strongest honest invariant available here: it
+# separates "the backup restored" from "the backup restored an empty/partial
+# schema", which is the failure mode a drill exists to catch.
+#
+# Cadence: monthly, 04:00 UTC on the 1st — after the 02:05 UTC daily backup
+# window, and staggered 40 minutes from the next drill so only one restored
+# database exists on the home node at a time. monitoring/rules.yaml alerts at
+# 32 days without a success, so a single missed monthly cycle is visible.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-immich
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: immich
+spec:
+  schedule: "0 4 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry: the script cleans up before it starts, so a second attempt
+      # is safe, and a transient node/CSI hiccup should not cost a month.
+      backoffLimit: 1
+      # 90 minutes against the script's own 45-minute wait, so the exit path
+      # (metrics push + cleanup) still has room if recovery stalls.
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: immich
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-immich
+          # The drill drives the Kubernetes API; the token is the only
+          # credential the pod has (no database password, no S3 key in env —
+          # the ObjectStore reads those from the copied Secret).
+          automountServiceAccountToken: true
+          # Same site pin as the database it restores: TrueNAS-backed volumes
+          # are not routable from the Hetzner ingress node.
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (Alpine + bash + kubectl 1.36 + jq +
+              # curl). kubectl 1.36 matches the cluster's v1.36.2 server.
+              # Provenance note: third-party toolbox image, but read by the
+              # script in this repo only — it holds no state and runs with a
+              # namespace-scoped ServiceAccount.
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: immich
+                - name: SRC_NS
+                  value: immich
+                - name: SRC_CLUSTER
+                  value: immich-database
+                - name: DRILL_NS
+                  value: immich-drill
+                - name: DRILL_CLUSTER
+                  value: immich-drill-database
+                - name: PGDATABASE
+                  value: app
+                - name: RECOVERY_OWNER
+                  value: app
+                - name: LEDGER_TABLE
+                  value: kysely_migrations
+                - name: DOMAIN_TABLE
+                  value: asset
+                - name: DOMAIN_MIN_ROWS
+                  value: "0"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nvmeof-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 20Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                # kubectl writes its discovery/HTTP cache under $HOME and the
+                # root filesystem is read-only; /tmp is an emptyDir.
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

@@ -1,0 +1,75 @@
+# Namespaces for the automated CNPG restore drills.
+#
+# cnpg-restore-drills is the CONTROL namespace: the CronJobs, the drill script
+# ConfigMap and one ServiceAccount per database live here. The drill driver pod
+# runs here and does nothing but call the Kubernetes API.
+#
+# The five *-drill namespaces hold the ephemeral recovered CNPG Cluster, its
+# recovery job and its PVC — and nothing else, ever. Each run creates those
+# objects at the start and deletes them again on exit (see the drill contract
+# in README.md), so an empty drill namespace is the normal steady state and a
+# leftover object is a bug to investigate.
+#
+# Pod Security Admission labels mirror the application namespaces (audit+warn
+# at `restricted`; enforcement stays the cluster default). The drill driver
+# pod satisfies `restricted` by construction — non-root, no capabilities,
+# RuntimeDefault seccomp, read-only root filesystem — and the recovered CNPG
+# pods are the operator's own, exactly as in every application namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: immich
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: paperless-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: paperless
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hindsight-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: hindsight
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: langfuse-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: langfuse
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authentik-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: authentik
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -61,6 +61,11 @@ resources:
   - hermes-egress.yaml
   # Non-k8s homelab metrics -> VictoriaMetrics (PVE/PBS/TrueNAS/UDM) + unpoller.
   - homelab-infra-metrics.yaml
+  # Automated CNPG restore drills: restore the latest backup into a
+  # throwaway Cluster, assert an invariant, report, delete. Inert until this
+  # entry exists, and it needs the CNPG CRDs + the VictoriaMetrics import
+  # endpoint, expressed as dependsOn edges in the file itself.
+  - cnpg-restore-drills.yaml
   # Multus secondary-CNI meta-plugin: prerequisite for the media namespace's
   # VLAN 2080 macvlan attachments (no CRD/Gateway deps of its own).
   - multus.yaml

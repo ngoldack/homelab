@@ -1,0 +1,418 @@
+# RBAC for the restore drills — two namespaces per database, nothing else.
+#
+# In the SOURCE namespace (<app>) each drill may read exactly one Secret, by
+# name: <app>-backup-s3-credentials. That is the minimum needed to give the
+# drill namespace's ObjectStore access to the same bucket prefix, and it is
+# why the credentials are copied at run time instead of being duplicated as a
+# second SOPS file per drill namespace (a copy in git would have to be
+# re-encrypted on every credential rotation, and a drifted copy fails in the
+# worst possible way — a drill that "succeeds" against another bucket).
+# No access to the live Cluster, its PVCs, its pods or its database password
+# is granted: the invariant query runs on the LOCAL socket inside the recovered
+# primary (see drill-config.yaml), which is superuser-authenticated by
+# PostgreSQL's `local … peer map=local` rule and therefore needs no secret.
+#
+# In the matching <app>-drill namespace the drill may create/delete only the
+# objects it owns: its CNPG Cluster, its ObjectStore, its copy of the
+# credentials Secret, the PVCs CNPG makes for it, and the Jobs CNPG makes for
+# the recovery — plus `pods/log` and `pods/exec` on those pods so the run can
+# run its invariant and dump the recovery log when it fails. `exec` is a real
+# privilege and it is deliberate here; it is confined to a namespace whose
+# only pods are drill-created.
+#
+# Pattern is identical for all five databases; only the names change.
+---
+# immich
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["immich-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-immich
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: immich-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: immich-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-immich
+    namespace: cnpg-restore-drills
+---
+# paperless
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["paperless-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-paperless
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: paperless-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: paperless-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-paperless
+    namespace: cnpg-restore-drills
+---
+# hindsight
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: hindsight
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["hindsight-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: hindsight
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-hindsight
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: hindsight-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: hindsight-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-hindsight
+    namespace: cnpg-restore-drills
+---
+# langfuse
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: langfuse
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["langfuse-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: langfuse
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-langfuse
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: langfuse-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: langfuse-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-langfuse
+    namespace: cnpg-restore-drills
+---
+# authentik
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: authentik
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["authentik-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: authentik
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-authentik
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: authentik-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: authentik-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-authentik
+    namespace: cnpg-restore-drills

@@ -1,0 +1,44 @@
+# cnpg-restore-drills — the automated restore drills (Phase 5.2).
+#
+# Each CronJob restores the LATEST Barman backup of one database into a
+# distinct `<app>-drill-database` Cluster in its own `<app>-drill` namespace,
+# asserts one schema invariant (plus one data invariant where the database
+# holds irreplaceable user data), pushes the result to VictoriaMetrics and
+# deletes everything it created. A drill that has not succeeded in 32 days
+# alerts (VMRule restore-drills in ../monitoring/rules.yaml).
+#
+# The manifests define no CRs of their own, so the only ordering that matters
+# is that the CNPG operator — and with it the CRDs the drill script talks to at
+# run time — is up before the first scheduled run. wait:true is deliberate: a
+# drill namespace whose RBAC or CNP failed to apply would otherwise fail
+# silently at 03:00 instead of reporting not-Ready here.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cnpg-restore-drills
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/cnpg-restore-drills
+  prune: true
+  wait: true
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    # CRDs the drill script creates against (Cluster/ObjectStore) — the
+    # operator must be established first, same CRD-before-CR edge as every
+    # other CNPG consumer in this repo. monitoring is needed for the
+    # VictoriaMetrics import endpoint the drills push to.
+    - name: cnpg-operator
+    - name: monitoring
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

@@ -1,0 +1,118 @@
+# Restore drill for hindsight's Postgres (hindsight/hindsight-database).
+#
+# Invariant: Alembic's `alembic_version` >= 1 (the recorded migration head —
+# the schema proof, and the only ledger table in hindsight's schema; live
+# schema has 23 public tables) AND `memory_units` >= 1 through
+# DOMAIN_MIN_ROWS=1.
+#
+# Why the second half asserts data: unlike immich and paperless, this cluster
+# holds real user data — live counts on 2026-09-18 were memory_units 40,021,
+# entities 48,311, unit_entities 334,312, documents 2,697, chunks 10,953. A
+# restore that returned an intact-but-empty schema would be worthless for
+# hindsight, so the drill asserts the app's central table rather than merely
+# reporting it. docs/service-catalog.md currently marks hindsight's RTO as
+# [unverified]; this drill is what turns that into a measured fact.
+#
+# Storage class is the NFS drill class because hindsight's database runs on
+# the NFS class upstream (truenas-fast-nfs-hindsight-database), so the drill
+# exercises the same substrate.
+#
+# Cadence: monthly, 05:20 UTC on the 1st (see cronjob-immich.yaml).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-hindsight
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: hindsight
+spec:
+  schedule: "20 5 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: hindsight
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-hindsight
+          automountServiceAccountToken: true
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (see cronjob-immich.yaml).
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: hindsight
+                - name: SRC_NS
+                  value: hindsight
+                - name: SRC_CLUSTER
+                  value: hindsight-database
+                - name: DRILL_NS
+                  value: hindsight-drill
+                - name: DRILL_CLUSTER
+                  value: hindsight-drill-database
+                - name: PGDATABASE
+                  value: hindsight
+                - name: RECOVERY_OWNER
+                  value: hindsight
+                - name: LEDGER_TABLE
+                  value: alembic_version
+                - name: DOMAIN_TABLE
+                  value: memory_units
+                - name: DOMAIN_MIN_ROWS
+                  value: "1"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nfs-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 10Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

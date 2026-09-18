@@ -1,0 +1,36 @@
+# Automated CNPG restore drills.
+#
+# Everything in this directory is wired in by ONE Flux Kustomization (see the
+# wiring note in README.md): the controls, the RBAC, the drill-only
+# StorageClasses, the Cilium policies and the five CronJobs. The resources are
+# cluster-agnostic — the drill script discovers each source cluster's backup
+# prefix at run time — so the only per-database difference is the environment
+# block in each cronjob-*.yaml.
+#
+# Ordering inside this directory does not matter (kustomize sorts by kind), but
+# the Kustomization's dependsOn does: the backend CRs cannot apply before the
+# CloudNativePG and plugin-barman-cloud CRDs are established.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Namespaces, one per database plus the control namespace; everything else
+  # below lands in one of them.
+  - namespace.yaml
+  # Drill-only StorageClasses (reclaimPolicy: Delete) — the reason a finished
+  # drill leaves no dataset behind on the NAS.
+  - storageclass.yaml
+  # One ServiceAccount per database, bound into exactly two namespaces
+  # (its source namespace, for one named Secret, and its drill namespace).
+  - serviceaccounts.yaml
+  - rbac.yaml
+  # Zero-trust network baseline for the control and drill namespaces, plus the
+  # single rule the result metrics need in the monitoring namespace.
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
+  # The drill harness itself (one script, five parameterisations) …
+  - drill-config.yaml
+  - cronjob-immich.yaml
+  - cronjob-paperless.yaml
+  - cronjob-hindsight.yaml
+  - cronjob-langfuse.yaml
+  - cronjob-authentik.yaml

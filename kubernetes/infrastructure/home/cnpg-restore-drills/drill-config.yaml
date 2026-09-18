@@ -1,0 +1,405 @@
+# The drill harness. One ConfigMap, one script, five CronJobs that differ only
+# in the database they point it at (cronjob-*.yaml) — so there is exactly one
+# copy of the drill logic to review and exactly one place a bug can live.
+#
+# The script is the contract described in README.md, and it never writes to,
+# nor prunes, the source backup prefix: the drill Cluster runs without
+# `spec.plugins` (required for a same-serverName recovery anyway), so no
+# barman sidecar exists to archive or prune anything. It only READS the
+# archive through the recovery path.
+#
+# `kustomize.toolkit.fluxcd.io/substitute: disabled` is load-bearing: the
+# script and its heredocs are full of `${...}` and `$VAR`, and the repo's Flux
+# Kustomizations run strict postBuild envsubst, which would fail the whole
+# Kustomization on the first unresolved variable (same reason the vendored
+# Grafana dashboards carry this annotation — see monitoring/kustomization.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnpg-restore-drill-script
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  drill.sh: |
+    #!/usr/bin/env bash
+    #
+    # CNPG restore drill. Proves that the Barman-cloud (plugin-barman-cloud)
+    # backup of one database can still be turned back into a running
+    # PostgreSQL cluster, then reports the outcome as metrics and removes
+    # everything it created.
+    #
+    # Steps, in order:
+    #   0. delete leftovers from a previous run (idempotent start)
+    #   1. read the source cluster's backup prefix from the LIVE source
+    #      Cluster/ObjectStore — never hardcoded, so a destinationPath change
+    #      (e.g. the v2 re-initialization each app went through) is picked up
+    #      automatically and the drill cannot silently restore an old prefix
+    #   2. copy the S3 credentials Secret into the drill namespace
+    #   3. create an ObjectStore for that prefix and a one-instance Cluster
+    #      that recovers it (`bootstrap.recovery`, no recoveryTarget = latest
+    #      base backup + every archived WAL segment after it)
+    #   4. wait for Ready, then run the invariant query inside the recovered
+    #      primary over the LOCAL socket
+    #   5. push metrics, then delete the Cluster, ObjectStore, Secret and PVCs
+    #
+    # Requires: kubectl, jq, curl, bash (alpine/k8s image), and the drill
+    # ServiceAccount's namespaced RBAC from rbac.yaml.
+    set -Eeuo pipefail
+
+    APP=${APP:?APP is required}
+    SRC_NS=${SRC_NS:?SRC_NS is required}
+    SRC_CLUSTER=${SRC_CLUSTER:?SRC_CLUSTER is required}
+    DRILL_NS=${DRILL_NS:?DRILL_NS is required}
+    DRILL_CLUSTER=${DRILL_CLUSTER:?DRILL_CLUSTER is required}
+    PGDATABASE=${PGDATABASE:?PGDATABASE is required}
+    LEDGER_TABLE=${LEDGER_TABLE:?LEDGER_TABLE is required}
+    DOMAIN_TABLE=${DOMAIN_TABLE:?DOMAIN_TABLE is required}
+    STORAGE_CLASS=${STORAGE_CLASS:?STORAGE_CLASS is required}
+    STORAGE_SIZE=${STORAGE_SIZE:?STORAGE_SIZE is required}
+    RECOVERY_OWNER=${RECOVERY_OWNER:-}
+    MIN_LEDGER_ROWS=${MIN_LEDGER_ROWS:-1}
+    DOMAIN_MIN_ROWS=${DOMAIN_MIN_ROWS:-0}
+    CREDS_SECRET=${CREDS_SECRET:-"$APP-backup-s3-credentials"}
+    DRILL_STORE=${DRILL_STORE:-"$APP-drill-backup-store"}
+    WAIT_SECONDS=${WAIT_SECONDS:-2700}
+    KEEP_ON_FAILURE=${KEEP_ON_FAILURE:-0}
+    VM_IMPORT_URL=${VM_IMPORT_URL:-http://vmsingle-monitoring-victoria-metrics-k8s-stack.monitoring.svc.cluster.local.:8428/api/v1/import/prometheus}
+    # Pinned: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie — the image
+    # every application cluster runs (resolved 2026-09-18), so a drill starts
+    # from the same server build that wrote the backup it is restoring.
+    POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql@sha256:670026a375a908c3c2f6b5eeb1c56a06d2a15d375959f401d2aed8b8dd99f50e
+
+    START_EPOCH=$(date +%s)
+    END_EPOCH=$START_EPOCH
+    DURATION=0
+    SUCCESS=0
+    FAILURE_REASON=""
+    LEDGER_ROWS=""
+    DOMAIN_ROWS=""
+    PUBLIC_TABLES=""
+    DB_SIZE_BYTES=""
+    POD=""
+    PHASE=""
+
+    log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+    is_number() {
+      case "$1" in
+        '' | *[!0-9]*) return 1 ;;
+      esac
+      return 0
+    }
+
+    # ----------------------------------------------------------------- metrics
+    # Prometheus exposition, pushed to VictoriaMetrics' import endpoint. The
+    # endpoint and the fact that it needs no auth were read off the live
+    # deployment (vmagent writes to the same URL): the vmsingle Service in the
+    # monitoring namespace, port 8428. Pushed samples are ordinary series, so
+    # "when did this last succeed" stays answerable for the full retention
+    # window even though a drill only runs once a month (this is why the
+    # result is pushed rather than exposed for scraping by the drill pod).
+    push_metrics() {
+      local payload="" ok
+      if [ "$SUCCESS" = "1" ]; then
+        payload="cnpg_restore_drill_success{app=\"$APP\",database=\"$PGDATABASE\"} 1"
+        ok=$'\n'"cnpg_restore_drill_last_success_timestamp_seconds{app=\"$APP\"} $END_EPOCH"
+        payload="$payload$ok"
+      else
+        payload="cnpg_restore_drill_success{app=\"$APP\",database=\"$PGDATABASE\"} 0"
+      fi
+      payload="$payload"$'\n'"cnpg_restore_drill_last_run_timestamp_seconds{app=\"$APP\"} $END_EPOCH"
+      payload="$payload"$'\n'"cnpg_restore_drill_duration_seconds{app=\"$APP\"} $DURATION"
+      if is_number "$PUBLIC_TABLES"; then
+        payload="$payload"$'\n'"cnpg_restore_drill_tables{app=\"$APP\"} $PUBLIC_TABLES"
+      fi
+      if is_number "$DB_SIZE_BYTES"; then
+        payload="$payload"$'\n'"cnpg_restore_drill_database_size_bytes{app=\"$APP\"} $DB_SIZE_BYTES"
+      fi
+      if is_number "$LEDGER_ROWS"; then
+        payload="$payload"$'\n'"cnpg_restore_drill_rows{app=\"$APP\",table=\"$LEDGER_TABLE\"} $LEDGER_ROWS"
+      fi
+      if is_number "$DOMAIN_ROWS"; then
+        payload="$payload"$'\n'"cnpg_restore_drill_rows{app=\"$APP\",table=\"$DOMAIN_TABLE\"} $DOMAIN_ROWS"
+      fi
+      log "metric payload:"
+      printf '%s\n' "$payload"
+      if printf '%s\n' "$payload" | curl -sS --max-time 30 -X POST --data-binary @- \
+          -H 'Content-Type: text/plain' "$VM_IMPORT_URL"; then
+        log "metric push ok"
+      else
+        log "WARNING: metric push to $VM_IMPORT_URL failed (drill result still in this log)"
+      fi
+    }
+
+    # ----------------------------------------------------------------- cleanup
+    # Deleting the PVCs is what actually releases storage: the drill
+    # StorageClasses are reclaimPolicy: Delete (storageclass.yaml) precisely so
+    # that a finished drill does not leave a dataset on the NAS. The drill
+    # namespace never holds anything but drill-owned volumes, so `delete pvc
+    # --all` there is exact rather than broad.
+    cleanup() {
+      local i left
+      log "cleanup: removing drill objects from $DRILL_NS"
+      kubectl -n "$DRILL_NS" delete cluster "$DRILL_CLUSTER" --ignore-not-found --wait=false || true
+      for i in $(seq 1 60); do
+        if ! kubectl -n "$DRILL_NS" get cluster "$DRILL_CLUSTER" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 5
+      done
+      kubectl -n "$DRILL_NS" delete job -l "cnpg.io/cluster=$DRILL_CLUSTER" --ignore-not-found || true
+      kubectl -n "$DRILL_NS" delete objectstore "$DRILL_STORE" --ignore-not-found || true
+      kubectl -n "$DRILL_NS" delete secret "$CREDS_SECRET" --ignore-not-found || true
+      kubectl -n "$DRILL_NS" delete pvc --all --ignore-not-found || true
+      for i in $(seq 1 60); do
+        left=$(kubectl -n "$DRILL_NS" get pvc --no-headers 2>/dev/null | wc -l) || left=0
+        if [ "${left:-0}" -eq 0 ]; then
+          break
+        fi
+        sleep 5
+      done
+      left=$(kubectl -n "$DRILL_NS" get pvc --no-headers 2>/dev/null | wc -l) || left=0
+      log "cleanup done; PVCs left in $DRILL_NS: ${left:-0}"
+    }
+
+    dump_diagnostics() {
+      log "--- diagnostics: cluster"
+      kubectl -n "$DRILL_NS" get cluster "$DRILL_CLUSTER" -o wide || true
+      kubectl -n "$DRILL_NS" get cluster "$DRILL_CLUSTER" -o json 2>/dev/null \
+        | jq -r '.status.conditions[]? | "\(.type)=\(.status) \(.message // "")"' || true
+      log "--- diagnostics: pods, pvcs"
+      kubectl -n "$DRILL_NS" get pods -o wide || true
+      kubectl -n "$DRILL_NS" get pvc || true
+      log "--- diagnostics: logs of every pod of the drill cluster"
+      kubectl -n "$DRILL_NS" logs -l "cnpg.io/cluster=$DRILL_CLUSTER" \
+        --all-containers --prefix --tail=80 || true
+    }
+
+    on_exit() {
+      local rc=$?
+      set +e
+      END_EPOCH=$(date +%s)
+      DURATION=$((END_EPOCH - START_EPOCH))
+      if [ "$rc" -ne 0 ]; then
+        SUCCESS=0
+        log "drill FAILED (rc=$rc): ${FAILURE_REASON:-no explicit failure reason}"
+        dump_diagnostics
+      else
+        log "drill succeeded in ${DURATION}s"
+      fi
+      push_metrics
+      if [ "$rc" -ne 0 ] && [ "$KEEP_ON_FAILURE" = "1" ]; then
+        log "KEEP_ON_FAILURE=1: leaving $DRILL_NS/$DRILL_CLUSTER in place for inspection"
+        log "delete it by hand with: kubectl -n $DRILL_NS delete cluster $DRILL_CLUSTER"
+      else
+        cleanup
+      fi
+      exit "$rc"
+    }
+    trap on_exit EXIT
+
+    # -------------------------------------------------------------------- run
+    log "drill start: app=$APP source=$SRC_NS/$SRC_CLUSTER drill=$DRILL_NS/$DRILL_CLUSTER db=$PGDATABASE"
+
+    cleanup
+
+    STORE_NAME=$(kubectl -n "$SRC_NS" get cluster "$SRC_CLUSTER" -o json 2>/dev/null \
+      | jq -r '[.spec.plugins[]? | select(.name == "barman-cloud.cloudnative-pg.io")
+                | .parameters.barmanObjectName] | first // empty') || STORE_NAME=""
+    if [ -z "$STORE_NAME" ]; then
+      FAILURE_REASON="source cluster $SRC_NS/$SRC_CLUSTER declares no barman-cloud ObjectStore"
+      exit 1
+    fi
+    DESTINATION_PATH=$(kubectl -n "$SRC_NS" get objectstore "$STORE_NAME" \
+      -o jsonpath='{.spec.configuration.destinationPath}') || DESTINATION_PATH=""
+    ENDPOINT_URL=$(kubectl -n "$SRC_NS" get objectstore "$STORE_NAME" \
+      -o jsonpath='{.spec.configuration.endpointURL}') || ENDPOINT_URL=""
+    if [ -z "$DESTINATION_PATH" ] || [ -z "$ENDPOINT_URL" ]; then
+      FAILURE_REASON="ObjectStore $SRC_NS/$STORE_NAME is missing destinationPath/endpointURL"
+      exit 1
+    fi
+    log "source backup prefix: $DESTINATION_PATH (endpoint $ENDPOINT_URL, serverName $SRC_CLUSTER)"
+
+    if ! kubectl -n "$SRC_NS" get secret "$CREDS_SECRET" -o json > /tmp/credentials.json; then
+      FAILURE_REASON="cannot read secret $SRC_NS/$CREDS_SECRET (RBAC missing or Secret gone)"
+      exit 1
+    fi
+    jq --arg ns "$DRILL_NS" \
+      '{apiVersion, kind, type: (.type // "Opaque"),
+        metadata: {name: .metadata.name, namespace: $ns}, data: (.data // {})}' \
+      /tmp/credentials.json | kubectl -n "$DRILL_NS" apply -f -
+    for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+      if ! kubectl -n "$DRILL_NS" get secret "$CREDS_SECRET" -o json \
+          | jq -e --arg k "$key" '.data[$k] != null' >/dev/null; then
+        FAILURE_REASON="secret $SRC_NS/$CREDS_SECRET has no $key key"
+        exit 1
+      fi
+    done
+    log "copied $SRC_NS/$CREDS_SECRET into $DRILL_NS (access key, secret key, region present)"
+
+    kubectl -n "$DRILL_NS" apply -f - <<YAML
+    apiVersion: barmancloud.cnpg.io/v1
+    kind: ObjectStore
+    metadata:
+      name: $DRILL_STORE
+      namespace: $DRILL_NS
+      labels:
+        app.kubernetes.io/name: cnpg-restore-drills
+        app.kubernetes.io/instance: $APP
+    spec:
+      configuration:
+        destinationPath: "$DESTINATION_PATH"
+        endpointURL: "$ENDPOINT_URL"
+        s3Credentials:
+          accessKeyId:
+            name: $CREDS_SECRET
+            key: AWS_ACCESS_KEY_ID
+          secretAccessKey:
+            name: $CREDS_SECRET
+            key: AWS_SECRET_ACCESS_KEY
+          region:
+            name: $CREDS_SECRET
+            key: AWS_REGION
+        wal:
+          compression: gzip
+      instanceSidecarConfiguration:
+        env:
+          - name: AWS_REQUEST_CHECKSUM_CALCULATION
+            value: when_required
+          - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+            value: when_required
+    YAML
+
+    RECOVERY_BLOCK=""
+    if [ -n "$RECOVERY_OWNER" ]; then
+      RECOVERY_BLOCK="      database: $PGDATABASE
+          owner: $RECOVERY_OWNER"
+    fi
+
+    kubectl -n "$DRILL_NS" apply -f - <<YAML
+    apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    metadata:
+      name: $DRILL_CLUSTER
+      namespace: $DRILL_NS
+      labels:
+        app.kubernetes.io/name: cnpg-restore-drills
+        app.kubernetes.io/instance: $APP
+      annotations:
+        cnpg-restore-drills/source: $SRC_NS/$SRC_CLUSTER
+        cnpg-restore-drills/destination-path: $DESTINATION_PATH
+    spec:
+      instances: 1
+      imageName: $POSTGRES_IMAGE
+      affinity:
+        nodeSelector:
+          topology.homelab/site: home
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+      storage:
+        size: $STORAGE_SIZE
+        storageClass: $STORAGE_CLASS
+      managed:
+        services:
+          disabledDefaultServices:
+            - "r"
+            - "ro"
+      bootstrap:
+        recovery:
+          source: drill-source
+    $RECOVERY_BLOCK
+      externalClusters:
+        - name: drill-source
+          plugin:
+            name: barman-cloud.cloudnative-pg.io
+            parameters:
+              barmanObjectName: $DRILL_STORE
+              serverName: $SRC_CLUSTER
+    YAML
+    log "applied drill ObjectStore $DRILL_STORE and Cluster $DRILL_CLUSTER (latest backup, no plugins)"
+
+    DEADLINE=$((START_EPOCH + WAIT_SECONDS))
+    while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+      PHASE=$(kubectl -n "$DRILL_NS" get cluster "$DRILL_CLUSTER" \
+        -o jsonpath='{.status.phase}' 2>/dev/null) || PHASE=""
+      READY=$(kubectl -n "$DRILL_NS" get cluster "$DRILL_CLUSTER" -o json 2>/dev/null \
+        | jq -r '[.status.conditions[]? | select(.type == "Ready") | .status] | first // empty') || READY=""
+      case "$PHASE" in
+        *unrecoverable*)
+          FAILURE_REASON="CloudNativePG stopped retrying: $PHASE"
+          exit 1
+          ;;
+      esac
+      if [ "$READY" = "True" ]; then
+        POD=$(kubectl -n "$DRILL_NS" get pods \
+          -l "cnpg.io/cluster=$DRILL_CLUSTER,cnpg.io/instanceRole=primary" \
+          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || POD=""
+        if [ -n "$POD" ]; then
+          log "cluster Ready after $(( $(date +%s) - START_EPOCH ))s; primary pod $POD"
+          break
+        fi
+      fi
+      log "waiting for recovery: phase=${PHASE:-unknown} ready=${READY:-unknown}"
+      sleep 15
+    done
+    if [ -z "$POD" ]; then
+      FAILURE_REASON="timed out after ${WAIT_SECONDS}s waiting for a Ready primary (phase=${PHASE:-unknown})"
+      exit 1
+    fi
+
+    # The invariant runs inside the recovered primary, over the local socket.
+    # A CNPG instance's fixed pg_hba rules are
+    #   local all all peer map=local
+    #   host  all all all scram-sha-256
+    # so `psql -U postgres` on the socket authenticates by OS user (the
+    # postgres container's own uid). The drill therefore needs no database
+    # password, no application secret and no network path into the database —
+    # it reads the restored volume and nothing else.
+    psql_q() {
+      local sql=$1 attempt out
+      for attempt in 1 2 3 4 5; do
+        if out=$(kubectl -n "$DRILL_NS" exec "$POD" -c postgres -- \
+            psql -X -q -tA -U postgres -d "$PGDATABASE" -c "$sql" 2>&1); then
+          printf '%s' "$out"
+          return 0
+        fi
+        log "psql attempt $attempt failed: $out"
+        sleep 10
+      done
+      return 1
+    }
+
+    LEDGER_RAW=$(psql_q "select count(*) from $LEDGER_TABLE") \
+      || { FAILURE_REASON="invariant query on $LEDGER_TABLE failed on $POD"; exit 1; }
+    LEDGER_ROWS=$(printf '%s' "$LEDGER_RAW" | tr -d '[:space:]')
+    if ! is_number "$LEDGER_ROWS"; then
+      FAILURE_REASON="invariant query on $LEDGER_TABLE returned '$LEDGER_RAW'"
+      exit 1
+    fi
+    if [ "$LEDGER_ROWS" -lt "$MIN_LEDGER_ROWS" ]; then
+      FAILURE_REASON="invariant failed: $LEDGER_TABLE has $LEDGER_ROWS rows (< $MIN_LEDGER_ROWS)"
+      exit 1
+    fi
+    PUBLIC_TABLES=$(psql_q "select count(*) from information_schema.tables where table_schema = 'public'") \
+      || PUBLIC_TABLES=""
+    DB_SIZE_BYTES=$(psql_q "select pg_database_size(current_database())") || DB_SIZE_BYTES=""
+    DOMAIN_ROWS=$(psql_q "select count(*) from $DOMAIN_TABLE") || DOMAIN_ROWS=""
+    PUBLIC_TABLES=$(printf '%s' "$PUBLIC_TABLES" | tr -d '[:space:]')
+    DB_SIZE_BYTES=$(printf '%s' "$DB_SIZE_BYTES" | tr -d '[:space:]')
+    DOMAIN_ROWS=$(printf '%s' "$DOMAIN_ROWS" | tr -d '[:space:]')
+    if is_number "$DOMAIN_ROWS" && [ "$DOMAIN_ROWS" -lt "$DOMAIN_MIN_ROWS" ]; then
+      FAILURE_REASON="invariant failed: $DOMAIN_TABLE has $DOMAIN_ROWS rows (< $DOMAIN_MIN_ROWS)"
+      exit 1
+    fi
+
+    SUCCESS=1
+    log "invariant ok: $LEDGER_TABLE=$LEDGER_ROWS rows, public tables=$PUBLIC_TABLES, \
+    $DOMAIN_TABLE=$DOMAIN_ROWS rows, db size=${DB_SIZE_BYTES}B"
+    log "drill complete for $APP; the exit trap pushes metrics and cleans up"

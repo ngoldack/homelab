@@ -1,0 +1,103 @@
+# Default-deny baseline for the drill namespaces — same semantics as the
+# cnpg-system/paperless pilots: selecting an endpoint with an ingress/egress
+# section flips that direction to default-deny, and an empty rule whitelists
+# no peer. The allowlists in cilium-allowlist.yaml are the only exceptions.
+#
+# The control namespace runs the drill driver (a Kubernetes-API client and
+# nothing else); the five *-drill namespaces run a recovered CNPG cluster that
+# must reach exactly one external thing — the S3 endpoint its backups live on.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnpg-restore-drills-default-deny
+  namespace: cnpg-restore-drills
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in cnpg-restore-drills. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-drill-default-deny
+  namespace: immich-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in immich-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-drill-default-deny
+  namespace: paperless-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in paperless-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-drill-default-deny
+  namespace: hindsight-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in hindsight-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: langfuse-drill-default-deny
+  namespace: langfuse-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in langfuse-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: authentik-drill-default-deny
+  namespace: authentik-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in authentik-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

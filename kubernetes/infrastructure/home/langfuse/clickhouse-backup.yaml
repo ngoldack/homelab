@@ -99,20 +99,22 @@ spec:
                 - |
                   set -euo pipefail
                   stamp=$(date -u +%Y%m%dT%H%M%SZ)
-                  dest="https://fsn1.your-objectstorage.com/home-cnpg-backups-7cd4e906/langfuse/clickhouse/${stamp}"
-                  echo "backing up events_full to ${dest}"
+                  dest="https://fsn1.your-objectstorage.com/home-cnpg-backups-7cd4e906/langfuse/clickhouse/$${stamp}"
+                  echo "backing up events_full to $${dest}"
                   # log_queries=0 first: the substituted credentials must never
                   # reach system.query_log. --multiquery runs both statements in
                   # one session, so the SET applies to the BACKUP.
+                  # $$ escapes Flux's strict postBuild envsubst, which otherwise
+                  # tries to expand these shell variables at build time.
                   clickhouse-client \
                     --host langfuse-clickhouse-headless.langfuse.svc.cluster.local \
                     --multiquery \
-                    --param_dest="${dest}" \
-                    --param_key="${AWS_ACCESS_KEY_ID}" \
-                    --param_secret="${AWS_SECRET_ACCESS_KEY}" \
+                    --param_dest="$${dest}" \
+                    --param_key="$${AWS_ACCESS_KEY_ID}" \
+                    --param_secret="$${AWS_SECRET_ACCESS_KEY}" \
                     -q "SET log_queries = 0;
                         BACKUP TABLE default.events_full TO S3({dest:String}, {key:String}, {secret:String})"
-                  echo "backup complete: ${dest}"
+                  echo "backup complete: $${dest}"
               env:
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:

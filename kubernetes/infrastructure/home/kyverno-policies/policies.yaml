@@ -53,6 +53,14 @@ metadata:
     policies.kyverno.io/title: Disallow latest / untagged images
     policies.kyverno.io/category: Supply Chain
     policies.kyverno.io/severity: medium
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes ship image tags from upstream charts/operators (Cilium, Kyverno, CSI,
+          device plugins) and Flux/Kyverno must be able to write the policy objects themselves.
+        review: "2027-03-18"
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
@@ -149,6 +157,14 @@ metadata:
     policies.kyverno.io/title: Restrict host namespaces
     policies.kyverno.io/category: Pod Security
     policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          CNI/CSI/device-plugin/monitoring planes need host namespaces by design, and Flux/Kyverno
+          must be able to write the policy objects themselves.
+        review: "2027-03-18"
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
@@ -208,6 +224,14 @@ metadata:
     policies.kyverno.io/title: Disallow hostPath volumes
     policies.kyverno.io/category: Pod Security
     policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Monitoring, the image builder and the CNI/CSI/device-plugin planes mount host paths by
+          design, and Flux/Kyverno must be able to write the policy objects themselves.
+        review: "2027-03-18"
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
@@ -270,6 +294,14 @@ metadata:
     policies.kyverno.io/title: Disallow privileged containers
     policies.kyverno.io/category: Pod Security
     policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          CNI/CSI/device-plugin/Kata/crowdsec planes are privileged by design and the media stack
+          needs NET_ADMIN, while Flux/Kyverno must be able to write the policy objects themselves.
+        review: "2027-03-18"
 spec:
   validationFailureAction: Audit
   # Surface violations to whoever runs kubectl apply, not just to
@@ -592,3 +624,924 @@ spec:
                   {{ request.object.spec.additionalPodMetadata.labels."workload.hermes.io/session-hash" || 'none' }}
                 operator: AllIn
                 value: "{{ quarantine.data.keys(@) | sort(@) }}"
+
+---
+# require-pod-non-root — Phase 6.1, control "running as non-root".
+#
+# WHY IT IS A GAP: none of the four Pod policies above checks runAsNonRoot, so a
+# namespace can report clean against them and still be rejected the day
+# PSA enforce=restricted lands (file header). Only hermes, hermes-sandbox,
+# hermes-egress and github-runner carry enforce=restricted today; every other app
+# namespace carries audit/warn only, and with no API audit policy (see
+# security-baseline/kustomization.yaml) nothing outside PSA's own reports even
+# surfaces this. A read-only census on 2026-09-18 over the namespaces this file
+# covers found 40 of 75 containers with no effective runAsNonRoot=true, and 43 of
+# 55 pods failing at least one of {non-root, seccomp, drop-ALL}.
+#
+# SEMANTICS: PSA-exact, read from the upstream check source (check_runAsNonRoot.go)
+# rather than inferred. Three violations:
+#   1. pod-level runAsNonRoot explicitly false — flagged even when every container
+#      overrides it (rule pod-level-not-false);
+#   2. a container whose own runAsNonRoot is explicitly false;
+#   3. a container whose own runAsNonRoot is absent while the pod level is not true.
+# `foreach` + `deny` is used instead of a `pattern` because no pattern can express
+# that per-container override/fallback pair: a single-element `pattern` list
+# applies to every container (there is no either/or), and `anyPattern`
+# alternatives are evaluated per pattern, not per container. Each condition is a
+# PASS expression compared with NotEquals "true", so a rendering surprise (null,
+# expression error) reports instead of silently passing.
+#
+# CONDITION IDIOM (verified against the engine, not assumed): a condition key
+# that resolves to a JSON boolean never equals a string value, so
+# `key: "{{ x == \`true\` }}"` + `operator: NotEquals value: "true"` is ALWAYS
+# true — every pass-expression in this file is therefore wrapped as
+# `(pass-expression) && 'pass' || 'fail'` and compared with NotEquals "pass"
+# (also fail-safe: a rendering error is not the string "pass", so it reports).
+# Verified with `kyverno jp query` on the exact expressions and end-to-end with
+# `kyverno apply` (CLI v1.19.1, the cluster's engine version) against compliant
+# and violating fixture pods.
+#
+# AUDIT -> ENFORCE: fix the securityContexts, then flip this and its two sibling
+# policies (seccomp, drop-ALL) in the same commit as that namespace's PSA
+# enforce=restricted label. Clean reports alone are not the gate: enforcement
+# only evaluates newly admitted pods, so breakage from an unclean namespace
+# arrives late and looks unrelated.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-non-root
+  annotations:
+    policies.kyverno.io/title: Require an effective non-root runAsNonRoot
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes legitimately run as root (CNI/CSI/device-plugin/monitoring/build/Kata) and
+          Flux/Kyverno must be able to write the policy objects themselves.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  # Surface violations to whoever runs kubectl apply, like the four policies above.
+  emitWarning: true
+  background: true
+  rules:
+    - name: pod-level-not-false
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          spec.securityContext.runAsNonRoot must not be false: PSA restricted rejects the pod for
+          it even when every container overrides the field.
+        deny:
+          conditions:
+            any:
+              - key: >-
+                  {{ (!(request.object.spec.securityContext.runAsNonRoot == `false`)) && 'pass' || 'fail' }}
+                operator: NotEquals
+                value: "pass"
+    - name: effective-runasnonroot-true
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          Containers must run as non-root: the effective runAsNonRoot (container securityContext,
+          else the pod securityContext) must be true.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.runAsNonRoot == `true`
+                      || (element.securityContext.runAsNonRoot == `null`
+                      && request.object.spec.securityContext.runAsNonRoot == `true`)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.runAsNonRoot == `true`
+                      || (element.securityContext.runAsNonRoot == `null`
+                      && request.object.spec.securityContext.runAsNonRoot == `true`)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          # Ephemeral containers can be added by kubectl debug; PSA restricted
+          # applies to them too, so the audit reports them rather than letting a
+          # debug container escape the census.
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.runAsNonRoot == `true`
+                      || (element.securityContext.runAsNonRoot == `null`
+                      && request.object.spec.securityContext.runAsNonRoot == `true`)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+
+---
+# require-seccomp-runtimedefault — Phase 6.1, control "seccompProfile".
+#
+# WHY IT IS A GAP: PSA restricted requires a seccomp profile (RuntimeDefault or
+# Localhost) for every container; no policy here checks it, so a clean
+# PolicyReport does not mean a pod will survive enforce=restricted. Same census
+# as above (2026-09-18): 42 of 75 containers in covered namespaces have no
+# effective RuntimeDefault profile, and none uses Localhost — so requiring
+# RuntimeDefault exactly is not lossy for this cluster (Localhost would be
+# allowed by PSA but is not in use; if a workload ever needs it, whitelist it
+# here with a comment rather than loosening the rule).
+#
+# SEMANTICS: PSA-exact, read from the upstream check source
+# (check_seccompProfile_restricted.go) rather than inferred. Violations: a
+# pod-level profile set to a value other than the allowed one (flagged even when
+# every container overrides it — rule pod-level-allowed); a container-level
+# profile set to a disallowed value; a container with no profile while the pod
+# level has none either. `.type` on an absent object is null, so the comparison
+# against the allowed value is total without anchors.
+#
+# AUDIT -> ENFORCE: same transition as require-pod-non-root.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-seccomp-runtimedefault
+  annotations:
+    policies.kyverno.io/title: Require an effective RuntimeDefault seccomp profile
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes legitimately need what this policy prohibits (host namespaces, hostPath,
+          privileged/root, no seccomp floor) and Flux/Kyverno must write the policy objects themselves.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: pod-level-allowed
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          spec.securityContext.seccompProfile, when set, must be RuntimeDefault (this cluster's
+          floor; PSA would also allow Localhost).
+        deny:
+          conditions:
+            any:
+              - key: >-
+                  {{ (request.object.spec.securityContext.seccompProfile == `null`
+                  || request.object.spec.securityContext.seccompProfile.type == 'RuntimeDefault') && 'pass' || 'fail' }}
+                operator: NotEquals
+                value: "pass"
+    - name: effective-seccomp-runtimedefault
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          Containers must set an effective seccompProfile of RuntimeDefault (container securityContext,
+          else the pod securityContext).
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.seccompProfile.type == 'RuntimeDefault'
+                      || (element.securityContext.seccompProfile == `null`
+                      && request.object.spec.securityContext.seccompProfile.type == 'RuntimeDefault'))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.seccompProfile.type == 'RuntimeDefault'
+                      || (element.securityContext.seccompProfile == `null`
+                      && request.object.spec.securityContext.seccompProfile.type == 'RuntimeDefault'))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.securityContext.seccompProfile.type == 'RuntimeDefault'
+                      || (element.securityContext.seccompProfile == `null`
+                      && request.object.spec.securityContext.seccompProfile.type == 'RuntimeDefault'))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+
+---
+# require-drop-all-capabilities — Phase 6.1, control "capabilities.drop: ALL".
+#
+# WHY IT IS A GAP: PSA restricted requires every container to drop ALL
+# capabilities; no policy here checks the capability set, so the media stack's
+# NET_ADMIN need is invisible to the reports in every other namespace. Same
+# census (2026-09-18): 35 of 75 containers in covered namespaces have no
+# effective drop of ALL.
+#
+# SEMANTICS: PSA-exact, read from the upstream check source
+# (check_capabilities_restricted.go) rather than inferred: the check looks ONLY
+# at the container's own securityContext.capabilities — a container that inherits
+# the pod-level field is reported as missing it, and a container whose
+# `capabilities` object exists without `drop` is reported too (the override wins
+# either way). This is why the expression reads the container object only, with
+# no pod-level fallback, and why `|| 'none'` is used: it keeps the expression
+# total when the field is absent (a string has no .drop, so contains() returns
+# false and the container is reported).
+#
+# NOT COVERED HERE, deliberately: PSA also restricts `capabilities.add` to
+# NET_BIND_SERVICE, and it additionally requires the same drop from init and
+# ephemeral containers — the latter two ARE covered below (three foreach lists),
+# but the `add` allowlist is a distinct control that this checklist item
+# ("drop ALL") does not ask for; it would flag intentional NET_BIND_SERVICE adds
+# that are legitimate today. Add it as its own policy if it is wanted.
+#
+# AUDIT -> ENFORCE: same transition as require-pod-non-root. Namespaces that
+# genuinely need an added capability (media's NET_ADMIN today) are already in the
+# exclude list at the top of this file rather than being exceptions here.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-drop-all-capabilities
+  annotations:
+    policies.kyverno.io/title: Require an effective capabilities drop of ALL
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes legitimately need added capabilities (media/NET_ADMIN, CNI, CSI, device
+          plugins) and Flux/Kyverno must write the policy objects themselves.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: effective-drop-all
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          Containers must drop ALL capabilities: the container's own
+          securityContext.capabilities.drop must include ALL (PSA looks only at the container's
+          own field, never at an inherited pod-level one).
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ ((element.securityContext.capabilities.drop || 'none')
+                      | contains(@, 'ALL')) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ ((element.securityContext.capabilities.drop || 'none')
+                      | contains(@, 'ALL')) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ ((element.securityContext.capabilities.drop || 'none')
+                      | contains(@, 'ALL')) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+
+---
+# require-resource-requests — Phase 6.1, control "resource requests present".
+#
+# WHY IT IS A GAP: PSA has no resource control at all, and no policy here checks
+# it — the Kubernetes scheduler and the eviction path are the only backstops. The
+# cluster has already hit the consequence once: a rolling update deadlocked
+# because a node was CPU-saturated and every replacement pod had to fit the
+# scheduler's view of it (see the rollout-capacity-deadlock runbook entry in
+# docs/disaster-recovery.md). A pod without requests is scheduled into whatever
+# headroom "looks" free and is the first thing to destabilise a node.
+#
+# SCOPE: cpu and memory requests on every container and init container (an
+# ephemeral container cannot declare resources — the API rejects it — so they are
+# not iterated). Limits are deliberately NOT required here: requests are what the
+# scheduler acts on, and a limits rule would be a different control with a
+# different blast radius (memory-limited JVMs, burstable databases).
+#
+# EXEMPT: none beyond the platform namespaces at the top of the file. A census on
+# 2026-09-18 found 16 of 75 containers in covered namespaces without both
+# requests; those are reported, not excluded — an exclusion here would hide the
+# exact population the control exists to shrink.
+#
+# AUDIT -> ENFORCE: only after every covered workload declares requests (start
+# with the CronJobs and one-shot pods, which are the usual offenders, then the
+# long-running ones), in the same commit as the namespace's other hardening
+# flips.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-requests
+  annotations:
+    policies.kyverno.io/title: Require cpu and memory requests
+    policies.kyverno.io/category: Reliability
+    policies.kyverno.io/severity: medium
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes are managed by their charts/operators (Cilium, CSI, device plugins,
+          monitoring agents) whose requests are set by upstream, and Flux/Kyverno must write the
+          policy objects themselves.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: requests-present
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          Every container must declare resources.requests.cpu and
+          resources.requests.memory — an unsized pod is scheduled against headroom that is not
+          actually free.
+        foreach:
+          # Two deny conditions (an `any`): either request missing is a violation.
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.resources.requests.cpu != `null`
+                      && element.resources.requests.memory != `null`) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (element.resources.requests.cpu != `null`
+                      && element.resources.requests.memory != `null`) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+
+---
+# disallow-default-serviceaccount — Phase 6.1, control "no default ServiceAccount".
+#
+# WHY IT IS A GAP: PSA does not look at ServiceAccount identity at all, and
+# neither did any policy here. security-baseline/default-service-accounts.yaml
+# hardens the SYMPTOM (automountServiceAccountToken: false on the `default` SA of
+# 27 namespaces, after an inventory showed not one binding in the cluster names a
+# `default` subject) but every pod that omits serviceAccountName still RUNS as
+# `default`. That is a latent identity problem, not a token problem: the day
+# anything grants a role to `default` in one of those namespaces — or the
+# namespace is not in that file's list, which has no floor for new namespaces —
+# every such pod silently inherits it, and RBAC/audit evidence cannot tell them
+# apart. A read-only census on 2026-09-18 found 19 of the 55 pods in covered
+# namespaces running as `default`.
+#
+# EXEMPTION ALREADY MADE ELSEWHERE: the agent/sandbox plane (hermes,
+# hermes-sandbox, agent-sandbox-system) is out of scope: those pods are denied a
+# token at pod level by the secure-hermes-sandbox ValidatingAdmissionPolicy and
+# are excluded below anyway. kube-system is excluded because its debug pods
+# (hostNetwork+hostPID+privileged, hostPath /) are the one place a default token
+# may legitimately be wanted (documented in the baseline file).
+#
+# NOT READ AS A VARIABLE: `request.object.spec.serviceAccountName` is the pod
+# field. The bare `serviceAccountName` variable Kyverno pre-defines is the
+# REQUESTER's account and, per the Kyverno docs, must not be used in rules with
+# background scanning — this rule reads the field, so background: true is safe.
+#
+# AUDIT -> ENFORCE: give each workload a dedicated ServiceAccount (a two-line
+# manifest per app dir) and then flip per namespace. Enforcing first would break
+# every pod that omits the field, which is most of the 19.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-default-serviceaccount
+  annotations:
+    policies.kyverno.io/title: Disallow the default ServiceAccount
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: medium
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          Platform planes use the default ServiceAccount for kubelet-style duties and for cluster
+          debug pods, and Flux/Kyverno must be able to write the policy objects themselves.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: no-default-serviceaccount
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      validate:
+        message: >-
+          Pods must name a dedicated serviceAccountName: an omitted field runs the pod as the
+          namespace's `default` ServiceAccount, which flattens RBAC and audit identity.
+        deny:
+          conditions:
+            any:
+              # `|| 'default'` is the API default made explicit: an absent field
+              # IS the default account.
+              - key: >-
+                  {{ ((request.object.spec.serviceAccountName || 'default') != 'default')
+                  && 'pass' || 'fail' }}
+                operator: NotEquals
+                value: "pass"
+
+---
+# restrict-image-registries — Phase 6.1, control "registry allowlist + digest".
+#
+# WHY IT IS A GAP: disallow-latest-tag above only demands *a* tag or digest, so
+# any registry and any image name passes it, and nothing verifies that a
+# first-party image is pinned by digest rather than a mutable tag. Unit 4.1 pins
+# the directly-referenced images in Git (chart-internal images stay
+# chart-managed), but pinning in Git is not an admission control: a hand-applied
+# pod, a new app dir, or a re-tagged first-party image is invisible until someone
+# re-reads the manifests. This policy is the admission half. Signature and
+# provenance verification is a DIFFERENT control (cosign verifyImages, Phase 4.3)
+# and is deliberately not duplicated here.
+#
+# SCOPE: cluster-wide — unlike the Pod-shape policies above there is no platform
+# exemption, because supply chain applies to every namespace, and every image
+# deployed on 2026-09-18 already satisfies the allowlist: a live census of all
+# container images found exactly nine registries in use — docker.io, ghcr.io,
+# quay.io, registry.k8s.io, registry.ngoldack.de, reg.kyverno.io, nvcr.io,
+# cr.agentgateway.dev, docker.langfuse.com — plus Docker-Hub-implicit names
+# (alpine, busybox, node, alpine/k8s). Adding a registry is therefore a
+# deliberate edit of the allowlist below, which is the point: today it would be a
+# silent default.
+#
+# HOW (both rules use JMESPath, not a deny-operator regex: Kyverno's deny
+# operators are Equals/NotEquals/In/LessThan/… only — there is no Matches
+# operator, which the policy webhook rejects at admission):
+#   1. regex_match() against an alternation that passes an allowlisted registry,
+#      a bare Docker Hub name (`busybox:1.36`, no slash at all), or a Hub-implicit
+#      `name/path` reference whose first segment carries neither a dot (hostname)
+#      nor a colon (host:port) — the same rule Docker itself applies to decide
+#      whether a reference names a registry;
+#   2. a first-party image (registry.ngoldack.de/…) must carry @sha256:<64 hex>.
+#      `!regex_match(...)` on the prefix replaces a negative lookahead, which Go's
+#      RE2 engine (used by Kyverno) does not support.
+#
+# AUDIT -> ENFORCE: rule 1 is enforceable once a fresh report is clean (it already
+# is); rule 2 waits for Unit 4.1's digest pass to clear
+# registry.ngoldack.de/llama-p100:0.4.0-p100 in llmkube-system, which was still
+# tag-pinned at census time.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Allowlist image registries and pin our own images by digest
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    # No exception register entry: this policy has no excludes, by design (see the
+    # header). The tag-pinned first-party image it reports is a finding, not an
+    # accepted exception — it is listed under "known findings" in
+    # docs/policy-exceptions.md.
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: registry-allowlist
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          Image must come from an allowlisted registry. Add the registry to this policy's allowlist
+          deliberately (and record why) instead of pulling from a new one.
+        # Five anchored alternatives, ORed across folded lines (a folded scalar
+        # joins with spaces, so one long regex cannot be split): the three
+        # allowlisted registry groups, a bare Docker Hub name (`busybox:1.36` —
+        # no slash at all), and a Hub-implicit `name/path` reference whose first
+        # segment carries neither a dot (hostname) nor a colon (host:port).
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (regex_match('^(registry\.ngoldack\.de|docker\.io|ghcr\.io|quay\.io)/.*$', element.image)
+                      || regex_match('^(registry\.k8s\.io|reg\.kyverno\.io|nvcr\.io)/.*$', element.image)
+                      || regex_match('^(cr\.agentgateway\.dev|docker\.langfuse\.com)/.*$', element.image)
+                      || regex_match('^[^/]+$', element.image)
+                      || regex_match('^[^/.:]+/.*$', element.image)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (regex_match('^(registry\.ngoldack\.de|docker\.io|ghcr\.io|quay\.io)/.*$', element.image)
+                      || regex_match('^(registry\.k8s\.io|reg\.kyverno\.io|nvcr\.io)/.*$', element.image)
+                      || regex_match('^(cr\.agentgateway\.dev|docker\.langfuse\.com)/.*$', element.image)
+                      || regex_match('^[^/]+$', element.image)
+                      || regex_match('^[^/.:]+/.*$', element.image)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          # Ephemeral containers are how `kubectl debug` injects a tool image into
+          # a running pod — the likeliest bypass of a registry allowlist.
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (regex_match('^(registry\.ngoldack\.de|docker\.io|ghcr\.io|quay\.io)/.*$', element.image)
+                      || regex_match('^(registry\.k8s\.io|reg\.kyverno\.io|nvcr\.io)/.*$', element.image)
+                      || regex_match('^(cr\.agentgateway\.dev|docker\.langfuse\.com)/.*$', element.image)
+                      || regex_match('^[^/]+$', element.image)
+                      || regex_match('^[^/.:]+/.*$', element.image)) && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+    - name: first-party-digest-pin
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          Images built by this repo (registry.ngoldack.de/…) must be pinned by digest
+          (image@sha256:<64 hex>), not by a mutable tag.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (!regex_match('^registry\.ngoldack\.de/.*$', element.image)
+                      || regex_match('^registry\.ngoldack\.de/[^@]+@sha256:[a-f0-9]{64}$', element.image))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (!regex_match('^registry\.ngoldack\.de/.*$', element.image)
+                      || regex_match('^registry\.ngoldack\.de/[^@]+@sha256:[a-f0-9]{64}$', element.image))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: >-
+                      {{ (!regex_match('^registry\.ngoldack\.de/.*$', element.image)
+                      || regex_match('^registry\.ngoldack\.de/[^@]+@sha256:[a-f0-9]{64}$', element.image))
+                      && 'pass' || 'fail' }}
+                    operator: NotEquals
+                    value: "pass"
+
+---
+# require-cilium-default-deny-floor — Phase 6.1, control "NetworkPolicy requirement".
+#
+# WHY IT IS A GAP: the zero-trust floor in this cluster is a per-namespace Cilium
+# pair (`<namespace>-default-deny` + `<namespace>-allowlist`, in each app dir),
+# not a Kubernetes NetworkPolicy — a census on 2026-09-18 found zero
+# networking.k8s.io/v1 NetworkPolicy objects in any covered namespace. And the
+# floor has no admission control behind it: security-baseline/kustomization.yaml
+# records both that a cluster-wide CCNP was trialled and rolled back (it denied
+# every Gateway route) and that therefore "a NEW namespace starts open and must
+# ship its own policy pair — there is no automatic floor". This policy is that
+# missing floor check: every pod admitted into a covered namespace must land in a
+# namespace that already carries the default-deny half of the pair. A Cilium
+# default-deny is what makes a missing per-workload allowlist a CLOSED door
+# instead of an open one, so its absence is the finding that matters — the
+# allowlists themselves are policy content, not a Pod-shape property.
+#
+# HOW: a namespace-scoped API lookup for CiliumNetworkPolicies whose name
+# contains '-default-deny' (the naming convention every app dir follows; a
+# census found the pair present in all 13 Flux-managed workload namespaces). The
+# count is compared with LessThan 1, so "namespace has no CiliumNetworkPolicy at
+# all" and "namespace has allowlists but no floor" are the same violation.
+#
+# RBAC: Kyverno's shipped roles do NOT include cilium.io — verified read-only
+# with `kubectl auth can-i list ciliumnetworkpolicies --as=...` returning no —
+# so this policy ships with rbac-cilium-netpol-read.yaml beside it. Without that
+# grant the lookup fails and every admission is reported as a policy error, which
+# is why the grant is part of this change and not a follow-up.
+#
+# background: false, deliberately: the rule resolves a live lookup for the
+# namespace of the object being ADMITTED (admission-time data). Keeping it out of
+# the background scan also keeps the semantics simple — this control exists to
+# catch pods landing in a namespace that starts open, and it reports nothing for
+# existing pods (background scans without an admission request are not the place
+# to resolve request.namespace).
+#
+# KNOWN NON-FLUX HOLES (reported, not excluded): the scratch namespaces `default`
+# and `reach-test` have no floor (`default` holds a single non-Flux
+# `fqdn-probe` CiliumNetworkPolicy, which is not the default-deny half;
+# `reach-test` has none). Neither carries Flux-managed workloads, but short-lived
+# probe pods do appear in them (a read-only `kyverno apply --cluster` run on
+# 2026-09-18 over 457 live resources reported exactly these two and nothing else)
+# — so they are left reported rather than excluded, which makes each probe pod
+# visible while it exists. `aigateway` is a retired lane with zero resources.
+#
+# AUDIT -> ENFORCE: once a fresh report is clean for the covered namespaces,
+# enforce. The excluded system namespaces stay excluded (Cilium itself, and the
+# platform planes, own their policies).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-cilium-default-deny-floor
+  annotations:
+    policies.kyverno.io/title: Require a Cilium default-deny floor per namespace
+    policies.kyverno.io/category: Network
+    policies.kyverno.io/severity: high
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: platform-namespaces
+        owner: platform
+        reason: >-
+          System and platform namespaces are policed by Cilium/the platform charts themselves (and
+          several have no workloads), while Flux/Kyverno must write the policy objects.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  # The rule needs the admitted object's namespace for its API lookup; see header.
+  background: false
+  rules:
+    - name: cilium-default-deny-present
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-node-lease
+                - kube-public
+                - cilium-secrets
+                - flux-system
+                - kyverno
+                - monitoring
+                - network
+                - cert-manager
+                - cnpg-system
+                - clickhouse-operator
+                - seaweedfs-operator
+                - valkey-operator-system
+                - truenas-csi
+                - nvidia-device-plugin
+                - buildkit
+                - agent-sandbox-system
+                - hermes-sandbox
+                - media
+                - tetragon
+                - crowdsec
+      context:
+        - name: defaultDenies
+          apiCall:
+            urlPath: "/apis/cilium.io/v2/namespaces/{{request.namespace}}/ciliumnetworkpolicies"
+            jmesPath: "items[?contains(metadata.name, '-default-deny')] | length(@)"
+      validate:
+        message: >-
+          Namespace {{request.namespace}} has no CiliumNetworkPolicy whose name contains
+          '-default-deny'. Per-namespace allowlists only narrow traffic that a default-deny floor
+          already blocks; without the floor the namespace is open.
+        # The count compare is numeric (LessThan 1) — numbers, unlike booleans,
+        # do compare against a literal value in a condition key (same reason the
+        # other policies here render a 'pass' token instead).
+
+        deny:
+          conditions:
+            any:
+              - key: "{{ defaultDenies }}"
+                operator: LessThan
+                value: 1

@@ -7,3 +7,8 @@ resources:
   # applied — the same CRD-before-CR split as monitoring-crds/monitoring and
   # agentgateway-crds/agentgateway.
   - policies.yaml
+  # ClusterRole/ClusterRoleBinding granting the policy engine get+list on
+  # cilium.io/ciliumnetworkpolicies — the one API group Kyverno's shipped roles do
+  # not cover, needed by the require-cilium-default-deny-floor policy. Rationale,
+  # scope and the verification command are in the file.
+  - rbac-cilium-netpol-read.yaml

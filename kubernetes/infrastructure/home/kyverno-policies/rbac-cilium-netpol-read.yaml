@@ -1,0 +1,60 @@
+# Read access to CiliumNetworkPolicies for the Kyverno policy engine.
+#
+# WHY: kubernetes/infrastructure/home/kyverno-policies/policies.yaml's
+# require-cilium-default-deny-floor rule resolves a live namespace-scoped
+# `context.apiCall` against
+# /apis/cilium.io/v2/namespaces/<ns>/ciliumnetworkpolicies to decide whether a
+# pod is landing in a namespace that already carries its Cilium default-deny
+# floor. Kyverno's shipped roles cover the built-in API groups only — verified
+# read-only against the live cluster:
+#
+#   kubectl auth can-i list ciliumnetworkpolicies -n langfuse \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   -> no
+#
+# Without this grant the lookup fails, and a failed context lookup is reported as
+# a policy error on every admission rather than as a pass — the grant is part of
+# the policy change, not a follow-up.
+#
+# SCOPE: get + list on exactly one Cilium resource type. No watch (background
+# evaluation of that rule is disabled), no write, and nothing else in cilium.io
+# (CiliumEndpoints, CiliumIdentities, CiliumNodes are all readable cluster-wide to
+# anyone with the built-in view role, and none of them is needed here).
+#
+# SUBJECTS: Kyverno splits policy evaluation across controllers — the admission
+# controller evaluates rules during admission (where this rule runs, since
+# background: false keeps it out of the scan), and the background controller
+# evaluates rules in background scans. Both are bound here so that enabling the
+# background scan for this rule later is a one-line policy change and not an
+# RBAC change; the grant itself is read-only on one resource type.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno-cilium-netpol-read
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+rules:
+  - apiGroups:
+      - cilium.io
+    resources:
+      - ciliumnetworkpolicies
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kyverno-cilium-netpol-read
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kyverno-cilium-netpol-read
+subjects:
+  - kind: ServiceAccount
+    name: kyverno-admission-controller
+    namespace: kyverno
+  - kind: ServiceAccount
+    name: kyverno-background-controller
+    namespace: kyverno

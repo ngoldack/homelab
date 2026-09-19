@@ -4,9 +4,13 @@
 #   * extensions.agents.x-k8s.io/v1beta1 sandboxclaims: get, list, delete
 #     (list_claims by the workload.hermes.io/session-hash label; delete_claim
 #     carries a UID precondition).
-#   * core configmaps: get, create, update RESTRICTED to resourceNames
-#     [hermes-quarantine] (get + create_configmap for the startup ledger,
-#     replace_configmap for the quarantine write; nothing else writable).
+#   * core configmaps: get + update RESTRICTED to resourceNames
+#     [hermes-quarantine], plus a separate create rule (create cannot be
+#     name-restricted — see the rule comment; the earlier single rule listing
+#     create under resourceNames denied the startup ledger create, so the
+#     quarantine path answered 503 for every event).
+#     (get + create_configmap for the startup ledger, replace_configmap for
+#     the quarantine write; nothing else writable.)
 #
 # NO pods/sandboxes verbs: the identity contract binds an event to cluster
 # objects through the CLAIM LABEL, not through a pod-IP lookup (no code path
@@ -51,10 +55,22 @@ rules:
   - apiGroups: ["extensions.agents.x-k8s.io"]
     resources: ["sandboxclaims"]
     verbs: ["get", "list", "delete"]
+  # get/update ARE name-restricted to the ledger.
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["hermes-quarantine"]
-    verbs: ["get", "create", "update"]
+    verbs: ["get", "update"]
+  # `create` CANNOT be restricted by resourceName: Kubernetes RBAC ignores
+  # resourceNames for create/deletecollection (the object name is not
+  # authoritative at authorization time), so listing create in the rule above
+  # denied every create — the reaper's startup ensure_ledger() 403'd, the
+  # hermes-quarantine ConfigMap never existed, and every quarantine event
+  # answered 503 (found live 2026-09-19 via hack/hermes-egress-e2e.sh).
+  # The verb therefore lives in its own rule, and the grant is only for
+  # creating ConfigMaps in this namespace; writes stay name-restricted above.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

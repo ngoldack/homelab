@@ -85,24 +85,34 @@ mac = base64.urlsafe_b64encode(hmac.new(secret, mac_input, hashlib.sha256).diges
 print(f"v1.{expiry}.go.{mac}")
 PYEOF
 )}"
-AUTH="Authorization: Basic $(printf '%s:%s' "$SESSION" "$TOKEN" | base64)"
+# The authorizer reads the token from the CHECK PAYLOAD, not from the HTTP
+# headers of the /check request: flat payloads must carry
+# `proxy_authorization` (see egress_guard/authorizer.py parse_check_request —
+# the Envoy path arrives as attributes.request.http.headers, which Envoy
+# populates from the real Proxy-Authorization header). Passing it as a curl
+# header alone yields x-egress-reason: token-missing.
+# `tr -d '\n'`: macOS base64 wraps at 76 chars, and a newline inside the JSON
+# string makes the authorizer reject the body ("Invalid control character").
+PROXY_AUTH="Basic $(printf '%s:%s' "$SESSION" "$TOKEN" | base64 | tr -d '\n')"
 
 say "identity: session=$SESSION (token minted, not printed)"
 
-# 3. Scenario 1: allowed host OK (pypi.org:443 in the core/go/web allowlists).
-say "scenario 1: allowed host (pypi.org:443)"
+# 3. Scenario 1: allowed host OK. The token carries profile `go`, so the host
+#    must come from THAT profile's allowlist (go allows proxy.golang.org and
+#    sum.golang.org; pypi.org belongs to core/web and is correctly denied for
+#    a go session).
+say "scenario 1: allowed host (proxy.golang.org:443, profile go)"
 RESULT=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-  -H "$AUTH" -H 'x-egress-target: pypi.org:443' \
   -X POST "http://127.0.0.1:$AUTHORIZER_PORT/check" \
-  -d '{"method":"CONNECT","target":"pypi.org:443","proxy_authorization":"Basic ...","source_ip":"10.0.0.1"}' \
+  --data-binary "{\"method\":\"CONNECT\",\"target\":\"proxy.golang.org:443\",\"proxy_authorization\":\"$PROXY_AUTH\",\"source_ip\":\"10.0.0.1\"}" \
   || echo curl-failed)
 check "allowed host answers 200" "[ '$RESULT' = '200' ]"
 
 # 4. Scenario 2: unapproved host denied + strike.
 say "scenario 2: unapproved host (example.org:443)"
 RESULT=$(curl -s --max-time 5 -D "$TMPDIR_OUT/deny.headers" \
-  -H "$AUTH" -X POST "http://127.0.0.1:$AUTHORIZER_PORT/check" \
-  -d '{"method":"CONNECT","target":"example.org:443"}' \
+  -X POST "http://127.0.0.1:$AUTHORIZER_PORT/check" \
+  --data-binary "{\"method\":\"CONNECT\",\"target\":\"example.org:443\",\"proxy_authorization\":\"$PROXY_AUTH\"}" \
   || echo curl-failed)
 check "unapproved host answers 403" "[ '$(head -1 "$TMPDIR_OUT/deny.headers" | grep -o '403\|200\|curl-failed' | head -1)' = '403' ]"
 check "deny carries strikes" "grep -qi 'x-egress-strikes: [1-9]' '$TMPDIR_OUT/deny.headers'"
@@ -126,8 +136,8 @@ printf '%s' "$CLAIM_JSON" | $K apply -f - --request-timeout=10s >/dev/null \
   || fail "throwaway claim could not be created"
 sleep 1
 RESULT=$(curl -s --max-time 5 -D "$TMPDIR_OUT/kill.headers" \
-  -H "$AUTH" -X POST "http://127.0.0.1:$AUTHORIZER_PORT/check" \
-  -d '{"method":"CONNECT","target":"10.1.2.3:443"}' \
+  -X POST "http://127.0.0.1:$AUTHORIZER_PORT/check" \
+  --data-binary "{\"method\":\"CONNECT\",\"target\":\"10.1.2.3:443\",\"proxy_authorization\":\"$PROXY_AUTH\"}" \
   || echo curl-failed)
 check "RFC1918 answers kill (403 + x-egress-kill: 1)" \
   "grep -qi 'x-egress-kill: 1' '$TMPDIR_OUT/kill.headers'"

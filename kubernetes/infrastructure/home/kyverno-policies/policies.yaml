@@ -1676,5 +1676,7 @@ spec:
                           MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGwdpASnmpORT2EV2kzr2WaM9azxu
                           a5JA7yNuqRJfydMV8Ka4rPvaDK6ENDMchkd5YBJAiLenuKNB6UFOXugZ9g==
                           -----END PUBLIC KEY-----
-                      rekor:
-                        ignoreTlog: true
+                        # The same tlog decision as the signature attestor above:
+                        # no Rekor egress, so a missing entry is accepted.
+                        rekor:
+                          ignoreTlog: true

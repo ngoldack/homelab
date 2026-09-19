@@ -37,8 +37,7 @@ spec:
       containers:
         - name: buildctl
           # Same version as the daemon (chart 1.8.0 -> appVersion v0.31.0).
-          # Pinned: moby/buildkit:v0.31.0
-          image: moby/buildkit@sha256:a095b3d11ce1a9a05b6064ef515dfca0291ec5bcf2ea8178da8f6461924294e1
+          image: moby/buildkit:v0.31.0
           command:
             - buildctl
           args:

@@ -32,8 +32,10 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
+      # maxSurge 0 (repo convention) forces maxUnavailable >= 1; see
+      # envoy.yaml for the full note.
       maxSurge: 0
-      maxUnavailable: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:

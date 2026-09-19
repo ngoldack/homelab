@@ -211,8 +211,12 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
+      # maxSurge 0 (repo convention, no surge slot on the mixed worker) forces
+      # maxUnavailable >= 1: k8s rejects maxUnavailable 0 with maxSurge 0
+      # ("may not be 0 when maxSurge is 0"). One replica, so a rollout
+      # briefly has the old pod before the new one — acceptable for a proxy.
       maxSurge: 0
-      maxUnavailable: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:

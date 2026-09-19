@@ -84,11 +84,32 @@ log_laggards() {
   done
 }
 
+# Permanent vs transient: a dry-run failure is a declarative error in the
+# manifest itself (schema-invalid, immutable field, illegal value) — Flux will
+# NOT recover from it by itself and no amount of polling fixes it. Exit at
+# once so the workflow fails on the first sighting instead of burning the
+# whole wait budget on a known-lost cause. Transient states (dependency not
+# ready, drift detection running) still wait.
+fatal_error() {
+  local payload="$1" msg
+  msg=$(printf '%s' "$payload" | jq -r '
+    [ .items[].status.conditions[]? | select(.message? | contains("dry-run failed")) | .message ] | .[]' \
+    | head -1)
+  [ -n "$msg" ]
+}
+
 for phase in "${PHASES[@]}"; do
   start=$SECONDS
   echo "[$(now_ts)] phase: $phase gate (target $TARGET_REV, max ${MAX_WAIT}s)"
   while true; do
     payload=$(json_snapshot) || { echo "[$(now_ts)] ERROR: kubectl get kustomizations failed"; exit 1; }
+    if fatal_error "$payload"; then
+      echo "[$(now_ts)] FATAL: a Kustomization reports a dry-run failure (declarative error, will not recover by itself)"
+      log_laggards "$phase" "$payload"
+      echo "--- final kustomization state ---"
+      flux get kustomizations -n "$NS" 2>/dev/null || kubectl -n "$NS" get kustomizations
+      exit 1
+    fi
     if phase_done "$phase" "$payload"; then
       echo "[$(now_ts)] $phase gate satisfied"
       break

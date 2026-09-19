@@ -23,7 +23,7 @@ spec:
     # nothing — re-add the rule together with the scrape object if one appears.
     # This namespace's SSO-gated UIs are reached through the authentik proxy
     # outpost, which only fronts the six backends httproutes.yaml sends to
-    # authentik-proxy: jellyseerr:5055, sabnzbd:8080, sonarr:8989,
+    # authentik-proxy: seerr:80 (container 5055), sabnzbd:8080, sonarr:8989,
     # radarr:7878, prowlarr:9696, bazarr:6767 (jellyfin stays direct on 8096).
     - fromEndpoints:
         - matchLabels:

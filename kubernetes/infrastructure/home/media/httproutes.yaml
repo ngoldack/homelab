@@ -10,7 +10,7 @@
 # which the *.svc.${CLUSTER_DOMAIN} wildcard certificate already covers
 # (network/certificate.yaml).
 #
-# Auth is the apps' own login pages (Jellyfin/Jellyseerr/*arr all ship one);
+# Auth is the apps' own login pages (Jellyfin/Seerr/*arr all ship one);
 # authentik is not in front of these, matching the immich/paperless posture
 # for LAN-resident services.
 apiVersion: gateway.networking.k8s.io/v1
@@ -35,7 +35,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: jellyseerr
+  name: seerr
   namespace: media
   labels:
     dns.ngoldack.de/publish: lan
@@ -45,7 +45,7 @@ spec:
       namespace: network
       sectionName: https-media-svc
   hostnames:
-    - jellyseerr.media.svc.${CLUSTER_DOMAIN}
+    - seerr.media.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
         - name: authentik-proxy

@@ -542,7 +542,7 @@ allowVolumeExpansion: true
 volumeBindingMode: Immediate
 ---
 # Media stack application state (../media/): /config directories for
-# Jellyfin, Jellyseerr, SABnzbd and the *arr apps — indexer configs, quality
+# Jellyfin, Seerr, SABnzbd and the *arr apps — indexer configs, quality
 # profiles, API keys, download history. Small, precious, and frequently
 # rewritten, so fast pool + the same 6h/14d schedule as paperless's data.
 apiVersion: storage.k8s.io/v1

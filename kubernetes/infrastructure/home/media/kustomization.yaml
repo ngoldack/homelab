@@ -8,5 +8,6 @@ resources:
   - vlan-routes-configmap.yaml
   - storage.yaml
   - sources.yaml
+  - seerr.yaml
   - helmrelease.yaml
   - httproutes.yaml

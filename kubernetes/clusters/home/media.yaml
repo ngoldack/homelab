@@ -1,4 +1,4 @@
-# The media stack (Jellyfin + Jellyseerr + the *arr download chain).
+# The media stack (Jellyfin + Seerr + the *arr download chain).
 #
 # dependsOn network for the Gateway its HTTPRoutes attach to and multus for
 # the NetworkAttachmentDefinition CRD + DaemonSet every VLAN-attached pod

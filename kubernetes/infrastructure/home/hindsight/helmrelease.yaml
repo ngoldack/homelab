@@ -91,7 +91,19 @@ spec:
           memory: 1Gi
         limits:
           cpu: 2
-          memory: 4Gi
+          # Raised 4Gi -> 9Gi on 2026-09-19 with the same evidence pattern as
+          # the worker limit below: the pod was OOMKilled (exit 137) 7 times
+          # in 3h28m — a fresh start sits at ~0.9Gi VmRSS and reaches the 4Gi
+          # limit within ~30 min, taking the UI's proxied /api calls down with
+          # it (502/500 in hindsight-ui). The API pod runs the maintenance
+          # loop (consolidation reconcile + mental-model refresh every 5 min),
+          # which hydrates the same multi-MB retain payloads the worker's
+          # claim path does, so it inherits the same unbounded-bytes
+          # pathology. 9Gi matches the worker limit already accepted on
+          # 2026-09-18; the durable fix stays upstream (producers submit
+          # ~20MB retains). Request unchanged: the limit raise adds no
+          # scheduling pressure.
+          memory: 9Gi
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
         # agentgateway synthetic OVER (2026-09-18): telemetry-tracer OpenAI-compatible API.

@@ -67,9 +67,16 @@ data:
     WAIT_SECONDS=${WAIT_SECONDS:-2700}
     KEEP_ON_FAILURE=${KEEP_ON_FAILURE:-0}
     VM_IMPORT_URL=${VM_IMPORT_URL:-http://vmsingle-monitoring-victoria-metrics-k8s-stack.monitoring.svc.cluster.local.:8428/api/v1/import/prometheus}
-    # Pinned: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie — the image
-    # every application cluster runs (resolved 2026-09-18), so a drill starts
-    # from the same server build that wrote the backup it is restoring.
+    # Pinned: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie, resolved to
+    # this digest on 2026-09-18 (registry Docker-Content-Digest). That is the
+    # tag the four application clusters declare — but not every running pod
+    # matches it today: two instances still run an older build of the same tag
+    # (the tag moved under them) and authentik's cluster declares no imageName
+    # at all, so it runs the operator default (18.4). A drill can therefore
+    # restore with a patch-level-newer server build than the pod that wrote the
+    # backup it restores — compatible within major 18 — which is deliberate:
+    # one uniform server build keeps "why did the drill fail" from ever having
+    # to consider a mixed-build fleet.
     POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql@sha256:670026a375a908c3c2f6b5eeb1c56a06d2a15d375959f401d2aed8b8dd99f50e
 
     START_EPOCH=$(date +%s)

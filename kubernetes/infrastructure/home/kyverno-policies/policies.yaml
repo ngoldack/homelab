@@ -1556,3 +1556,115 @@ spec:
               - key: "{{ defaultDenies }}"
                 operator: LessThan
                 value: 1
+
+---
+# First-party signature + provenance verification (verifyImages), Phase 4.3.
+#
+# WHAT THIS CHECKS — every Pod (and, via autogen, its controllers) referencing
+# an image from OUR registry (registry.ngoldack.de/*) must carry:
+#   1. a key-based cosign SIGNATURE made with the image-builds signing key
+#      (cosign-signing-key, namespace buildkit — see
+#      ../image-builds/README.md);
+#   2. a signed SLSA-provenance ATTESTATION (cosign attest, predicate type
+#      https://slsa.dev/provenance/v0.2) produced by the same key in the
+#      image-builds Jobs.
+#
+# HOW IT VERIFIES — the attestor public keys are the SOPS-managed cosign.pub
+# from the image-builds Secret, inlined here so verification does not depend on
+# a Secret read at admission time. --tlog-upload=false was used at signing (no
+# Rekor egress by design), so both the signature check and the attestation must
+# accept transparent logging as MISSING rather than wrong: without
+# ignoreTlog: true a key-based check would ask Rekor for an entry that was
+# never uploaded and fail. The policy is intentionally NOT scoped to a match on
+# namespaces: the registry pattern alone keeps third-party images (ghcr.io,
+# docker.io, ...) outside its reach.
+#
+# AUDIT -> ENFORCE checklist (flip validationFailureAction to Enforce —
+# optionally per namespace via validationFailureActionOverrides — only when
+# ALL of these hold):
+#   1. Every Job in ../image-builds/ has completed once since this policy
+#      landed, so every deployed first-party digest is signed AND attested
+#      (images pushed before the Jobs carried the signing steps are NOT
+#      verifiable and keep the audit report red by design).
+#   2. Every workload that references registry.ngoldack.de/* is digest-pinned
+#      (Unit 4.1 landed this); re-pinning after each rebuild is mandatory
+#      because the signing steps sign exactly the digest that was pushed.
+#   3. kubectl get clusterpolicy verify-images-first-party -o yaml reports
+#      no violations for in-scope resources: check
+#      kubectl get policyreports -A and the clusterpolicy report status
+#      (audit runs via the background controller each scan interval).
+#   4. A dry-run denial was demonstrated: kubectl apply --dry-run=server of a
+#      manifest referencing an UNSIGNED registry.ngoldack.de/* image fails
+#      once Enforce is on (prove with a re-tagged unsigned copy first).
+#   5. Break-glass: an image that cannot be re-signed in time is exempted per
+#      workload with an annotation recorded in docs/policy-exceptions.md
+#      (owner, reason, review date) — never by loosening this policy.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-images-first-party
+  annotations:
+    policies.kyverno.io/title: Verify signatures and provenance of first-party images
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    # Exception register, Unit 6.2: expanded into docs/policy-exceptions.md.
+    homelab.ngoldack.de/policy-exceptions: |
+      - scope: images-pushed-before-signing
+        owner: platform
+        reason: >-
+          First-party digests pushed before the image-builds Jobs gained their
+          sign/attest steps carry no signature; they stay visible in the audit
+          report until each is rebuilt and re-pinned.
+        review: "2027-03-18"
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  # verifyImages is admission-only: signatures are fetched from the registry at
+  # webhook time and background scans cannot do that reliably.
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature-and-provenance
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "registry.ngoldack.de/*"
+          # Admission must see the digest, not a mutable tag: the Jobs sign the
+          # pushed digest, so a tag reference cannot be verified consistently.
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGwdpASnmpORT2EV2kzr2WaM9azxu
+                      a5JA7yNuqRJfydMV8Ka4rPvaDK6ENDMchkd5YBJAiLenuKNB6UFOXugZ9g==
+                      -----END PUBLIC KEY-----
+                    # Signed with --tlog-upload=false (no Rekor egress), so the
+                    # transparency-log check is opted out rather than failing.
+                    # (No recorded entry means the signature is not logged, not
+                    # wrong - accepting that has to be explicit.)
+                    rekor:
+                      ignoreTlog: true
+          attestations:
+            - name: slsa-provenance
+              type: slsaprovenance
+              attestors:
+                - count: 1
+                  entries:
+                    - keys:
+                        publicKeys: |-
+                          -----BEGIN PUBLIC KEY-----
+                          MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGwdpASnmpORT2EV2kzr2WaM9azxu
+                          a5JA7yNuqRJfydMV8Ka4rPvaDK6ENDMchkd5YBJAiLenuKNB6UFOXugZ9g==
+                          -----END PUBLIC KEY-----
+                      rekor:
+                        ignoreTlog: true

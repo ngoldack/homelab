@@ -41,6 +41,7 @@ spec:
       labels:
         app.kubernetes.io/name: egress-authorizer
     spec:
+      serviceAccountName: egress-authorizer
       # The authorizer NEVER touches the Kubernetes API (its identity comes
       # from the HMAC token, not from pod labels), so it mounts no SA token:
       # a compromised authorizer has no cluster credentials to abuse.

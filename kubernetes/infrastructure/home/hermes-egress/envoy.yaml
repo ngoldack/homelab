@@ -78,6 +78,17 @@ data:
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
                           transport_api_version: V3
+                          # The CheckRequest's source.address is the sandbox
+                          # pod IP (use_remote_address). The authorizer does
+                          # NOT look it up: identity comes only from the
+                          # verified HMAC token in Proxy-Authorization, and
+                          # the source address rides along for the violation
+                          # events' forensics. include_peer_certificate is an
+                          # ExtAuthz-level field (NOT an HttpService field —
+                          # misplacing it aborts Envoy's YAML→JSON conversion
+                          # at boot), and false is also the explicit intent:
+                          # no client TLS material rides the callout.
+                          include_peer_certificate: false
                           http_service:
                             server_uri:
                               uri: http://egress-authorizer.hermes-egress.svc.cluster.local:8080
@@ -110,20 +121,19 @@ data:
                                   - exact: x-egress-session
                                   - exact: x-egress-profile
                                   - exact: x-egress-kill
-                            # The CheckRequest's source.address is the sandbox
-                            # pod IP (use_remote_address). The authorizer does
-                            # NOT look it up: identity comes only from the
-                            # verified HMAC token in Proxy-Authorization, and
-                            # the source address rides along for the violation
-                            # events' forensics. Forwarding it here is what
-                            # makes that record possible.
-                            include_peer_certificate: false
                       # 2) The router: only requests the ext_authz filter
                       #    ALLOWED reach this point — a deny was already
                       #    answered by the authorizer's 403 and never routed.
                       #    Cluster selection lives in route_config below (the
                       #    egress-tunnel ORIGINAL_DST cluster, addressed per
                       #    connection by the host:port the CONNECT named).
+                      #    Router MUST be present and terminal: Envoy rejects
+                      #    an HTTP filter chain whose last filter is not the
+                      #    router ("non-terminal filter ... is the last
+                      #    filter in a http filter chain").
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
                     route_config:
                       # The forward-proxy route: every request (CONNECT or
                       # absolute-form HTTP) tunnels through the egress-tunnel
@@ -142,13 +152,16 @@ data:
                                 # Tunnels are long-lived: no per-request timeout
                                 # (the idle windows bound them instead).
                                 timeout: 0s
-                              # CONNECT upgrade: the forward-proxy path. The
-                              # authorizer saw and approved the request before
-                              # this upgrade engages.
-                              upgrade_configs:
-                                - upgrade_type: CONNECT
-                                  connect_config:
-                                    allow_post: false
+                                # CONNECT upgrade: the forward-proxy path.
+                                # upgrade_configs is a RouteAction field, so it
+                                # lives HERE inside `route:` — at the Route
+                                # level Envoy rejects it as unknown. The
+                                # authorizer saw and approved the request
+                                # before this upgrade engages.
+                                upgrade_configs:
+                                  - upgrade_type: CONNECT
+                                    connect_config:
+                                      allow_post: false
       clusters:
         # Upstream tunnel cluster for ALLOWED traffic: addressed by the
         # ORIGINAL destination (host:port the CONNECT asked for), so the proxy
@@ -223,6 +236,7 @@ spec:
         app.kubernetes.io/name: hermes-egress
         app.kubernetes.io/component: forward-proxy
     spec:
+      serviceAccountName: hermes-egress-proxy
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

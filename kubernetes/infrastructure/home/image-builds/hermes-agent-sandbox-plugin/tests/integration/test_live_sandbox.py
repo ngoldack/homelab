@@ -153,6 +153,101 @@ def test_file_roundtrip_through_authenticated_router(sandbox_env, config):
         assert resp.status in (200, 204)
 
 
+def test_stdin_roundtrip(sandbox_env):
+    """stdin_data reaches the guest process as real stdin (native WriteStdin
+    in this sandboxd build; the file fallback is for UNIMPLEMENTED builds).
+    Unit 2.2's acceptance: `cat` round-trips the payload back."""
+    _exec_gate()
+    payload = f"stdin-{uuid.uuid4().hex}\n"
+    result = sandbox_env.execute("cat", stdin_data=payload, timeout=30)
+    assert result["returncode"] == 0, result
+    assert result["output"] == payload, result
+
+
+def test_stdin_over_limit_is_rejected_before_guest(sandbox_env):
+    """The stdin size cap is enforced at the plugin boundary — a payload over
+    AGENT_SANDBOX_STDIN_MAX_BYTES never touches the wire."""
+    _exec_gate()
+    from hermes_agent_sandbox.errors import SandboxFileSizeError
+
+    limit = sandbox_env.config.stdin_max_bytes
+    with pytest.raises(SandboxFileSizeError):
+        sandbox_env.execute("cat", stdin_data=b"x" * (limit + 1), timeout=30)
+
+
+def test_background_process_streams_logs_and_stops(sandbox_env):
+    """Unit 2.5's contract against the real sandbox: a long-running process
+    survives the exec call, output accumulates, and stop() terminates it."""
+    _exec_gate()
+    registry = sandbox_env._processes  # ProcessRegistry, lazy-created
+    handle = registry.start(
+        "for i in 1 2 3 4 5; do echo tick-$i; sleep 1; done", start_timeout=30
+    )
+    assert handle.remote_process_id > 0, handle.as_dict()
+    assert handle.running
+
+    deadline = time.monotonic() + 30
+    logs = {}
+    while time.monotonic() < deadline:
+        logs = handle.logs(tail_bytes=4096)
+        if "tick-3" in logs.get("output", ""):
+            break
+        time.sleep(0.5)
+    assert "tick-1" in logs.get("output", ""), f"output never accumulated: {logs}"
+    assert "tick-2" in logs.get("output", ""), f"output truncated mid-stream: {logs}"
+
+    stopped = registry.stop(handle.id)
+    assert stopped.get("state") in ("stopped", "exited", "finished"), stopped
+    after = registry.get(handle.id)
+    assert not after.running, f"process still running after stop: {after.as_dict()}"
+
+
+def test_artifact_export_import_roundtrip(sandbox_env):
+    """Unit 2.3's core loop against the real sandbox: write a workspace file,
+    export it to the gateway artifact store, delete it in the guest, import it
+    back, and read the restored content."""
+    _exec_gate()
+    tag = uuid.uuid4().hex[:8]
+    remote_dir = f"/workspace/art-{tag}"
+    make = sandbox_env.execute(
+        f"mkdir -p {remote_dir} && printf 'payload-{tag}\\n' > {remote_dir}/data.txt",
+        timeout=30,
+    )
+    assert make["returncode"] == 0, make
+
+    store = sandbox_env.artifacts
+    ref = store.export(
+        sandbox_env._transport,
+        sandbox_env.config,
+        [remote_dir],
+        ttl_hours=1,
+        session=f"itest-{tag}",
+        kind="itest",
+        timeout=120,
+    )
+    try:
+        assert ref.bytes > 0, ref.as_dict()
+        assert ref.sha256, "export recorded no digest"
+        from pathlib import Path
+
+        stored = Path(store.data_path(ref.id)).read_bytes()
+        assert len(stored) == ref.bytes, "stored tarball size differs from the ref"
+        assert ref.sha256 == __import__("hashlib").sha256(stored).hexdigest()
+
+        # Guest copy is gone (import is the only road back).
+        rm = sandbox_env.execute(f"rm -rf {remote_dir}", timeout=30)
+        assert rm["returncode"] == 0, rm
+        restored = store.import_artifact(
+            sandbox_env._transport, sandbox_env.config, ref.id, timeout=120
+        )
+        assert restored.id == ref.id, restored.as_dict()
+        read = sandbox_env.execute(f"cat {remote_dir}/data.txt", timeout=30)
+        assert read["returncode"] == 0, read
+        assert read["output"].strip() == f"payload-{tag}", read
+    finally:
+        store._remove_files(ref.id)
+
+
 def test_claim_deleted_after_cleanup(sandbox_env, claims):
     from hermes_agent_sandbox.transport import OWNER_LABEL
 

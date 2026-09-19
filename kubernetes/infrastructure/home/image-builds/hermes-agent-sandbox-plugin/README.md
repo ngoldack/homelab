@@ -198,8 +198,13 @@ image, runtimeClass, namespace, serviceAccount, mounts or network policy.
   seeded router keypair, and a port-forwarded Router). Exec assertions are
   gated behind `AGENT_SANDBOX_IN_CLUSTER=1` (sandbox ingress admits only
   in-cluster namespaces on gRPC); the Phase-7 e2e runs them from the Hermes
-  namespace.
-- Not yet covered by a live run (cluster-dependent): Router PUT/DELETE against
-  the real sandboxd, native stdin/`WriteStdin` against the real sandboxd,
-  background-process streaming and signals, and artifact export/import through
-  `hack/hermes-e2e.sh` (planned as Unit 2.7).
+  namespace. The Unit-2.7 paths are codified as tests and will run the moment
+  a live cluster is reachable: Router PUT/GET/DELETE round-trip, native
+  stdin/`WriteStdin` round-trip + the size-cap rejection, background-process
+  streaming/logs/stop, and artifact export → guest wipe → import round-trip
+  (all in `test_live_sandbox.py`).
+- Not yet covered by a LIVE run (cluster unreachable from the authoring
+  workstation as of 2026-09-19; nothing above has executed against a real
+  sandboxd yet): the four Unit-2.7 paths listed in the bullet above, plus the
+  full `hack/hermes-e2e.sh` acceptance gate. The offline units cover the same
+  semantics against stubs; the live run is the remaining proof.

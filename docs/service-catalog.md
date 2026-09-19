@@ -115,6 +115,13 @@ placeholder for a guess.
 - **No Kubernetes API audit policy** exists (Talos default, nothing set in
   `tofu/home/`), so `pod-security.kubernetes.io/audit` labels and Kyverno
   PolicyReports are the only PSA drift signals.
+- **Hubble egress audit: not yet performed.** Unit 1.6's inventory half landed
+  (privileged/SA-token tightening, `security-baseline` policies), but the
+  `hubble observe --verdict DROPPED` sweep over representative namespaces was
+  not run, so no DROPPED-verdict findings are recorded here. Same gap as the
+  egress-e2e script's Hubble half (hack/hermes-egress-e2e.sh scenario 4): the
+  hubble CLI must be relayed in-cluster first. Until then, CNP correctness is
+  argued from the manifests, not observed from the dataplane — `[unverified]`.
 - **Kata guest observability** is a documented gap: host Tetragon sees the VMM,
   not guest syscalls — see the Kata blind-spot section of
   [`docs/architecture.md`](architecture.md).

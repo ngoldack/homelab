@@ -8,6 +8,10 @@ kind: ConfigMap
 metadata:
   name: authentik-outpost-config
   namespace: authentik
+# WARNING: nothing watches this ConfigMap for changes — after editing it you
+# MUST restart the consuming Deployments (kubectl rollout restart), or they keep
+# running the old config (2026-09-19: -local Service rename left the outpost,
+# both portal bridges and oidc-meta proxy on stale configs -> 502 / auth loop).
 data:
   AUTHENTIK_HOST: http://authentik-server.authentik.svc.cluster.local
   AUTHENTIK_HOST_BROWSER: https://authentik.ngoldack.de

@@ -28,6 +28,10 @@
 # (a response_body Lua rewrite replaces sub_filter; it works on any body, not
 # just exact JSON spacing).
 ---
+# WARNING: nothing watches this ConfigMap for changes — after editing it you
+# MUST restart the consuming Deployments (kubectl rollout restart), or they keep
+# running the old config (2026-09-19: -local Service rename left the outpost,
+# both portal bridges and oidc-meta proxy on stale configs -> 502 / auth loop).
 apiVersion: v1
 kind: ConfigMap
 metadata:

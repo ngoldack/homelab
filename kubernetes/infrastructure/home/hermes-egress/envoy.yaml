@@ -34,7 +34,12 @@ data:
     admin:
       address:
         socket_address:
-          address: 127.0.0.1
+          # Pod IP, not loopback: the kubelet readiness/liveness probes target
+          # the pod IP (:9901); a loopback-only admin listener makes every
+          # probe "connection refused" and liveness kills the healthy proxy in
+          # a loop. Scope stays pod-local (Cilium default-deny + the namespace
+          # allowlist decide who may actually connect).
+          address: 0.0.0.0
           port_value: 9901
     static_resources:
       listeners:

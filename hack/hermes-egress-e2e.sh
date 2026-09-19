@@ -61,6 +61,17 @@ sleep 2
 
 cleanup() {
   test -f "$PF_PID_OUT" && while read -r pid; do kill "$pid" 2>/dev/null; done <"$PF_PID_OUT"
+  # Drop every throwaway claim this run created (each one owns a Kata sandbox
+  # that otherwise squats the single Kata node's CPU — leaked claims starved
+  # the warm pool on 2026-09-19 and made the NEXT run fail with
+  # "warm pool hermes-go never had a ready replica").
+  for name in $($K -n hermes-sandbox get sandboxclaim -o name \
+      --request-timeout=10s 2>/dev/null | sed 's|sandboxclaim.extensions.agents.x-k8s.io/||'); do
+    case "$name" in
+      e2e-claim-*) $K -n hermes-sandbox delete sandboxclaim "$name" \
+        --ignore-not-found --request-timeout=10s >/dev/null 2>&1 || true ;;
+    esac
+  done
 }
 trap 'cleanup; rm -rf "$TMPDIR_OUT"' EXIT
 

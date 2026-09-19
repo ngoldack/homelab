@@ -96,8 +96,45 @@ Verification after each step: apiserver healthy, all nodes Ready, a pod
 restart succeeds, a fresh etcd snapshot decrypts, and alert delivery still
 arrives at the external destination.
 
+## Known failure mode: control-plane VM reboots (open, 2026-09-19)
+
+`talos-bno-yij` (the sole control plane, `cp-main`) rebooted **three times in
+one morning** — approximately 09:13, 10:21 and 11:56 UTC — with the worker VMs
+on the same Proxmox host unaffected (`talos-3bi-1fl` ~2.5 days uptime,
+`talos-919-w9u` ~6.5 days). Observed signature and blast radius:
+
+- Each reboot produces a Kubernetes `Rebooted` node event and a window where
+  the API refuses connections: in-cluster clients get `connect: connection
+  refused` on `172.21.0.1:443`, workstation clients a timeout on
+  `10.30.0.10:6443`.
+- Guest side shows no cause: no kernel panic, no OOM kill, no
+  `MemoryPressure`, ~4 GiB free of 8 GiB.
+- **Cascade:** each API blip makes the CloudNativePG operator exit(1) at
+  startup (`failed to get server groups ... connection refused`; 91 restarts
+  accumulated), which flips the `cnpg-operator` Flux Kustomization
+  not-ready and blocks its dependents (`hindsight`, `cnpg-restore-drills`)
+  for minutes. A deploy that lands in that window stalls.
+
+Triage (host access required — the Proxmox API `https://10.20.10.21:8006` is
+not reachable from the workstation while its VPN is up):
+
+```sh
+# on pmx-main
+journalctl -u pvedaemon -u pveproxy -u qmeventd --since today | grep -i 'VM 1'
+grep -i watchdog /etc/pve/qemu-server/<vmid>.conf   # watchdog device?
+cat /etc/pve/jobs.cfg                               # backup job in stop mode?
+dmesg -T | grep -iE 'oom|killed process'            # host memory pressure
+```
+
+Until the host cause is fixed, treat control-plane availability as degraded:
+expect ~hourly API interruptions, and re-run a stalled `flux reconcile` /
+`task check` after the node returns.
+
 ## Open items
 
+- The control-plane VM reboot cause (see the failure-mode section above):
+  needs the Proxmox host's task log/journal, the VM's watchdog config and the
+  backup-job mode — not obtainable from inside the cluster.
 - The first live drill run, and its measured duration, must be recorded here —
   the table above says "designed" until then.
 - The control-plane rebuild rehearsal (rebuild `cp-main`, restore etcd,

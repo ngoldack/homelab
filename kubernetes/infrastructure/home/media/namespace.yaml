@@ -1,4 +1,4 @@
-# The media stack: Jellyfin (+ Jellyseerr) for playback/requests, and the
+# The media stack: Jellyfin (+ Seerr) for playback/requests, and the
 # *arr download automation chain (Prowlarr indexers -> Sonarr/Radarr ->
 # SABnzbd) with Recyclarr keeping the quality profiles in sync.
 #

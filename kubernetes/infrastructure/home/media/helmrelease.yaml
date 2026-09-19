@@ -1,10 +1,13 @@
-# The media stack, all on one app-template release (releaseName `media`, hence
-# Services `media-jellyfin`, `media-sonarr`, ... and the HTTPRoute backends).
+# The media stack on one app-template release (releaseName `media`, hence
+# Services `media-jellyfin`, `media-sonarr`, ... and the HTTPRoute backends),
+# except the request UI: Seerr ships its own upstream chart + release
+# (seerr.yaml) instead of a controller/service entry here.
 #
 # Two pods families live here:
 #
-#   playback   jellyfin (+ jellyseerr for requests) — LAN-resident media
-#              servers, no VLAN attachment, reached on the LAN VIP.
+#   playback   jellyfin (+ Seerr for requests, its own release above) —
+#              LAN-resident media server, no VLAN attachment, reached on the
+#              LAN VIP.
 #   automation sabnzbd, prowlarr, sonarr, radarr, bazarr — the download chain.
 #              Every one of these carries a macvlan interface on VLAN 2080
 #              (UniFi "Obfuscated", auto-VPN-routed) so indexer queries and
@@ -111,55 +114,6 @@ spec:
                 spec:
                   httpGet:
                     path: /health
-                    port: http
-                  periodSeconds: 10
-                  timeoutSeconds: 10
-                  failureThreshold: 30
-      jellyseerr:
-        type: deployment
-        containers:
-          main:
-            image:
-              repository: fallenbagel/jellyseerr
-              tag: "2.7.3"
-            env:
-              TZ: Europe/Berlin
-            ports:
-              - name: http
-                containerPort: 5055
-            resources:
-              requests:
-                cpu: 100m
-                memory: 256Mi
-              limits:
-                memory: 1Gi
-            probes:
-              liveness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /api/v1/status
-                    port: http
-                  periodSeconds: 15
-                  timeoutSeconds: 10
-                  failureThreshold: 6
-              readiness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /api/v1/status
-                    port: http
-                  periodSeconds: 15
-                  timeoutSeconds: 10
-                  failureThreshold: 6
-              startup:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /api/v1/status
                     port: http
                   periodSeconds: 10
                   timeoutSeconds: 10
@@ -644,11 +598,6 @@ spec:
         ports:
           http:
             port: 8096
-      jellyseerr:
-        controller: jellyseerr
-        ports:
-          http:
-            port: 5055
       sabnzbd:
         controller: sabnzbd
         ports:
@@ -744,13 +693,6 @@ spec:
           jellyfin:
             main:
               - path: /dev/dri
-      jellyseerr-config:
-        type: persistentVolumeClaim
-        existingClaim: jellyseerr-config
-        advancedMounts:
-          jellyseerr:
-            main:
-              - path: /config
       sabnzbd-config:
         type: persistentVolumeClaim
         existingClaim: sabnzbd-config

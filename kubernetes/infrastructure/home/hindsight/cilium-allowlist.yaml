@@ -69,6 +69,12 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
 ---
 # The control-plane UI. Reachable only through the authentik proxy outpost
 # (seed.yaml: hindsight-ui-proxy). The outpost is configured with the app's
@@ -174,6 +180,12 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
     - toEntities:
         - world
       toPorts:

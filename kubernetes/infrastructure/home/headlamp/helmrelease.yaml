@@ -80,6 +80,12 @@ spec:
           - name: headlamp_keda
             source: https://artifacthub.io/packages/headlamp/headlamp-plugins/headlamp_keda
             version: 0.1.2
+          - name: headlamp_ai_assistant
+            source: https://artifacthub.io/packages/headlamp/headlamp-plugins/headlamp_ai_assistant
+            version: 0.4.0-alpha
+          - name: headlamp-click-ops
+            source: https://artifacthub.io/packages/headlamp/headlamp-click-ops/headlamp-click-ops
+            version: 0.4.0
         installOptions:
           parallel: true
           maxConcurrent: 3

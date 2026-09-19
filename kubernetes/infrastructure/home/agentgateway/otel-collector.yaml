@@ -4,6 +4,13 @@
 # The collector exposes OTLP traces at grpc:4317 and http:4318, sends traces
 # to Langfuse (langfuse-web's /api/public/otel), and exposes metrics on 8888
 # for scraping.
+#
+# Its otlphttp sending_queue is backed by the filestorage extension on the
+# otel-collector-queue PVC (otel-collector-queue-pvc.yaml), so a Langfuse
+# outage or a collector restart spools spans on disk instead of dropping them.
+# That single-writer bbolt queue is why the release is pinned to one replica
+# with maxSurge: 0 — a rollout must never run two collectors on the same
+# ReadWriteOnce queue directory.
 # LANGFUSE_AUTH is base64("<public key>:<secret key>"), the Basic credential
 # for Langfuse's OTLP intake; the pair lives in langfuse-otel.sops.yaml
 # (stringData.PUBLIC_KEY / SECRET_KEY / AUTH), never in cleartext here.
@@ -47,6 +54,18 @@ spec:
       interval: 1h
   values:
     mode: deployment
+    # One replica, and a rollout that never overlaps two collectors: the
+    # exporter's filestorage queue (bbolt) has exactly one writer, and the queue
+    # volume is ReadWriteOnce. maxSurge: 0 means the old pod is gone before the
+    # new one starts (plain `strategy: Recreate` cannot be used here: the live
+    # Deployment was created with a rollingUpdate block, which server-side apply
+    # would leave in place next to type: Recreate -> Forbidden).
+    replicaCount: 1
+    rollout:
+      strategy: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
     image:
       repository: otel/opentelemetry-collector-contrib
     command:
@@ -57,6 +76,19 @@ spec:
         memory: 64Mi
       limits:
         memory: 256Mi
+    # The image runs as uid 10001; the TrueNAS NFS queue volume is root-owned, so
+    # the queue directory is group-owned by the collector's uid (fsGroupChangePolicy
+    # keeps the recursive chown off the hot path on restart).
+    podSecurityContext:
+      fsGroup: 10001
+      fsGroupChangePolicy: OnRootMismatch
+    extraVolumes:
+      - name: otelcol-queue
+        persistentVolumeClaim:
+          claimName: otel-collector-queue
+    extraVolumeMounts:
+      - name: otelcol-queue
+        mountPath: /var/lib/otelcol/queue
     extraEnvs:
       - name: LANGFUSE_AUTH
         valueFrom:
@@ -71,6 +103,23 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
+      extensions:
+        # Persistent queue backing: spans that cannot be exported right now
+        # (Langfuse restart, network blip, rolling update of langfuse-web) wait
+        # on disk instead of living only in the exporter's memory queue.
+        file_storage:
+          directory: /var/lib/otelcol/queue
+          timeout: 10s
+          create_directory: true
+          directory_permissions: "0770"
+          compaction:
+            # The persistent-queue workload is exactly the one the contrib docs
+            # name for rebound compaction: the bbolt file grows while Langfuse is
+            # unreachable and must give the space back once it drains.
+            on_rebound: true
+            on_start: true
+            directory: /var/lib/otelcol/queue/compaction
+            cleanup_on_start: true
       exporters:
         otlphttp:
           endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
@@ -86,7 +135,11 @@ spec:
             enabled: true
           sending_queue:
             enabled: true
+            # On-disk queue, so a collector restart (or a rollout) resumes the
+            # pending spans instead of dropping them.
+            storage: file_storage
       service:
+        extensions: [file_storage, health_check]
         pipelines:
           traces:
             receivers: [otlp]

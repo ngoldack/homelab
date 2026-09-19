@@ -30,7 +30,12 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  timeout: 10m
+  # 20m, not 10m: a worker boots in 2-5 min (sentence_transformers model
+  # download), and two simultaneous worker restarts under the 10m budget
+  # marked the install/upgrade stalled — the remediation then DELETED the
+  # sts before the workers ever finished, and every retry churned the same
+  # way (2026-09-18 outage: repeated install-fail/delete cycles from 17:00).
+  timeout: 20m
   chart:
     spec:
       chart: hindsight
@@ -44,6 +49,14 @@ spec:
   install:
     createNamespace: false
     remediation:
+      # 3, not 0: a failed install wait must not uninstall the release
+      # (deleting the sts mid-boot was the 17:00-19:00 churn engine, and
+      # the uninstall is what the final failed retry would do). But 0 also
+      # marks the FIRST failed wait terminal — it latched Stalled/
+      # RetriesExceeded at 18:17 and blocked the subsequent installs that
+      # empty release storage should have allowed. 3 attempts lets helm
+      # re-evaluate a transient stall; the new 20m timeout (chart boot
+      # worst case) is the actual fix for the mid-boot failure.
       retries: 3
   upgrade:
     remediation:
@@ -79,35 +92,28 @@ spec:
         limits:
           cpu: 2
           memory: 4Gi
-      env: &llm-env
+      env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # OpenRouter DIRECT (2026-09-16): the in-cluster Envoy AI Gateway's
-        # controller is crash-looping and its routes 500, so hindsight talks
-        # to OpenRouter alone until the gateway is healthy again.
-        # HINDSIGHT_API_LLM_API_KEY in secret.sops.yaml must therefore be a
-        # dedicated OpenRouter key (sk-or-v1-…), NOT any gateway JWT.
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
-        # "~deepseek/deepseek-v4-flash-latest" is OpenRouter's always-current
-        # DeepSeek V4 Flash alias — user-confirmed 2026-09-16 (the bare ID
-        # deepseek/deepseek-v4-latest does not exist on OpenRouter; the "~"
-        # prefix is mandatory for the always-latest aliases). Reasoning stays
-        # low + STRICT_SCHEMA so extraction remains fast and strictly JSON.
-        #
-        # The Envoy AI Gateway (aigateway) that this block used to point at is
-        # retired 2026-09-17; hindsight stays on OpenRouter direct per user
-        # decision. agentgateway (the replacement, LAN 10.30.0.203) could take
-        # this base_url at MODEL "chat" + an aigateway-oidc JWT later — not
-        # wired now.
+        # agentgateway synthetic OVER (2026-09-18): telemetry-tracer OpenAI-compatible API.
+        # The retryable synthetic model hf/openai/gpt-oss-120b is pulled from the
+        # agentgateway backend named synthetic (api.synthetic.new), verified on
+        # 2026-09-16. The base URL stays OpenAI-compatible (/v1/...), the model
+        # name matches the backend's openai.model stanza.
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
+        # Reasoning LOW + STRICT_SCHEMA so extraction is fast and JSON-only.
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
-        # Extraction bundles a large system schema + chunk; upstream first-token
-        # latency plus 4k max_tokens generation busts the chart-default ~60s
-        # budget on a cold gpt-5-nano slot. Raise generously; connect is still
-        # capped so a dead route fails fast.
+        # Extraction bundles a large system schema + chunk; raise timeout.
         HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
-        # Audit logging off by default; enable so the ingest paths are auditable.
+        # Audit logging enabled so ingest paths are visible.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         # Retention (verified against hindsight_api/config.py in the shipped
         # image: these feed the hourly maintenance sweep in
@@ -123,6 +129,8 @@ spec:
         # so the values are repeated there on purpose.
         HINDSIGHT_API_OPERATION_RETENTION_DAYS: "14"
         HINDSIGHT_API_AUDIT_LOG_RETENTION_DAYS: "14"
+        HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"
+        HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT: "medium"
     worker:
       # Dedicated workers (not the API's internal one): retain/consolidation
       # LLM chains are long and must not starve recall latency on the API pod.
@@ -134,17 +142,64 @@ spec:
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
       replicaCount: 2
-      # Conservative per-worker resources so 2 replicas (2000m limits / 400m
-      # requests total) fit on the shared home node without starving it. The
-      # default 2000m limit x2 is already near the node's ceiling - keep the
-      # burst capped at 1000m.
+      # Memory raised three times on 2026-09-18. Evidence, not estimation —
+      # live VmRSS of a booting worker, sampled every 2s:
+      #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)
+      #   then 1.93GB -> 3.78GB -> OOMKilled (5Gi) within 8s of the polling
+      #   loop starting, every restart, LLM verification already passed.
+      # So base RSS + local models is only ~300MB and is NOT the driver; the
+      # claim path adds ~3.5GB in seconds. Mechanism, read from the shipped
+      # source: claim_tasks selects `task_payload` per slot, then each
+      # claimed retain folds up to DEFAULT_MAX_FOLD_PEERS=16 peers, which
+      # fetch_foldable_retain_peers also loads WITH task_payload. The fold's
+      # only bound is a TOKEN budget (RETAIN_BATCH_TOKENS, 10k ~ 40KB text),
+      # applied after the JSON is already in memory; RETAIN_MEMORY_BUDGET_MB
+      # covers extraction state (memory_budget.py), not claim hydration.
+      # Nothing bounds bytes at claim time. The backlog holds retains of
+      # ~20MB each (161MB total over 9 rows), and a fold of those parses to
+      # GBs. 9Gi absorbs one cycle; nodes have the headroom (48Gi allocatable
+      # on talos-919-w9u). MAX_SLOTS=4 halves the cycle's claim width.
+      # The durable fix is upstream: producers submit 20MB retains.
       resources:
         requests:
           cpu: 200m
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: 1000m
-          memory: 2Gi
+          memory: 9Gi
+      # Probes widened from the chart default (3x10s) to 12x10s. The
+      # 2026-09-18 kill events read "Liveness probe failed: /health/live:
+      # context deadline exceeded" — the request TIMED OUT rather than the
+      # failure count running out — while the app's loop watchdog reported only
+      # brief (~1s) stalls in the same window, and a direct in-pod curl answers
+      # 200 in <1ms. So the endpoint is healthy but intermittently too slow to
+      # answer within 5s, and the chart's 3-miss budget turns that into a
+      # restart mid-retain, requeuing the operation onto the other replica
+      # (observed alternating between worker-0 and worker-1).
+      # The load behind it: one 24.6M-token document (claimed 20:28:25,
+      # "Processing sub-batch 1" 47s later, then every extraction call hitting
+      # HTTP 429 from api.synthetic.new) fans into thousands of sub-calls.
+      # A wider budget lets a worker that is genuinely progressing keep its
+      # claimed work; verified: no liveness kills for the 15+ min after the
+      # 12x10s config rolled, both replicas steady.
+      # Durable fixes are producer-side (bank unikraft submitted ~100MB of
+      # text in one retain) and upstream (the 429s are the model provider's).
+      livenessProbe:
+        httpGet:
+          path: /health/live
+          port: 8889
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 12
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8889
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 12
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact
@@ -166,25 +221,43 @@ spec:
       # batch/poll tunables.
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # OpenRouter direct, same model as the api (see the api env block for
-        # rationale); written out in full because a YAML anchor cannot be
-        # appended to.
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: "~deepseek/deepseek-v4-flash-latest"
+        # agentgateway synthetic OVER (2026-09-18): same model as the api.
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
-        # Tasks claimed per poll cycle (chart default 10). With 3 workers we
-        # raise the claim batch so each worker takes bigger chunks per poll.
+        # Tasks claimed per poll cycle to match 2 replica balance.
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
-        # Audit logging is disabled by default — roll it on for the worker too.
+        # Retain/claim bounds. The claim query selects `task_payload` per
+        # slot and each claimed retain folds up to 16 peers, also fetching
+        # `task_payload` — no byte bound at claim time (see the memory note
+        # on the worker resources above). MAX_SLOTS=4 narrows the cycle's
+        # claim width; RETAIN_MEMORY_BUDGET_MB=96 bounds extraction state
+        # (memory_budget.py), which is a separate pool.
+        HINDSIGHT_API_WORKER_MAX_SLOTS: "4"
+        HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
+        # RETAIN_BATCH_TOKENS stays at the 10k default on purpose: it keeps
+        # each extraction prompt far inside gpt-oss-120b's context window. The
+        # 24,645,631-token document behind the 2026-09-18 incident (bank
+        # unikraft submitted ~100MB of text in one retain) is a producer defect
+        # to fix at the source, not something to widen batches for.
+        # Audit logging enabled for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         # Same retention window as the api (the chart does not merge api.env
         # into the worker — the env above is deliberately written out in
         # full, not anchored — and the maintenance sweep runs per process).
         HINDSIGHT_API_OPERATION_RETENTION_DAYS: "14"
         HINDSIGHT_API_AUDIT_LOG_RETENTION_DAYS: "14"
+        HINDSIGHT_API_RETAIN_LLM_REASONING_EFFORT: "low"
+        HINDSIGHT_API_CONSOLIDATION_LLM_REASONING_EFFORT: "medium"
     controlPlane:
       enabled: true
     nodeSelector:

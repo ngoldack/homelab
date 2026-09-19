@@ -526,10 +526,12 @@ func TestColdStartNoRestoreAndSaveAfterEOF(t *testing.T) {
 // for: restoring on a warm slot is not only useless (the file restore is inert on
 // this build) but actively destroys the in-process cache, 130 ms -> 44 s of prompt
 // processing. Two identical requests against a server whose task counter only ever
-// grows must therefore touch the slot exactly zero times beyond the save.
+// grows must therefore touch the slot exactly zero times beyond the save. The
+// restart gating lives in restore mode auto; the shipped default off skips the
+// probe entirely and is covered by TestRestoreModeOffSkipsProbeAndRestore.
 func TestWarmSlotSkipsRestore(t *testing.T) {
 	st := newStubUpstream(t)
-	_, srv := newTestBroker(t, st, nil)
+	_, srv := newTestBroker(t, st, func(c *config) { c.restoreMode = restoreModeAuto })
 
 	postOK(t, srv, "/v1/chat/completions", "warm-gate", chatRequestBody)
 	name := waitForSave(t, st)
@@ -554,7 +556,7 @@ func TestWarmSlotSkipsRestore(t *testing.T) {
 // while the slot file is still on disk.
 func TestRestoreOnceAfterServerRestart(t *testing.T) {
 	st := newStubUpstream(t)
-	_, srv := newTestBroker(t, st, nil)
+	_, srv := newTestBroker(t, st, func(c *config) { c.restoreMode = restoreModeAuto })
 
 	postOK(t, srv, "/v1/chat/completions", "restart-gate", chatRequestBody)
 	name := waitForSave(t, st)
@@ -584,6 +586,96 @@ func TestRestoreOnceAfterServerRestart(t *testing.T) {
 	mustHaveMetricLine(t, metricsBody(t, srv), "kv_broker_server_restarts_total 1")
 }
 
+// TestRestoreModeOffSkipsProbeAndRestore pins the shipped default: restore mode
+// off must not touch the slot endpoints beyond saving — no restore, no erase,
+// and above all no /slots probe, because that probe is per-request overhead the
+// serving path should not pay while restore is disabled. The stub's /slots
+// handler is not part of the call log, so the probe is asserted through its own
+// counter.
+func TestRestoreModeOffSkipsProbeAndRestore(t *testing.T) {
+	st := newStubUpstream(t)
+	_, srv := newTestBroker(t, st, nil)
+
+	// Produce a real slot file first: off must leave it in place and keep
+	// saving, which is what makes flipping the mode later useful.
+	postOK(t, srv, "/v1/chat/completions", "off-mode", chatRequestBody)
+	name := waitForSave(t, st)
+	if _, err := os.Stat(filepath.Join(st.slotDir, name)); err != nil {
+		t.Fatalf("slot file not written in off mode: %v", err)
+	}
+
+	st.reset()
+	postOK(t, srv, "/v1/chat/completions", "off-mode", chatRequestBody)
+	waitForCalls(t, st, []string{"infer", "infer:body-written", actionSave + ":" + name})
+	if got := countAction(st.callLog(), actionRestore); got != 0 {
+		t.Fatalf("off mode restored %d time(s): %v", got, st.callLog())
+	}
+	if got := countAction(st.callLog(), actionErase); got != 0 {
+		t.Fatalf("off mode erased %d time(s): %v", got, st.callLog())
+	}
+	if got := st.slotListCount(); got != 0 {
+		t.Fatalf("off mode probed /slots %d time(s), want 0", got)
+	}
+	body := metricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_warm"} 0`)
+	mustHaveMetricLine(t, body, "kv_broker_server_restarts_total 0")
+}
+
+// TestRestoreModeAlwaysRestoresExistingFile covers the opt-in brute-force mode:
+// every request restores the slot file if it exists (no restart detection, no
+// probe), the restore failure falls back to erase + remove + cold serve like in
+// auto mode, and a missing file is skipped rather than restored.
+func TestRestoreModeAlwaysRestoresExistingFile(t *testing.T) {
+	st := newStubUpstream(t)
+	_, srv := newTestBroker(t, st, func(c *config) { c.restoreMode = restoreModeAlways })
+
+	// No file yet: nothing to restore over, the live cache is the only one.
+	postOK(t, srv, "/v1/chat/completions", "always-mode", chatRequestBody)
+	name := waitForSave(t, st)
+	waitForCalls(t, st, []string{"infer", "infer:body-written", actionSave + ":" + name})
+	if got := st.slotListCount(); got != 0 {
+		t.Fatalf("always mode probed /slots %d time(s), want 0", got)
+	}
+
+	// The file exists now: restore before every forward, probe still skipped.
+	st.reset()
+	postOK(t, srv, "/v1/chat/completions", "always-mode", chatRequestBody)
+	waitForCalls(t, st, []string{
+		actionRestore + ":" + name,
+		"infer",
+		"infer:body-written",
+		actionSave + ":" + name,
+	})
+
+	// A failing restore serves cold from a clean slate: erase, unlink, infer.
+	st.configure(func(s *stubUpstream) { s.restoreFail = true })
+	st.reset()
+	postOK(t, srv, "/v1/chat/completions", "always-mode", chatRequestBody)
+	waitForCalls(t, st, []string{
+		actionRestore + ":" + name,
+		actionErase + ":" + name,
+		"infer",
+		"infer:body-written",
+		actionSave + ":" + name,
+	})
+	// The failed restore unlinked the file; the cold serve then re-saved it, so
+	// what is on disk now is the freshly saved state, not the restored one.
+	info, err := os.Stat(filepath.Join(st.slotDir, name))
+	if err != nil {
+		t.Fatalf("slot file not rewritten after the cold serve: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("re-saved slot file %s is empty", name)
+	}
+
+	body := metricsBody(t, srv)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_no_file"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="ok"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="error"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_warm"} 0`)
+	mustHaveMetricLine(t, body, "kv_broker_server_restarts_total 0")
+}
+
 // TestMetricsEndpoint pins the whole exposition contract: the family set and its
 // order, HELP/TYPE presence, the histogram bucket layout, and the counter values a
 // completed and a failed request leave behind.
@@ -607,7 +699,7 @@ func TestMetricsEndpoint(t *testing.T) {
 			t.Fatalf("save histogram has no le=%s bucket:\n%s", le, body)
 		}
 	}
-	mustHaveMetricLine(t, body, `kv_broker_build_info{version="3"} 1`)
+	mustHaveMetricLine(t, body, `kv_broker_build_info{version="4"} 1`)
 	mustHaveMetricLine(t, body, "kv_broker_slot_files 0")
 
 	// A 2xx completion saves its slot: the request and the save are both ok, and
@@ -615,9 +707,10 @@ func TestMetricsEndpoint(t *testing.T) {
 	postOK(t, srv, "/v1/chat/completions", "metrics-session", chatRequestBody)
 	waitForSave(t, st)
 	body = settledMetricsBody(t, srv)
-	mustHaveMetricLine(t, body, `kv_broker_save_total{result="ok"} 1`)
+	// Restore mode off (the shipped default) never runs the /slots probe, so
+	// the restore counter stays at zero and no skipped_warm series moves.
+	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_warm"} 0`)
 	mustHaveMetricLine(t, body, `kv_broker_requests_total{handler="chat_completions",result="ok"} 1`)
-	mustHaveMetricLine(t, body, `kv_broker_restore_total{result="skipped_warm"} 1`)
 	mustHaveMetricLine(t, body, "kv_broker_save_seconds_count 1")
 	mustHaveMetricLine(t, body, `kv_broker_save_seconds_bucket{le="+Inf"} 1`)
 
@@ -664,7 +757,7 @@ func TestRestoreFailureErasesAndServesCold(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := newStubUpstream(t)
-			_, srv := newTestBroker(t, st, nil)
+			_, srv := newTestBroker(t, st, func(c *config) { c.restoreMode = restoreModeAuto })
 
 			postOK(t, srv, "/v1/chat/completions", "restore-session", chatRequestBody)
 			name := waitForSave(t, st)

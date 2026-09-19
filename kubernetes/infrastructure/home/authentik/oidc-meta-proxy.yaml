@@ -78,28 +78,29 @@ data:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                           default_source_code:
                             inline_string: |
-        local flags = env.streamInfo():dynamicMetadata():get(
-          "envoy.filters.http.lua", "oidc_meta")
-        if not flags then
-          env.streamInfo():dynamicMetadata():set(
-            "envoy.filters.http.lua", "oidc_meta",
-            {target = "proxy"})
-        local h = handle:headers()
-        h:remove("accept-encoding")
-        end
+                              local flags = env.streamInfo():dynamicMetadata():get(
+                                "envoy.filters.http.lua", "oidc_meta")
+                              if not flags then
+                                env.streamInfo():dynamicMetadata():set(
+                                  "envoy.filters.http.lua", "oidc_meta",
+                                  {target = "proxy"})
+                                local h = handle:headers()
+                                h:remove("accept-encoding")
+                              end
                               function envoy_on_response(handle)
                                 local m = env.streamInfo():dynamicMetadata():get("envoy.filters.http.lua")
                                 local flag = m and m.oidc_meta or false
                                 if not flag then
                                   return
                                 end
-        if handle:headers():get(":status") == "200"
-          and string.find(
-            handle:headers():get(":path") or "", "openid-configuration", 1, true)
+                                if handle:headers():get(":status") == "200"
+                                  and string.find(
+                                    handle:headers():get(":path") or "", "openid-configuration", 1, true)
+                                then
                                   local body = handle:body():getBytes(0, handle:body():length())
-          body = string.gsub(body,
-            "https://authentik%.ngoldack%.de/application/o/headlamp/jwks/",
-            "http://oidc-meta.authentik.svc.cluster.local/jwks/headlamp")
+                                  body = string.gsub(body,
+                                    "https://authentik%.ngoldack%.de/application/o/headlamp/jwks/",
+                                    "http://oidc-meta.authentik.svc.cluster.local/jwks/headlamp")
                                   handle:body():setBytes(body)
                                 end
                               end

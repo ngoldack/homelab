@@ -21,6 +21,9 @@ spec:
 # Seerr replaces the previous request app (Jellyseerr) and ships its own
 # (StatefulSet + own config PVC), so it is deployed as its own release rather
 # than hand-declared on app-template like the *arr chain. OCI from GHCR.
+# Flux appends the chart name to an OCI repo URL (same as `media` +
+# `app-template` above), so the URL is the parent repo and `chart: seerr-chart`
+# in seerr.yaml resolves to ghcr.io/seerr-team/seerr/seerr-chart.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
@@ -29,4 +32,4 @@ metadata:
 spec:
   type: oci
   interval: 2h
-  url: oci://ghcr.io/seerr-team/seerr/seerr-chart
+  url: oci://ghcr.io/seerr-team/seerr

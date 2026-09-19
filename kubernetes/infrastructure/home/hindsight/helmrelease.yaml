@@ -1,15 +1,14 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: OpenRouter DIRECT (2026-09-19) — model openai/gpt-oss-120b at low
-# reasoning effort, strictly JSON via STRICT_SCHEMA. Switched from the
-# in-cluster agentgateway synthetic backend (api.synthetic.new), which began
-# answering 429 to every extraction; the same model is served by OpenRouter
-# over the plain OpenAI-compatible surface, so only the base URL, the model
-# id and the key changed (see the api env block for the details and the
-# shared-key note). Earlier history: the 3-member failover chain (incl. the
-# local qwen3-27b leg) made startup verification cross the chart's 30s
-# liveness budget, crash-looping the API pod mid-boot — removed 2026-09-13.
+# LLM: OpenRouter DIRECT (2026-09-16) — single model
+# ~deepseek/deepseek-v4-flash-latest at low reasoning effort, strictly JSON
+# via STRICT_SCHEMA. The prior 3-member failover chain (incl. the local
+# qwen3-27b leg) made startup verification cross the chart's 30s liveness
+# budget, crash-looping the API pod mid-boot — removed 2026-09-13. The
+# in-cluster Envoy AI Gateway hop (model "chat") was removed 2026-09-16
+# because the aigateway controller is crash-looping and its routes 500;
+# restore it once the gateway is healthy (see the api env block).
 #
 # Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
 # ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and
@@ -107,20 +106,20 @@ spec:
           memory: 9Gi
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # OpenRouter DIRECT (2026-09-19) — the agentgateway synthetic backend
-        # (api.synthetic.new via /v1/key/synthetic-gpt-oss) started answering
-        # 429 to every extraction, stalling retains. OpenRouter serves the
-        # SAME model (openai/gpt-oss-120b, reasoning low) over the plain
-        # OpenAI-compatible surface, so the provider stays `openai`.
-        # HINDSIGHT_API_LLM_API_KEY now carries the sk-or-v1 key
-        # (secret.sops.yaml, shared with agentgateway/openrouter-key — the
-        # dedicated-key isolation is intentionally relaxed here; split it
-        # again if the gateway is restored). The X-Api-Key
-        # HINDSIGHT_API_LLM_DEFAULT_HEADERS entry was gateway-only and is
-        # removed with it (OpenRouter authenticates by Authorization: Bearer).
+        # agentgateway synthetic OVER (2026-09-18): telemetry-tracer OpenAI-compatible API.
+        # The retryable synthetic model hf/openai/gpt-oss-120b is pulled from the
+        # agentgateway backend named synthetic (api.synthetic.new), verified on
+        # 2026-09-16. The base URL stays OpenAI-compatible (/v1/...), the model
+        # name matches the backend's openai.model stanza.
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
         # Reasoning LOW + STRICT_SCHEMA so extraction is fast and JSON-only.
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-120b
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         # Extraction bundles a large system schema + chunk; raise timeout.
@@ -234,11 +233,15 @@ spec:
       # batch/poll tunables.
       env:
         HINDSIGHT_API_LLM_PROVIDER: openai
-        # OpenRouter DIRECT (2026-09-19) — same switch as the api block above:
-        # the synthetic backend 429'd every extraction; same model, plain
-        # OpenAI-compatible surface, sk-or-v1 key from secret.sops.yaml.
-        HINDSIGHT_API_LLM_BASE_URL: https://openrouter.ai/api/v1
-        HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-120b
+        # agentgateway synthetic OVER (2026-09-18): same model as the api.
+        HINDSIGHT_API_LLM_BASE_URL: http://agentgateway.agentgateway.svc.cluster.local:80/v1/key/synthetic-gpt-oss
+        HINDSIGHT_API_LLM_MODEL: hf:openai/gpt-oss-120b
+        # Static-key auth (X-Api-Key) via the /v1/key/* route scope: no JWT
+        # expiry to rotate. HINDSIGHT_API_LLM_DEFAULT_HEADERS lives in
+        # secret.sops.yaml (envFrom injects every key into the pod): the
+        # gateway policy reads the key from X-Api-Key; the SDK's own
+        # Authorization: Bearer header is harmless on this backend (verified
+        # live: both headers together do not clobber the upstream credential).
         HINDSIGHT_API_LLM_REASONING_EFFORT: "low"
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"

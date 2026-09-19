@@ -1560,20 +1560,28 @@ spec:
 ---
 # First-party signature + provenance verification (verifyImages), Phase 4.3.
 #
+# STATUS: still Audit, and it MUST stay Audit until the build Jobs actually
+# sign (plan Unit 4.2, still OPEN — see ../image-builds/README.md). Today the
+# Jobs build and push only; they do NOT run cosign. This policy therefore
+# reports every first-party digest as unsigned, which is CORRECT: unsigned
+# images are exactly what Audit is supposed to surface as a work list. The
+# keypair exists and is verified (public key derives from the private key), so
+# the policy is ready to enforce the moment the build path produces signatures.
+#
 # WHAT THIS CHECKS — every Pod (and, via autogen, its controllers) referencing
 # an image from OUR registry (registry.ngoldack.de/*) must carry:
 #   1. a key-based cosign SIGNATURE made with the image-builds signing key
 #      (cosign-signing-key, namespace buildkit — see
 #      ../image-builds/README.md);
 #   2. a signed SLSA-provenance ATTESTATION (cosign attest, predicate type
-#      https://slsa.dev/provenance/v0.2) produced by the same key in the
+#      https://slsa.dev/provenance/v0.2) produced by the same key from the
 #      image-builds Jobs.
 #
 # HOW IT VERIFIES — the attestor public keys are the SOPS-managed cosign.pub
 # from the image-builds Secret, inlined here so verification does not depend on
-# a Secret read at admission time. --tlog-upload=false was used at signing (no
-# Rekor egress by design), so both the signature check and the attestation must
-# accept transparent logging as MISSING rather than wrong: without
+# a Secret read at admission time. --tlog-upload=false will be used at signing
+# (no Rekor egress by design), so both the signature check and the attestation
+# must accept transparent logging as MISSING rather than wrong: without
 # ignoreTlog: true a key-based check would ask Rekor for an entry that was
 # never uploaded and fail. The policy is intentionally NOT scoped to a match on
 # namespaces: the registry pattern alone keeps third-party images (ghcr.io,
@@ -1582,10 +1590,12 @@ spec:
 # AUDIT -> ENFORCE checklist (flip validationFailureAction to Enforce —
 # optionally per namespace via validationFailureActionOverrides — only when
 # ALL of these hold):
-#   1. Every Job in ../image-builds/ has completed once since this policy
-#      landed, so every deployed first-party digest is signed AND attested
-#      (images pushed before the Jobs carried the signing steps are NOT
-#      verifiable and keep the audit report red by design).
+#   1. Unit 4.2 has landed: the image-builds Jobs run the shared signing step
+#      (scan gate -> SBOM -> provenance attestation -> signature, by digest)
+#      and at least one full build has completed since, so every deployed
+#      first-party digest is signed AND attested (images pushed before those
+#      steps existed are NOT verifiable and keep the audit report red BY
+#      DESIGN until each is rebuilt and re-pinned — that is the work list).
 #   2. Every workload that references registry.ngoldack.de/* is digest-pinned
 #      (Unit 4.1 landed this); re-pinning after each rebuild is mandatory
 #      because the signing steps sign exactly the digest that was pushed.

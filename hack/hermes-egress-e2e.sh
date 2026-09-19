@@ -7,7 +7,8 @@
 #   2. unapproved host denied     — CONNECT example.org:443 → 403 + strike count
 #   3. RFC1918 → quarantine       — CONNECT 10.x → kill header → reaper
 #                                   quarantines the session + deletes the claim
-#                                   → re-claim rejected (Kyverno)
+#                                   → re-claim flagged by the quarantine
+#                                   policy (Audit: warning; Enforce: denied)
 #   4. bypass attempt → drop      — direct CONNECT from a sandbox pod to a
 #                                   world address (never the proxy) → Cilium
 #                                   drop (default-deny, Hubble-observable)
@@ -135,8 +136,11 @@ check "quarantine ledger carries the session" \
   "$K -n hermes-sandbox get configmap hermes-quarantine -o jsonpath='{.data.$SESSION}' --request-timeout=10s | grep -q ."
 check "claim was reaped" \
   "$K -n hermes-sandbox get sandboxclaim $CLAIM_NAME --request-timeout=10s 2>/dev/null | grep -q NotFound"
-check "re-claim rejected (Kyverno audit reports the hash)" \
-  "! printf '%s' '$CLAIM_JSON' | $K apply -f - --request-timeout=10s 2>&1 | grep -qi 'session is quarantined'"
+# Kyverno reports the quarantine. In Audit mode the apply SUCCEEDS with a
+# warning naming the session, so an output that CONTAINS the message is the
+# pass — asserting its absence would pass only when the policy never fired.
+check "re-claim flagged by quarantine policy (message present)" \
+  "printf '%s' '$CLAIM_JSON' | $K apply -f - --request-timeout=10s 2>&1 | grep -qi 'session is quarantined'"
 
 # 6. Scenario 4: bypass attempt → Cilium drop. A pod in hermes-sandbox
 #    CONNECTing DIRECTLY to a world address (no proxy) is default-deny.
@@ -146,11 +150,9 @@ BYPASS=$($K -n hermes-sandbox run e2e-bypass-$$ --rm -i --restart=Never \
   --command -- sh -c 'curl -s -o /dev/null -w %{http_code} --max-time 5 https://example.org || echo blocked' \
   2>&1 | tail -1)
 check "bypass CONNECT did not reach the world" "[ '$BYPASS' != '200' ]"
-check "bypass blocked verdict is labeled (Hubble)" \
-  "$($K -n hermes-egress exec deploy/hermes-egress-proxy -c envoy -- \
-     sh -c 'echo hubble-check-placeholder' --request-timeout=10s 2>/dev/null; true)"
-# The Hubble half needs the hubble CLI relayed in-cluster; when absent the
-# check above is a no-op and the verdict rests on scenario 4's curl block.
+# The Hubble-verdict half (labeling the drop) needs the hubble CLI inside the
+# cluster and is not implemented yet (Unit 1.6 follow-up); the bypass outcome
+# above is the assertion that matters — a 200 would mean default-deny failed.
 
 say "e2e complete: scenarios 1-4 executed"
 say "NOTE: run this script ONLY after the guard images were built+digest-pinned

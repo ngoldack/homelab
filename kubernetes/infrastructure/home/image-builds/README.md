@@ -41,17 +41,33 @@ is still in **Audit**:
   policy currently verifies nothing, and every first-party digest appears in the
   audit report as unsigned.
 
-Implementing it is **Unit 4.2** of the remediation plan. Two constraints learned
-the hard way while attempting it, worth keeping:
+Implementing it is **Unit 4.2** of the remediation plan. Constraints learned
+while attempting it, worth keeping:
 
 * **`ghcr.io/sigstore/cosign/cosign` is distroless** (`Entrypoint:
-  ['/ko-app/cosign']`, no `/bin/sh`). It cannot be staged with a shell command.
-  Either build a small in-repo tools image (`COPY --from=` the pinned cosign and
-  trivy images, built like the other Jobs here) or use a shell-capable image.
+  ['/ko-app/cosign']`, no `/bin/sh`) — it cannot be staged with a shell
+  command. The cheaper path, and the one to use: stage trivy exactly as
+  `../image-scan/cronjob.yaml` already does (the trivy image has a shell,
+  proven by the live CronJob), and fetch the cosign binary with a pinned
+  checksum (`cosign-linux-amd64` v2.4.3 = `caaad125…4708`) in the same init
+  container — the buildkit CNP already allows world:443/80. Do NOT build an
+  in-repo "tools image": it would live unsigned in `registry.ngoldack.de`
+  and become self-referential the moment `verify-images-first-party` goes
+  Enforce.
 * **Job specs are immutable.** Any change must bump the Job name suffix, the
   output tag and (for repo-context Jobs) the context SHA together — Flux prunes
   the old Job. Editing `spec.template` in place leaves the Kustomization
-  NotReady with `field is immutable`.
+  NotReady with `field is immutable`. A name bump forces a rebuild and a
+  re-pin, so land the harness + ONE pilot Job (llama-kv-broker is the
+  smallest), verify the pilot live, then fan out to the other seven — do not
+  mass-edit all eight blind.
+* **The CNP needs a carve-out the first run will expose**: buildkit's
+  allowlist gives the client pod only the registry namespace on :5000 plus
+  world :80/443, but cosign/trivy in the Job pod reach
+  `registry.ngoldack.de:443` post-DNAT, which evaluates against the **gateway
+  pod's identity** (same reasoning as `../hermes-egress/cilium-policy.yaml`).
+  Expect drops on the pilot's first run and add the explicit egress rule then;
+  do not ship it presumed-working.
 
 ## The signing key
 

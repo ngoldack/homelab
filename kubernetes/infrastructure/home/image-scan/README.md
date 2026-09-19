@@ -8,10 +8,11 @@ metrics, the VMRule (`../monitoring/rules-image-scan.yaml`) raises alerts, a
 human decides.
 
 This is the "continuously rescan deployed digests" half of the supply-chain
-phase. The build-time scan gate (trivy in the image-builds Jobs, coordinated
-trivy pin) covers images when they are BUILT; this job covers the digests
-that are RUNNING, including images that never passed through the build
-pipeline at all (third-party DaemonSets, operators, helm-chart images).
+phase. The build-time scan gate is still OPEN (plan Unit 4.2 — trivy in the
+image-builds Jobs was designed but not yet landed, see
+../image-builds/README.md); this job covers the digests that are RUNNING,
+including images that never passed through the build pipeline at all
+(third-party DaemonSets, operators, helm-chart images).
 
 ## What it covers
 

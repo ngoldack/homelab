@@ -29,6 +29,13 @@ jobs:
     runs-on: [self-hosted, homelab]
     timeout-minutes: 20
     steps:
+      # The wait step below runs a script from hack/, so the runner needs the
+      # repo — the first step of this workflow has never checked it out because
+      # every previous step was a single kubectl/flux command. The checkout is
+      # read-only (contents: read), matching the runner's existing posture.
+      - name: Check out main
+        uses: actions/checkout@v4
+
       - name: Point the flux CLI at the in-cluster API server
         run: |
           mkdir -p "$HOME/.kube"
@@ -81,15 +88,17 @@ jobs:
       # controller consumes it, which makes the equality unsatisfiable and
       # hangs the run for the whole timeout (observed). lastAppliedRevision has
       # no such lifecycle and is set only by an actual apply.
-      - name: Wait until this run's revision is applied everywhere
-        run: >-
-          kubectl wait kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
-          --for=jsonpath='{.status.lastAppliedRevision}'="$REVISION" --timeout=15m
-
-      - name: Wait for every Kustomization to be Ready
-        run: >-
-          kubectl wait kustomizations.kustomize.toolkit.fluxcd.io -n flux-system --all
-          --for=condition=Ready --timeout=15m
+      #
+      # Why a polling script instead of `kubectl wait`: kubectl wait prints
+      # nothing until it passes or times out, so a stuck dependency
+      # ("dependency 'x' is not ready") or a dry-run failure ("field is
+      # immutable") just burns the 15-minute timeout with zero signal. The
+      # script prints, every poll, which Kustomizations have not converged and
+      # the message on their Ready condition — the message is where Flux says
+      # what it is waiting for. It runs the revision gate then the Ready gate
+      # (540 s each; the 20-min job timeout is the outer bound).
+      - name: Wait for this run's revision + Ready everywhere (with visibility)
+        run: hack/flux-wait-kustomizations.sh "$REVISION" 540
 
       - name: Status
         if: always()

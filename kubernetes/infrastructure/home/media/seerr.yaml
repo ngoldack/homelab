@@ -1,0 +1,58 @@
+# Seerr — media request app (formerly Jellyseerr, 2026-09-19). Ships its own
+# dedicated upstream chart (StatefulSet + config PVC + Service `seerr`), so it
+# is NOT hand-declared on the app-template `media` release like the *arr chain.
+# Target namespace stays media; the edge/LAN URL moves from
+# The edge/LAN URL is seerr.media.svc.ngoldack.de.
+#
+# Chart defaults: image ghcr.io/seerr-team/seerr pinned to the v3.4.1 digest
+# (repo convention: immutable digest, not a mutable tag), container port 5055,
+# Service port 80 -> targetPort http (5055), config PVC seerr-config on the
+# media NFS StorageClass (declared in storage.yaml, existingClaim here).
+# The upstream securityContext (runAsNonRoot, drop ALL, seccomp RuntimeDefault)
+# is already PSA restricted-compliant; nodeSelector pins to home like the rest
+# of the media stack.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: seerr
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: seerr-chart
+      version: "3.9.1"
+      sourceRef:
+        kind: HelmRepository
+        name: seerr
+      interval: 2h
+  targetNamespace: media
+  releaseName: seerr
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      remediateLastFailure: true
+      retries: 3
+  values:
+    nameOverride: seerr
+    image:
+      repository: seerr-team/seerr
+      tag: "v3.4.1"
+      sha: f4768de5f616248d723e05891f3345a1402123775d03bf0890dbfedc0831bda1
+    config:
+      persistence:
+        existingClaim: seerr-config
+    service:
+      port: 80
+    nodeSelector:
+      topology.homelab/site: home
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi

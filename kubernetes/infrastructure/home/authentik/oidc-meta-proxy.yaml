@@ -110,10 +110,13 @@ data:
                                 if tostring(r:headers():get(":status") or "") ~= "200" then
                                   return
                                 end
-                                local p = r:headers():get(":path") or ""
-                                if not string.find(p, "openid-configuration", 1, true) then
-                                  return
-                                end
+                                -- NOTE: response headers carry no :path, so
+                                -- the earlier "only rewrite the discovery
+                                -- document" check NEVER passed and the
+                                -- jwks_uri rewrite never fired. The proxy
+                                -- only routes the two authentik paths anyway
+                                -- and the JWKS body contains no URL to
+                                -- rewrite, so gsub is unconditional here.
                                 local body = r:body():getBytes(0, r:body():length())
                                 body = string.gsub(body,
                                   "https://authentik%.ngoldack%.de/application/o/headlamp/jwks/",

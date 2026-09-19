@@ -1590,6 +1590,9 @@ spec:
 # AUDIT -> ENFORCE checklist (flip validationFailureAction to Enforce —
 # optionally per namespace via validationFailureActionOverrides — only when
 # ALL of these hold):
+#   0. Set mutateDigest back to true. The webhook forbids it in Audit mode
+#      (observed: "mutateDigest must be set to false for 'Audit' failure
+#      action"), so it sits false now — the mutation IS the point of Enforce.
 #   1. Unit 4.2 has landed: the image-builds Jobs run the shared signing step
 #      (scan gate -> SBOM -> provenance attestation -> signature, by digest)
 #      and at least one full build has completed since, so every deployed
@@ -1646,7 +1649,11 @@ spec:
             - "registry.ngoldack.de/*"
           # Admission must see the digest, not a mutable tag: the Jobs sign the
           # pushed digest, so a tag reference cannot be verified consistently.
-          mutateDigest: true
+          # Audit-mode constraint: Kyverno rejects mutateDigest: true unless
+          # the policy Enforces (webhook: "mutateDigest must be set to false
+          # for 'Audit' failure action"). While this policy audits, the
+          # mutation is off; the enforce flip MUST set it back to true.
+          mutateDigest: false
           verifyDigest: true
           required: true
           attestors:

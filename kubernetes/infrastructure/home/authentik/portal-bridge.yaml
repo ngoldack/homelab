@@ -1,13 +1,15 @@
 # Portal bridges: pod-netns nginx hops, one per site, each fronting the
-# node-local server via authentik-server-local (see that file for why).
+# authentik server via the global Service.
 #
 # Why bridges exist at all: the gateway data plane is host-netns
-# cilium-envoy, and cross-site pod reachability over KubeSpan+VXLAN is the
-# flaky layer (verified live: host→remote-pod fails outright; pod→remote-pod
-# ~50%). Each bridge is a LOCAL backend for its site's envoy and a
-# local-socket-LB client of the server — no cross-site hop survives on the
-# request path. The outpost reaches authentik the same way (its
-# AUTHENTIK_HOST points at the -local Service).
+# cilium-envoy, and host→remote-pod fails outright (verified live), so each
+# envoy needs a LOCAL backend on its site. The bridge is that local hop; the
+# cross-site hop to the server then happens in a pod netns, where KubeSpan
+# carries it reliably (2026-09-19 live re-measurement from fsn1: pod→remote-
+# pod 20/20 incl. 73 KB responses; the global Service path works 20/20 with a
+# ~1.1 s tail — the old pod-netns "~50% flaky" reading that required a
+# node-local server replica no longer holds, so the server is home-only and
+# the -local internalTrafficPolicy Service is retired).
 #
 # arm64-safe image; the cloud side tolerates the ingress taint.
 apiVersion: v1
@@ -23,7 +25,7 @@ data:
       server {
         listen 9100;
         location / {
-          set $upstream http://authentik-server-local.authentik.svc.cluster.local;
+          set $upstream http://authentik-server.authentik.svc.cluster.local;
           proxy_pass $upstream;
           proxy_set_header Host $host;
           proxy_set_header X-Real-IP $remote_addr;

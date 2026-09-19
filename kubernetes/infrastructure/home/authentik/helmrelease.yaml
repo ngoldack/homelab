@@ -106,16 +106,20 @@ spec:
           mountPath: /secrets-aigateway
           readOnly: true
     server:
-      # 2 replicas, NOT site-pinned, tolerating the ingress taint: the edge
-      # Gateway's envoy is the host-netns cilium-envoy DaemonSet, and
-      # host-origin traffic from the Hetzner node cannot reach LAN pod IPs
-      # (the edge portal 503, while the outpost→server path in a pod netns
-      # worked). With one replica landing on the ingress node, the edge
-      # listener's upstream is LOCAL and the cross-site hop moves into pod
-      # networking where KubeSpan serves it fine. The scheduler cannot put
-      # them both on one home node without more capacity pressure than exists
-      # (two untainted home nodes vs cp taint + gpu taint), and
-      # topologySpread below makes home/home illegal anyway.
+      # 2 replicas, HOME ONLY. The 2026-09-18 edge straddle (one replica
+      # tolerating the ingress taint so the host-netns edge envoy had a LOCAL
+      # upstream) is gone: it put an API replica on the public node where the
+      # DB round-trip over KubeSpan made the app slow enough that liveness
+      # probes killed it in a loop (49 restarts, 2026-09-19), and it exposed
+      # identity data on the internet-facing node. Live re-measurement
+      # (2026-09-19, netprobe pod on fsn1): pod→remote-pod is reliable
+      # (20/20 incl. 73 KB responses, ~0.2 s) — the stale "~50% flaky"
+      # claim that justified local-only routing no longer holds. The edge
+      # envoy still cannot leave host-netns, so portal-bridge-cloud remains
+      # the edge hop; the bridge and the outpost now cross the site in a pod
+      # netns via the global authentik-server Service (works 20/20, tail
+      # ~1.1 s on the cross-site service path — acceptable for login/refresh
+      # traffic, and no identity data plane on the public node).
       replicas: 2
       # maxSurge=0 serializes the swap against the hard anti-affinity (a
       # surge pod has no third schedulable node — cp and gpu workers are
@@ -128,10 +132,10 @@ spec:
           maxSurge: 0
           maxUnavailable: 1
       # HARD anti-affinity by hostname: exactly one server per node, so the
-      # pair straddles home+Hetzner instead of both landing on the ingress
-      # node (ScheduleAnyway spread let that happen, which then 503'd the
-      # INTERNAL portal — the failure is directional-symmetric: host-netns
-      # envoy only ever reaches LOCAL pods).
+      # pair straddles the two schedulable home nodes (919, 3bi) instead of
+      # both landing on one (ScheduleAnyway spread let that happen, which
+      # then 503'd the INTERNAL portal — the failure is directional-symmetric:
+      # host-netns envoy only ever reaches LOCAL pods).
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -140,31 +144,23 @@ spec:
                   app.kubernetes.io/name: authentik
                   app.kubernetes.io/component: server
               topologyKey: kubernetes.io/hostname
-      # Deterministic ingress/home straddle: exactly one server replica in
-      # the `ingress`/cloud domain and one in the home domain, DoNotSchedule.
-      # Key is topology.homelab/site (EVERY node carries it: fsn1=cloud, the
-      # home nodes=home) so there are always two real spread domains — the
-      # deadlock-free {cloud:1, home:1} split. (node.homelab/role is present
-      # ONLY on fsn1, so home nodes would be spread-excluded entirely and
-      # replica 2 would Pending forever.) Without the straddle the scheduler
-      # puts both replicas on home nodes (most free CPU), leaving the ingress
-      # node with NO local server upstream — the edge portal-bridge
-      # (internalTrafficPolicy: Local) then 502s every authentik path. The
-      # 2026-09-15 nvidia-taint removal made the home pool large enough to
-      # trigger exactly this, so the straddle is now load-bearing.
+      # Spread one replica per home node (hostname): with the pair spread
+      # across 919 and 3bi, losing one node still leaves one serving replica.
+      # (The previous topology.homelab/site DoNotSchedule spread was what
+      # pinned replica 2 onto the ingress node — home+home was unschedulable
+      # by definition; with the server home-only that constraint would
+      # deadlock, so it is hostname-based now.)
       topologySpreadConstraints:
         - maxSkew: 1
-          topologyKey: topology.homelab/site
+          topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: authentik
               app.kubernetes.io/component: server
-      tolerations:
-        - key: dedicated
-          operator: Equal
-          value: ingress
-          effect: NoSchedule
+      # NO ingress-taint toleration: the server must never schedule onto the
+      # public node (dedicated=ingress is for the outpost, the portal bridge
+      # and edge agents only).
       resources:
         requests:
           cpu: 200m

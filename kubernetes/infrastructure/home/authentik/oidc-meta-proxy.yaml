@@ -55,6 +55,16 @@ data:
                       virtual_hosts:
                         - name: oidc-meta
                           domains: ["*"]
+                          # authentik derives the advertised `issuer` scheme
+                          # from X-Forwarded-Proto; in-cluster the downstream
+                          # hop is plain HTTP, which advertises `http://` —
+                          # while kube-apiserver is configured with
+                          # https://authentik.ngoldack.de/... and rejects any
+                          # token whose iss mismatches (tofu/home/talos.tf
+                          # oidc-issuer-url). Force https on the upstream hop.
+                          request_headers_to_add:
+                            - header: {key: x-forwarded-proto, value: "https"}
+                              append: false
                           routes:
                             # The discovery document: authentik's own, with the
                             # public Host so its `issuer` matches the tokens.
@@ -129,6 +139,12 @@ data:
                           address: authentik-server.authentik.svc.cluster.local
                           port_value: 80
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oidc-meta-proxy
+  namespace: authentik
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -146,6 +162,11 @@ spec:
       labels:
         app.kubernetes.io/name: oidc-meta-proxy
     spec:
+      # Envoy here never touches the Kubernetes API; a dedicated SA with no
+      # RBAC + no token mount keeps the pod off the namespace default SA
+      # (Kyverno disallow-default-serviceaccount) with zero privileges.
+      serviceAccountName: oidc-meta-proxy
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
       containers:

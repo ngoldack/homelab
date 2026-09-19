@@ -78,31 +78,37 @@ data:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                           default_source_code:
                             inline_string: |
-                              local flags = env.streamInfo():dynamicMetadata():get(
-                                "envoy.filters.http.lua", "oidc_meta")
-                              if not flags then
-                                env.streamInfo():dynamicMetadata():set(
-                                  "envoy.filters.http.lua", "oidc_meta",
-                                  {target = "proxy"})
-                                local h = handle:headers()
-                                h:remove("accept-encoding")
+                              -- Rewrite authentik's jwks_uri to this proxy in the
+                              -- discovery response body, so the key fetch stays
+                              -- in-cluster. The version from 7b48556 never ran:
+                              -- its YAML block had mixed indentation (yaml-cpp
+                              -- parse error) and the Lua referenced a
+                              -- nonexistent global "env". The filter API hands
+                              -- the handler to each callback; no cross-request
+                              -- state is needed because the response headers
+                              -- still carry the request path.
+                              function envoy_on_request(request_handle)
+                                -- The discovery document may come back
+                                -- gzip'd; body() would then return compressed
+                                -- bytes and the gsub would miss. Strip the
+                                -- encodings so response rewriting sees plain
+                                -- text.
+                                request_handle:headers():remove("accept-encoding")
                               end
-                              function envoy_on_response(handle)
-                                local m = env.streamInfo():dynamicMetadata():get("envoy.filters.http.lua")
-                                local flag = m and m.oidc_meta or false
-                                if not flag then
+                              function envoy_on_response(response_handle)
+                                local r = response_handle
+                                if tostring(r:headers():get(":status") or "") ~= "200" then
                                   return
                                 end
-                                if handle:headers():get(":status") == "200"
-                                  and string.find(
-                                    handle:headers():get(":path") or "", "openid-configuration", 1, true)
-                                then
-                                  local body = handle:body():getBytes(0, handle:body():length())
-                                  body = string.gsub(body,
-                                    "https://authentik%.ngoldack%.de/application/o/headlamp/jwks/",
-                                    "http://oidc-meta.authentik.svc.cluster.local/jwks/headlamp")
-                                  handle:body():setBytes(body)
+                                local p = r:headers():get(":path") or ""
+                                if not string.find(p, "openid-configuration", 1, true) then
+                                  return
                                 end
+                                local body = r:body():getBytes(0, r:body():length())
+                                body = string.gsub(body,
+                                  "https://authentik%.ngoldack%.de/application/o/headlamp/jwks/",
+                                  "http://oidc-meta.authentik.svc.cluster.local/jwks/headlamp")
+                                r:body():setBytes(body)
                               end
                       - name: envoy.filters.http.router
                         typed_config:

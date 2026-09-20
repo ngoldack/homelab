@@ -1,0 +1,99 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  // Replaces the onboarding renovate.json. Decision-complete config for the
+  // homelab GitOps repo: Flux GitOpsToolkit manifests (HelmRelease in
+  // helmrelease.yaml + HelmRepository registries in sources.yaml, namespaces
+  // set so Renovate links them), raw k8s manifests with docker image pins,
+  // image-build Dockerfiles, GitHub Actions, OpenTofu providers, one Go and
+  // one Python build. Merging to `main` deploys: no automerge anywhere.
+  extends: ["config:recommended", "docker:pinDigests"],
+  // ---- repo scope ----
+  baseBranchPatterns: ["main"],
+  dependencyDashboard: false,
+  // ---- schedule (homelab operator reviews PRs in the morning) ----
+  timezone: "Europe/Berlin",
+  schedule: ["before 07:00 on tuesday"],
+  updateNotScheduled: true,
+  // ---- what NOT to manage ----
+  ignorePaths: [
+    "tofu/.terraform/modules/**", // vendored upstream terraform module (also a nested git repo)
+    "kubernetes/infrastructure/home/agent-sandbox/upstream/**", // vendored upstream fork of agent-sandbox
+    "**/gotk-components.yaml", // flux system manifest schema; flux would blind-rewrite custom bootstrap flags
+    ".state-archive/**",
+    ".omp/**",
+    ".claude/**",
+    ".vscode/**",
+    ".pytest_cache/**",
+    "hack/bench-prompts/**"
+  ],
+  // ---- managers (evidence-based; see per-entry comments) ----
+  enabledManagers: [
+    "github-actions", // .github/workflows/{flux-reconcile,validate,codeql}.yml
+    "dockerfile", // 7 Dockerfiles under kubernetes/infrastructure/home/image-builds/
+    "kubernetes", // raw manifests with single-line `image: name[:tag]@sha256` refs (patterns below)
+    "flux", // Flux GitOpsToolkit HelmRelease/HelmRepository/Kustomization resources
+    "helmv3", // tofu/home/charts/gateway-api-crds/Chart.yaml
+    "terraform", // tofu/home/providers.tf required_providers + .terraform.lock.hcl
+    "gomod", // kubernetes/infrastructure/home/image-builds/llama-kv-broker/go.mod
+    "pep621" // kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml
+  ],
+  // flux manager: default patterns only see gotk-components.y*ml; the repo's
+  // manifests live per-app as helmrelease.yaml (+ sources.yaml HelmRepositories),
+  // so scan every yaml under kubernetes/. Namespaces on HelmRelease metadata and
+  // HelmRepository metadata are set, so chart->HelmRepository linking works and
+  // the per-chart registry comes from the in-repo sources.yaml resources — no
+  // registryUrls/registryAliases needed. NOTE: paperless's sources.yaml points
+  // app-template at the dead https://bjw-s-labs.github.io/helm-charts index; its
+  // chart pin stays manual until that source is flipped to the OCI repo.
+  flux: {
+    managerFilePatterns: ["/kubernetes/.*\\.ya?ml$/"]
+  },
+  // kubernetes manager has NO default patterns: scope it to raw workload
+  // manifests (deployments, statefulsets, cronjobs, model manifests, hermes/
+  // authentik/langfuse sidecar files). helmrelease.yaml / sources.yaml /
+  // kustomization.yaml are intentionally NOT listed — they belong to flux.
+  kubernetes: {
+    managerFilePatterns: [
+      "/(?:^|\\/)(?:deployment|statefulset|cronjob|multus-daemonset|envoy|authorizer|reaper|sandbox-template|postgres|valkey|clickhouse|keeper|blackbox-exporter|outpost|portal-bridge|oidc-meta-proxy|ldap-outpost|kv-broker|qwen|nomic-embed)[^/]*\\.ya?ml$/",
+      "/image-builds/[^/]+\\.ya?ml$/" // build Jobs (moby/buildkit buildctl image)
+    ]
+  },
+  ignoreDeps: [],
+  // ---- version handling ----
+  separateMajorMinor: true,
+  separateMinorPatch: false,
+  separateMultipleMajor: true,
+  rangeStrategy: "bump",
+  minimumReleaseAge: "2 days", // let upstream shake out before PRs land
+  // ---- PR / branch hygiene ----
+  branchPrefix: "renovate/",
+  prConcurrentLimit: 8,
+  branchConcurrentLimit: 8,
+  prHourlyLimit: 4,
+  prHeader: "⚠️ Merging deploys to the LIVE homelab (Flux reconciles on push to `main`).\nReview against [docs/overview.md](docs/overview.md) and the service catalog before merging.",
+  prFooter: "Managed by Renovate via `renovate.json5` — see the config for grouping/exclusions.",
+  rebaseWhen: "behind-base-branch",
+  automerge: false,
+  labels: ["dependencies"],
+  semanticCommits: "enabled",
+  semanticCommitType: "chore",
+  semanticCommitScope: "deps",
+  vulnerabilityAlerts: { enabled: true },
+  packageRules: [
+    // FIRST: suppress first-party private-registry deps — the bot runs on
+    // GitHub infra and cannot resolve registry.ngoldack.de; those images are
+    // built in-cluster and re-pinned by hand in the same commit as their
+    // image-build Job.
+    { matchPackageNames: ["/^registry\\.ngoldack\\.de//"], enabled: false }, // (regex-form matchPackageNames; depName starts with the private registry host)
+    // grouping (matchDatasources so flux values images, kubernetes manager
+    // and dockerfiles all land in the container groups)
+    { matchManagers: ["github-actions"], groupName: "GitHub Actions" },
+    { matchDatasources: ["helm"], groupName: "Helm charts" },
+    { matchDatasources: ["docker"], matchUpdateTypes: ["minor", "patch"], groupName: "Container minor/patch" },
+    { matchDatasources: ["docker"], matchUpdateTypes: ["digest"], groupName: "Container digests" },
+    { matchManagers: ["gomod"], groupName: "Go dependencies" },
+    { matchManagers: ["terraform"], groupName: "Terraform/OpenTofu providers" },
+    // supply chain: pin actions to SHAs; after the first run they stay SHA-pinned
+    { matchManagers: ["github-actions"], pinDigests: true }
+  ]
+}

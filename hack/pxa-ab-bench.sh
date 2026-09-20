@@ -56,27 +56,43 @@ printf '%s' "$resp" | jq -e '.timings.prompt_per_second, .timings.predicted_per_
   || { echo "FATAL: probe missing timings — server response:" >&2; printf '%s' "$resp" | head -c 400 >&2; exit 1; }
 echo "probe: cached-token field jq = ${CACHED_JQ}"
 
-# --- Exact-token prompt builder: wordlist repeated until /tokenize >= target ---
+# --- Exact-token prompt builder: wordlist repeated & tokenize-verified ---
 build_prompt() { # <outfile> <target_tokens>
   local out="$1" target="$2" src="$PROMPTS_DIR/reasoning.txt"
-  local src_bytes tgt_bytes
+  local src_bytes tgt_bytes n
   src_bytes="$(wc -c < "$src")"
-  tgt_bytes=$(( target * 4 ))
   : > "$out"
+  # Overshoot by ~30% (chars/token can exceed 4), then trim to a token-verified size.
+  tgt_bytes=$(( target * 5 ))
   while [ "$(wc -c < "$out")" -lt "$tgt_bytes" ]; do cat "$src" >> "$out"; done
-  head -c "$tgt_bytes" "$out" > "${out}.trim"; mv "${out}.trim" "$out"
-  # Verify token count via /tokenize; loosen if it 404s (char/4 heuristic stands).
-  local fz
-  fz="$(mktemp)"
-  post_json /tokenize "{\"content\":$(json_prompt "$out")}" > "$fz" 2>/dev/null \
-    && n=$(jq -r '.tokens | length' "$fz" 2>/dev/null) || n=-1
-  rm -f "$fz"
-  if [ "$n" -ge 0 ]; then
-    echo "build_prompt($out): tokenized=$n target=$target" >&2
-    [ "$n" -ge "$target" ] || { echo "FATAL: prompt under token target (n=$n < $target)" >&2; exit 1; }
-  else
-    echo "build_prompt($out): /tokenize unavailable — using char/4 estimate" >&2
-  fi
+  # Tokenize-verify; extend in steps until >= target (or /tokenize absent: fall back
+  # to the char/5 estimate and continue).
+  for round in $(seq 1 6); do
+    fz="$(mktemp)"
+    if post_json /tokenize "{\"content\":$(json_prompt "$out")}" > "$fz" 2>/dev/null; then
+      n=$(jq -r '.tokens | length' "$fz" 2>/dev/null)
+      [ -n "$n" ] && [ "$n" -ge 0 ] 2>/dev/null || n=-1
+    else
+      n=-1
+    fi
+    rm -f "$fz"
+    if [ "$n" -ge 0 ]; then
+      echo "build_prompt($out): tokenized=$n target=$target (round $round)" >&2
+      if [ "$n" -ge "$target" ]; then
+        # Trim the tail to the closest safe overshoot (keep >= target + 16).
+        head -c $(( (n * 4) + ((target + 16) * 4) )) "$out" > "${out}.trim" 2>/dev/null || cp "$out" "${out}.trim"
+        [ "$(wc -c < "${out}.trim")" -lt "$(wc -c < "$out")" ] && mv "${out}.trim" "$out"
+        return 0
+      fi
+      # Under target: append two more source copies and re-verify.
+      cat "$src" "$src" >> "$out"
+    else
+      echo "build_prompt($out): /tokenize unavailable — char/5 estimate stands" >&2
+      return 0
+    fi
+  done
+  echo "FATAL: build_prompt could not reach ${target} tokens after 6 rounds" >&2
+  exit 1
 }
 
 # One completion; append raw JSON log; print "pp<tab>tg<tab>prompt_n<tab>prompt_ms<tab>cached".

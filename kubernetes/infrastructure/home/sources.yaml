@@ -119,3 +119,16 @@ metadata:
 spec:
   interval: 2h
   url: https://valkey.io/valkey-helm
+---
+# Consumed by librechat/ — LibreChat, the self-hosted LLM chat front-end. OCI
+# chart published on GHCR (the chart repo has no HTTPS index; type: oci, same
+# as the agentgateway entry above).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: librechat
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/danny-avila/librechat-chart

@@ -1,0 +1,72 @@
+# LibreChat allowlist. LibreChat federates natively against the authentik OIDC
+# provider (seed.yaml: provider librechat-oidc — NOT the proxy outpost, which
+# would break the /oauth/openid/callback handshake), and its edge HTTPRoute
+# backends librechat:3080 directly, so inbound traffic arrives from the Gateway
+# with the reserved `ingress` identity. The container port is 3080 (the
+# chart's default LibreChat port; targetPort of the librechat Service).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: librechat-allowlist
+  namespace: librechat
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    # LibreChat app <-> its bundled MongoDB and Meilisearch (intra-namespace).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: librechat
+    # Edge Gateway (Envoy) -> LibreChat. The `ingress` reserved identity is how
+    # the edge envoy presents to backend pods.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3080"
+              protocol: TCP
+    # Kubelet probes (readiness/liveness).
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "3080"
+              protocol: TCP
+  egress:
+    # DNS (kube-dns).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Intra-namespace: LibreChat -> MongoDB / Meilisearch.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: librechat
+    # LLM calls: LibreChat hits the agentgateway static-key scope
+    # (http://agentgateway.agentgateway.svc.cluster.local/v1/key/<chain>) on
+    # the proxy's in-cluster :80 listener. The gateway requires an X-Api-Key
+    # that matches a key in Secret agentgateway-api-keys (identifier
+    # `librechat`), so the traffic is authenticated AND namespaced.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    # OIDC validation: LibreChat fetches the authentik provider's discovery
+    # document and JWKS from https://authentik.ngoldack.de/application/o/
+    # librechat — an edge hostname, i.e. internet traffic that traverses the
+    # Gateway, so Cilium checks it as this pod's egress against the route's
+    # backend (the portal-bridge pod in the authentik namespace, NOT `world`).
+    # The matching ingress rule lives in ../authentik/cilium-allowlist.yaml;
+    # both halves are required, or the edge answers 403 "Access denied".
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik

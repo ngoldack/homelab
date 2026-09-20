@@ -484,6 +484,36 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
+  name: librechat-intra-namespace-allow
+  namespace: librechat
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: librechat
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: librechat
+    # DNS (see the header note).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+---
+# Intra-namespace traffic is allowed by default: this namespace is one trust
+# domain, so a pod may reach any sibling pod on any port. Cross-namespace
+# traffic stays denied unless a specific allowlist rule names it — that is the
+# boundary this cluster's policy is actually about.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
   name: llmkube-system-intra-namespace-allow
   namespace: llmkube-system
 spec:

@@ -1,0 +1,173 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: librechat
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  # The edge Gateway (network ns) must exist before this namespace's HTTPRoute
+  # can Attach/Accept; the edge route is what exposes chat.ngoldack.de.
+  dependsOn:
+    - name: network
+  chart:
+    spec:
+      chart: librechat
+      version: "2.0.12"
+      sourceRef:
+        kind: HelmRepository
+        name: librechat
+        namespace: flux-system
+      interval: 1h
+  targetNamespace: librechat
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: librechat
+    replicaCount: 1
+    image:
+      # Highest stable (non-rc) LibreChat image on GHCR (2026-09-20). GHCR is on
+      # the Kyverno registry allowlist; registry.librechat.ai is not.
+      registry: ghcr.io
+      repository: danny-avila/librechat
+      tag: v0.8.7
+      pullPolicy: IfNotPresent
+    nodeSelector:
+      topology.homelab/site: home
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
+      port: 3080
+      targetPort: 3080
+      containerPort: 3080
+    global:
+      librechat:
+        existingSecretName: librechat-credentials-env
+    librechat:
+      configEnv:
+        DOMAIN_CLIENT: https://chat.ngoldack.de
+        DOMAIN_SERVER: https://chat.ngoldack.de
+        NO_INDEX: "true"
+        SEARCH: "true"
+        ALLOW_REGISTRATION: "false"
+        ALLOW_SOCIAL_LOGIN: "true"
+        ALLOW_SOCIAL_REGISTRATION: "true"
+        OPENID_CLIENT_ID: librechat-oidc
+        # NO trailing slash: LibreChat appends /.well-known/openid-configuration,
+        # and authentik's issuer is https://authentik.ngoldack.de/application/o/
+        # librechat/ (the langfuse/headlamp trailing-slash lesson).
+        OPENID_ISSUER: https://authentik.ngoldack.de/application/o/librechat
+        OPENID_SCOPE: openid profile email
+        OPENID_CALLBACK_URL: /oauth/openid/callback
+        OPENID_BUTTON_LABEL: Sign in with authentik
+        OPENID_USE_PKCE: "false"
+      configYamlContent: |
+        version: 1.2.1
+        cache: true
+        registration:
+          socialLogins: ["openid"]
+        endpoints:
+          custom:
+            - name: "agentgateway"
+              apiKey: "${AGENTGATEWAY_API_KEY}"
+              baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/general-purpose"
+              headers:
+                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+              models: {default: ["general-purpose"], fetch: false}
+              titleConvo: true
+              titleModel: "general-purpose"
+              modelDisplayLabel: "agentgateway"
+            - name: "agentgateway-coding"
+              apiKey: "${AGENTGATEWAY_API_KEY}"
+              baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/coding-large"
+              headers:
+                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+              models: {default: ["coding-large"], fetch: false}
+              titleConvo: true
+              titleModel: "coding-large"
+              modelDisplayLabel: "agentgateway (coding)"
+            - name: "agentgateway-fast"
+              apiKey: "${AGENTGATEWAY_API_KEY}"
+              baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/coding-small"
+              headers:
+                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+              models: {default: ["coding-small"], fetch: false}
+              titleConvo: true
+              titleModel: "coding-small"
+              modelDisplayLabel: "agentgateway (fast)"
+            - name: "agentgateway-free"
+              apiKey: "${AGENTGATEWAY_API_KEY}"
+              baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/free"
+              headers:
+                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+              models: {default: ["free"], fetch: false}
+              titleConvo: true
+              titleModel: "free"
+              modelDisplayLabel: "agentgateway (free)"
+      imageVolume:
+        enabled: true
+        size: 5Gi
+        storageClassName: truenas-fast-nfs
+        accessModes: ReadWriteOnce
+    mongodb:
+      enabled: true
+      image:
+        repository: bitnamilegacy/mongodb
+      auth:
+        enabled: false
+      databases:
+        - LibreChat
+      persistence:
+        enabled: true
+        size: 8Gi
+        storageClass: truenas-fast-nfs
+      nodeSelector:
+        topology.homelab/site: home
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+    meilisearch:
+      enabled: true
+      image:
+        # The chart's default meilisearch override is stale (v1.7.3); the
+        # subchart's own appVersion is v1.12.0, and version-alignment with the
+        # bundled chart is the repo rule.
+        tag: v1.12.0
+      persistence:
+        enabled: true
+        size: 2Gi
+        storageClass: truenas-fast-nfs
+      auth:
+        existingMasterKeySecret: librechat-credentials-env
+      nodeSelector:
+        topology.homelab/site: home
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+    redis:
+      enabled: false
+    librechat-rag-api:
+      enabled: false

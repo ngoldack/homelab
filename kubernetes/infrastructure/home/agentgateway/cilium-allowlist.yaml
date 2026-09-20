@@ -40,6 +40,24 @@ spec:
       toPorts:
         - ports:
             - {port: "80", protocol: TCP}
+    # LibreChat (chat.ngoldack.de) calls the static-key scope
+    # (/v1/key/*) on this proxy's in-cluster :80 listener, carrying an
+    # X-Api-Key from the agentgateway-api-keys Secret (identifier `librechat`).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: librechat
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
+    # The authentik proxy outpost (agentgateway.ngoldack.de UI) reaches the
+    # agentgateway-ui Service on :15000. The controller-generated Service only
+    # publishes listener port 80; ui-service.yaml adds the 15000 listener.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - {port: "15000", protocol: TCP}
   egress:
     - toEndpoints:
         - matchLabels:

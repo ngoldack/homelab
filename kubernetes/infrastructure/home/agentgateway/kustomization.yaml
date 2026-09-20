@@ -52,5 +52,7 @@ resources:
   - httproute-key-edge.yaml
   - policy-retry-edge.yaml
   - policy-apikey-edge.yaml
+  - ui-service.yaml
+  - httproute-ui-edge.yaml
   - otel-collector.yaml
   - otel-collector-queue-pvc.yaml

@@ -7,3 +7,4 @@ resources:
   - kv-cache-pvc.yaml
   - kv-broker.yaml
   - canary-pxa-models.yaml
+  - canary-pxa.yaml

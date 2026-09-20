@@ -1,0 +1,461 @@
+You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.You are a meticulous mathematical problem solver. Work through the following problem
+step by step, showing all intermediate algebra, and state the final answer clearly.
+
+Problem: A train leaves Station A traveling at a constant speed of v1 = 90 km/h
+catching up to a cargo train that departed Station A two hours earlier traveling in
+the same direction at v2 = 60 km/h. They follow the same single track with no
+stops between stations. At the moment the faster train departs, a drone is released
+from Station A flying directly toward Station B at vd = 120 km/h. The drone reaches
+Station B, immediately reverses, and flies back along the track. Station B is
+L = 540 km from Station A.
+
+(a) In how many hours after the faster train's departure does it catch the cargo
+train, and at what distance from Station A?
+(b) The faster train must clear a 2.5 km-long tunnel. If it enters the tunnel just as
+it catches the cargo train (assume both trains are point objects for this part), how
+long is the faster train inside the tunnel from the moment its front enters until its
+rear clears the far end? The faster train is 400 m long.
+(c) Find the total distance the drone travels (accounting for its reversal at Station
+B) in the time it takes the faster train to reach Station B. Explain why the drone's
+total distance does not require summing an infinite series, and state any assumption
+about the drone's instantaneous reversal.
+
+Be careful with units (km/h and km vs meters for the tunnel part). Clearly separate
+each part (a), (b), (c) in your answer.

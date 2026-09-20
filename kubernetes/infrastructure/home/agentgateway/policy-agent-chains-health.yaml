@@ -1,0 +1,79 @@
+# Health/eviction policies for the agent chains (agent-chains.yaml): a 5xx
+# or 429 response evicts the answering provider for 10 MINUTES, so a general
+# Synthetic rate-limit ("Too many requests, try again later" — 429, not just
+# the subscription-exhausted error) means NO requests are sent to Synthetic
+# for the window. Without these policies, backends are never evicted and the
+# chains' failover groups never fire.
+#
+# duration: 10m — Synthetic's 429 carries no Retry-After header (verified
+# live 2026-09-20), so the configured duration governs the eviction window.
+# consecutiveFailures: 1 — a single 429 is enough; rate-limit storms must
+# back off immediately, not after N coincidences.
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: general-purpose-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: general-purpose-chain
+  backend:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        duration: 10m
+        consecutiveFailures: 1
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: coding-small-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: coding-small-chain
+  backend:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        duration: 10m
+        consecutiveFailures: 1
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: coding-medium-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: coding-medium-chain
+  backend:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        duration: 10m
+        consecutiveFailures: 1
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: coding-large-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: coding-large-chain
+  backend:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        duration: 10m
+        consecutiveFailures: 1

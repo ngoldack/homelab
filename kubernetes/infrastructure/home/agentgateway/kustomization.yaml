@@ -40,6 +40,8 @@ resources:
   - hindsight-chain.yaml
   - policy-hindsight-health.yaml
   - policy-retry.yaml
+  - agent-chains.yaml
+  - policy-agent-chains-health.yaml
   - httproute-key.yaml
   - policy-apikey.yaml
   - otel-collector.yaml

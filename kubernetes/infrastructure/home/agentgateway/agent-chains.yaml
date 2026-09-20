@@ -1,0 +1,160 @@
+# Agent chains: synthetic-first, OpenRouter fallback ("mostly synthetic >
+# openrouter"). One chain per agent tier. Provider stanzas are verbatim
+# copies of the single-provider Synthetic backends in backends.yaml and the
+# OpenRouter stanza (keep in sync); each OpenRouter group pins its model
+# override so the client's synthetic alias (`hf:...`) is replaced per group.
+# "v4 latest" below means DEEPSEEK V4 FLASH (NOT v4.1): the ~alias
+# ~deepseek/deepseek-v4-flash-latest, deliberately distinct from
+# deepseek/deepseek-v4.1-flash.
+#
+# Eviction/failover is driven by policy-agent-chains-health.yaml: 5xx/429
+# evicts the answering synthetic provider for 10 minutes. Without that
+# policy, backends are never evicted and these groups are dead weight.
+---
+# general-purpose: default agent model. synthetic DeepSeek V4.1 Flash ->
+# OpenRouter DeepSeek V4 flash latest (NOT v4.1).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: general-purpose-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: general-purpose-synthetic
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:deepseek-ai/DeepSeek-V4.1-Flash
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: general-purpose-openrouter
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: "~deepseek/deepseek-v4-flash-latest"
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai
+---
+# coding-small: synthetic GLM-4.7-Flash -> OpenRouter DeepSeek V4 flash latest
+# (NOT v4.1).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: coding-small-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: coding-small-synthetic
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:zai-org/GLM-4.7-Flash
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: coding-small-openrouter
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: "~deepseek/deepseek-v4-flash-latest"
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai
+---
+# coding-medium: synthetic GLM-5.3-Flash -> OpenRouter DeepSeek V4 flash latest
+# (NOT v4.1).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: coding-medium-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: coding-medium-synthetic
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:zai-org/GLM-5.3-Flash
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: coding-medium-openrouter
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: "~deepseek/deepseek-v4-flash-latest"
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai
+---
+# coding-large: synthetic DeepSeek V4.1 Flash -> OpenRouter DeepSeek V4.1 flash
+# (the one chain that wants v4.1, not v4).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: coding-large-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: coding-large-synthetic
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:deepseek-ai/DeepSeek-V4.1-Flash
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: coding-large-openrouter
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: deepseek/deepseek-v4.1-flash
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai

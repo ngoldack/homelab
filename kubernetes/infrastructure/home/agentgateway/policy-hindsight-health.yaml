@@ -1,0 +1,20 @@
+# Health/eviction policy for the hindsight-chain backend: 5xx and 429
+# responses evict the answering provider on the first occurrence, so the
+# chain fails over to the next priority group (OpenRouter). Without this
+# policy, backends are never evicted and failover never fires.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: hindsight-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: hindsight-chain
+  backend:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        duration: 10s
+        consecutiveFailures: 1

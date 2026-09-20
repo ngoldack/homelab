@@ -1,0 +1,23 @@
+# Retry policy for the key-authenticated routes: when a backend answers 429
+# or 500, retry once (attempts counts the initial attempt; 2 = one retry)
+# after 1s. Retries prefer a different backend, so combined with the health
+# policies' eviction this produces transparent failover — the client never
+# sees the first error. Without eviction, a retry loops onto the same
+# failing group.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: key-route-retry
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: local-llm-key
+  traffic:
+    retry:
+      attempts: 2
+      backoff: 1s
+      codes:
+        - 429
+        - 500

@@ -1,0 +1,46 @@
+# Hindsight's LLM chain: synthetic gpt-oss-120b primary, OpenRouter fallback.
+#
+# Groups are priority order (agentgateway failover mechanism): the gateway
+# tries group 1 first and only moves to group 2 once every provider in
+# group 1 is evicted. Eviction is driven by the hindsight-health policy
+# (policy-hindsight-health.yaml) — without it, this backend never fails over.
+#
+# Group 1 is a verbatim copy of the synthetic-hf-openai-gpt-oss-120b provider
+# from backends.yaml (keep in sync); group 2 mirrors the openrouter backend
+# shape but pins openai.model so the client's `hf:` model string is replaced
+# per group (openai/gpt-oss-120b is how OpenRouter names the same model).
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: hindsight-chain
+  namespace: agentgateway
+spec:
+  ai:
+    groups:
+      - providers:
+          - name: synthetic-gpt-oss
+            host: api.synthetic.new
+            port: 443
+            path: /v1/chat/completions
+            openai:
+              model: hf:openai/gpt-oss-120b
+            policies:
+              auth:
+                secretRef:
+                  name: synthetic-key
+              tls:
+                sni: api.synthetic.new
+      - providers:
+          - name: openrouter-gpt-oss
+            host: openrouter.ai
+            port: 443
+            path: /api/v1/chat/completions
+            openai:
+              model: openai/gpt-oss-120b
+            policies:
+              auth:
+                secretRef:
+                  name: openrouter-key
+              tls:
+                sni: openrouter.ai

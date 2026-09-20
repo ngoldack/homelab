@@ -21,13 +21,14 @@ hermes_events_rejected_total (metrics.py).
 Env (k8sapi.client_from_env + config plumbing):
   EGRESS_HMAC_SECRET (required) | EGRESS_LISTEN_PORT (8080)
   EGRESS_QUARANTINE_NAMESPACE (hermes-sandbox) | EGRESS_QUARANTINE_CONFIGMAP (hermes-quarantine)
-  EGRESS_QUARANTINE_TTL_S (86400)
+  EGRESS_QUARANTINE_TTL_S (86400) | EGRESS_QUARANTINE_SWEEP_S (3600)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -44,6 +45,8 @@ METRICS = metrics_mod.Metrics()
 METRICS.declare("hermes_quarantine_total", "Sessions quarantined by the reaper.")
 METRICS.declare("hermes_egress_denied_total", "Egress deny events consumed.")
 METRICS.declare("hermes_events_rejected_total", "Events rejected (signature/replay/chain).")
+METRICS.declare("hermes_quarantine_sweep_total", "Ledger TTL sweeps performed by the reaper.")
+METRICS.declare("hermes_quarantine_swept_total", "Expired ledger entries dropped by the reaper.")
 
 
 @dataclass(frozen=True)
@@ -53,7 +56,7 @@ class ReaperConfig:
     configmap: str
     quarantine_ttl_s: int
     listen_port: int
-
+    sweep_interval_s: int = 3600
 
 def quarantine_entry(event: dict, now: int, default_ttl_s: int = 0) -> str:
     """The ConfigMap value for one quarantine: reason/strikes/TTL, one line.
@@ -182,6 +185,64 @@ class Reaper:
                 self.config.namespace, self.config.configmap, data,
                 str((existing.get("metadata") or {}).get("resourceVersion") or ""),
             )
+    def _sweep_expired(self, now: Optional[int] = None) -> int:
+        """Drop ledger entries whose ttl_s has passed. Returns the count removed.
+
+        The ConfigMap key holds one session hash; the value is a JSON line
+        (quarantine_entry) whose ``ttl_s`` is set at write time. A sweep
+        re-reads the whole ledger and rewrites it with only live entries, so a
+        concurrent writer between read and replace surfaces as a 409 and is
+        merged by the same write-back logic _write_ledger uses.
+        """
+        moment = int(time.time()) if now is None else now
+        existing = self.k8s.get_configmap(self.config.namespace, self.config.configmap)
+        if existing is None:
+            return 0
+        data = dict(existing.get("data") or {})
+        dropped: list[str] = []
+        for key, value in list(data.items()):
+            try:
+                entry = json.loads(value)
+                ttl_s = int(entry.get("ttl_s") or 0)
+            except (ValueError, TypeError, AttributeError):
+                # A malformed entry cannot expire by its own clock; leave it
+                # alone (a corrupt ledger should not be silently deleted by
+                # the sweeper).
+                continue
+            if ttl_s and ttl_s <= moment:
+                dropped.append(key)
+        if not dropped:
+            return 0
+        resource_version = str((existing.get("metadata") or {}).get("resourceVersion") or "")
+        for key in dropped:
+            data.pop(key, None)
+        try:
+            self.k8s.replace_configmap(
+                self.config.namespace, self.config.configmap, data, resource_version
+            )
+        except K8sApiError as exc:
+            if exc.status != 409:
+                raise
+            # Concurrent writer beat us: re-read and let the NEXT sweep finish
+            # the job (an entry that was re-added with a fresh TTL keeps its
+            # new clock, so a retry here would risk dropping a live session).
+            LOG.warning("ledger sweep 409 (concurrent writer); next sweep retries")
+            return 0
+        METRICS.inc("hermes_quarantine_swept_total", amount=len(dropped))
+        LOG.info("ledger sweep: dropped %d expired key(s): %s", len(dropped), ", ".join(sorted(dropped)))
+        return len(dropped)
+
+    def sweep_forever(self, interval_s: int) -> None:
+        """Periodic TTL sweep — the daemon thread target (plan 2.E)."""
+        while True:
+            try:
+                self._sweep_expired()
+                METRICS.inc("hermes_quarantine_sweep_total")
+            except K8sApiError as exc:
+                # The ledger write-back can fail transiently; the next
+                # interval retries. Never crash the sweep thread.
+                LOG.error("ledger sweep failed: %s", exc)
+            time.sleep(max(1, int(interval_s or 0)))
 
     # -- startup ----------------------------------------------------------
     def ensure_ledger(self) -> None:
@@ -231,6 +292,7 @@ def main(argv: Optional[list[str]] = None) -> int:  # noqa: ARG001 - module argv
         configmap=env_str("EGRESS_QUARANTINE_CONFIGMAP", "hermes-quarantine") or "hermes-quarantine",
         quarantine_ttl_s=env_int("EGRESS_QUARANTINE_TTL_S", 86400),
         listen_port=env_int("EGRESS_LISTEN_PORT", 8080),
+        sweep_interval_s=env_int("EGRESS_QUARANTINE_SWEEP_S", 3600),
     )
     reaper = Reaper(config, K8sClient(), auth.EventReplayGuard())
     try:
@@ -240,6 +302,17 @@ def main(argv: Optional[list[str]] = None) -> int:  # noqa: ARG001 - module argv
         # Startup proceeds: the ledger's absence surfaces on the first event
         # (503) and Kyverno's fail-closed policy reports the same condition.
         LOG.error("hermes-quarantine ledger create failed: %s", exc)
+    sweep_thread = threading.Thread(
+        target=reaper.sweep_forever,
+        args=(config.sweep_interval_s,),
+        name="ledger-ttl-sweep",
+        daemon=True,
+    )
+    sweep_thread.start()
+    LOG.info(
+        "ledger TTL sweep thread started (every %ds)",
+        config.sweep_interval_s,
+    )
     server = build_server(reaper, port=config.listen_port)
     LOG.info("reaper listening on :%d (ledger %s/%s)", config.listen_port, config.namespace, config.configmap)
     server.serve_forever()

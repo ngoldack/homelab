@@ -383,3 +383,57 @@ def test_healthz_and_metrics_are_open(server):
 
 def test_unknown_path_is_not_found(server):
     assert _request(server, "GET", "/nope")[0] == 404
+
+
+# --- ledger TTL sweep (plan 2.E) -------------------------------------------
+
+
+def test_sweep_drops_only_expired_ledger_keys(reaper):
+    reaper_obj, stub = reaper
+    # Two live (future TTL) + one expired (past TTL).
+    stub.configmap = {
+        "data": {
+            "a" * 64: quarantine_entry({"ttl_s": 3600}, NOW - 10, default_ttl_s=86400),
+            "b" * 64: quarantine_entry({"ttl_s": 86400}, NOW, default_ttl_s=86400),
+            "c" * 64: quarantine_entry({"ttl_s": 0}, NOW - 7200, default_ttl_s=0),
+        },
+        "metadata": {"resourceVersion": "1"},
+    }
+
+    removed = reaper_obj._sweep_expired(now=NOW)
+
+    assert removed == 1
+    assert "c" * 64 not in stub.configmap["data"]
+    assert "a" * 64 in stub.configmap["data"]
+    assert "b" * 64 in stub.configmap["data"]
+
+
+def test_sweep_leaves_ledger_untouched_when_nothing_expired(reaper):
+    reaper_obj, stub = reaper
+    stub.configmap = {
+        "data": {
+            "a" * 64: quarantine_entry({"ttl_s": 3600}, NOW, default_ttl_s=86400),
+        },
+        "metadata": {"resourceVersion": "1"},
+    }
+
+    removed = reaper_obj._sweep_expired(now=NOW)
+
+    assert removed == 0
+    assert "a" * 64 in stub.configmap["data"]
+
+
+def test_sweep_skips_malformed_entries_and_reports_metric(reaper):
+    reaper_obj, stub = reaper
+    stub.configmap = {
+        "data": {
+            "a" * 64: quarantine_entry({"ttl_s": 3600}, NOW, default_ttl_s=86400),
+            "bad": "not-json{",
+        },
+        "metadata": {"resourceVersion": "1"},
+    }
+
+    removed = reaper_obj._sweep_expired(now=NOW)
+
+    assert removed == 0
+    assert {"bad"} <= set(stub.configmap["data"].keys())

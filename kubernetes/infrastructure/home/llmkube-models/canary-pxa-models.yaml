@@ -6,11 +6,9 @@
 # findings apply. `format: gguf` matches the file extension; the pxa engine parses
 # the PXQ bytes at serve time, the operator only caches the byte blobs.
 #
-# NOTE: pxa-coder-35b is a ~17.7 GiB PXQ4 file — `layers: -1` WILL oversubscribe the
-# 16 GiB card at load. The Step-5 boot ladder reduces hardware.gpu.layers
-# (-1 -> 30 -> 20) until it loads; the KV-restore test stays valid (attention/KV on
-# GPU). pxa-fusion4-35b uses the PXQ2 tier (10.5 GiB) — the card's documented
-# "one 16 GB card (P100/V100/T4)" tier; the PXQ4 tier does not fit.
+# NOTE: pxa-coder-35b is a ~17.7 GiB PXQ4 file — full offload (-1) OOMs on the
+# 16 GiB card, so `layers: 30` pins the partial-offload configuration the boot
+# ladder lands on; the KV-restore test stays valid (attention/KV on GPU).
 apiVersion: inference.llmkube.dev/v1alpha1
 kind: Model
 metadata:
@@ -28,6 +26,7 @@ spec:
       count: 1
       vendor: nvidia
       memory: "16Gi"
+      # Full offload — the PXQ2 tier is the card's "one 16 GB card" tier.
       layers: -1
   resources:
     cpu: "4"
@@ -50,7 +49,9 @@ spec:
       count: 1
       vendor: nvidia
       memory: "16Gi"
-      layers: -1
+      # Partial offload: the ~17.7 GiB PXQ4 file cannot fully fit the 16 GiB P100;
+      # 30/41 layers on GPU is the ladder's landing configuration.
+      layers: 30
   resources:
     cpu: "4"
     memory: "8Gi"

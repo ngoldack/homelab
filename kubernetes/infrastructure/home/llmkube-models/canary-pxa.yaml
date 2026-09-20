@@ -72,6 +72,12 @@ spec:
   cacheTypeK: q8_0
   cacheTypeV: q8_0
   parallelSlots: 1
+  # b/ub 512: pxa's gallocr pooled "compute buffer" (~1.9 GiB, ctx-independent)
+  # exceeded the 16 GiB card. 512 == the llama.cpp default ubatch the production
+  # parity run also uses, so prefill/decode parity is unaffected (only the
+  # allocator's scratch pool shrinks). See docs/pxa-qwen36-benchmark-results.md.
+  batchSize: 512
+  uBatchSize: 512
   endpoint:
     port: 8080
     type: ClusterIP

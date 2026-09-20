@@ -31,6 +31,22 @@ ignore: |
   # of the vendored agent-sandbox upstream manifests. Same never-hand-formatted
   # rationale as the ignore above; its own state is the user's working tree.
   feature/**
+  # Image-build Jobs and their model canaries: hand-terse manifests whose
+  # `args:` blocks are long multi-line shell build scripts (curl/buildctl/
+  # cosign invocations). Wrapping them to yamllint's 120-col limit would
+  # either break the shell (newline-sensitive) or churn the scripts; their
+  # compact sequence style also trips the default indentation rule. These are
+  # declarative Job definitions reviewed for correctness, not formatted
+  # output — same never-hand-formatted rationale as the vendored entries
+  # above. The buildctl/registry-credentials wiring is what matters, not the
+  # column count.
+  kubernetes/infrastructure/home/image-builds/*.yaml
+  # llmkube model canary window toggles: JSON-ish one-line model specs (long
+  # lines by construction), toggled by git commits, never hand-formatted.
+  kubernetes/infrastructure/home/llmkube-models/canary-pxa-models.yaml
+  # hermes-egress policy ConfigMap: the embedded CEL/OPA policy expressions
+  # are one-liners; reflowing them would obscure the policy text.
+  kubernetes/infrastructure/home/hermes-egress/policy-configmap.yaml
 
 rules:
   line-length:

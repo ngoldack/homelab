@@ -588,7 +588,17 @@ metadata:
     policies.kyverno.io/category: Hermes sandbox
     policies.kyverno.io/severity: high
 spec:
-  validationFailureAction: Audit
+  # ENFORCED 2026-09-20 (docs/hermes-review.md Tier 1, unit 1.A). Evidence for
+  # the flip: PolicyReport baseline clean (no live admission report for
+  # hermes-sandbox claims); dry-run proof — a claim carrying a quarantined
+  # session hash produced this policy's warning under Audit and is denied
+  # under Enforce. A quarantine now rejects NEW claims for that session at
+  # admission (live claim deletion remains the reaper's job, unchanged).
+  #
+  # BREAK-GLASS: any exception must carry the
+  # homelab.ngoldack.de/policy-exceptions annotation (owner/reason/review-date)
+  # plus a docs/policy-exceptions.md entry, mirroring verify-images-first-party.
+  validationFailureAction: Enforce
   emitWarning: true
   background: true
   # Fail-closed on the context lookup (see header): a reaper outage must

@@ -227,22 +227,19 @@ check "RFC1918 kill quarantined the session and reaped its claim" "[ '$kill_ok' 
 # applies after the ledger write can miss the fresh entry.
 QUAR_MSG=""
 for _ in $(seq 36); do
-  if printf '%s' "$CLAIM_JSON" | $K -n hermes-sandbox apply -f - --request-timeout=10s 2>&1 \
-       | grep -qi 'session is quarantined'; then
+  # ENFORCED (2026-09-20): a re-claim carrying the quarantined session hash
+  # is now REJECTED at admission by hermes-session-quarantine; an apply that
+  # fails with the quarantine message is the PASS. Wait the retry window for
+  # Kyverno's ConfigMap-context cache to pick up the fresh ledger entry.
+  if ! OUT=$($K -n hermes-sandbox apply -f - --request-timeout=10s <<EOF 2>&1
+$CLAIM_JSON
+EOF
+   ) && printf '%s' "$OUT" | grep -qi 'session is quarantined'; then
     QUAR_MSG="seen"; break
   fi
   sleep 5
 done
-# SOFT assertion: the policy is Audit-mode defense in depth, and its ConfigMap
-# context cache can lag the ledger write well past this script's budget (the
-# SAME session's re-claim warns when applied a few minutes later — verified by
-# hand twice on 2026-09-19). Reporting it without aborting keeps scenarios 1-4
-# running; a 'not seen' here is a Kyverno cache artifact, not a guard failure.
-if [ "$QUAR_MSG" = "seen" ]; then
-  say "PASS: re-claim flagged by quarantine policy (message present)"
-else
-  say "SOFT-FAIL: quarantine-policy warning not observed within the retry window (Kyverno context-cache lag; verify by hand with a later apply)"
-fi
+check "re-claim denied by quarantine policy (Enforce)" "[ '$QUAR_MSG' = 'seen' ]"
 
 # 6. Scenario 4: bypass attempt → Cilium drop. A pod in hermes-sandbox
 #    CONNECTing DIRECTLY to a world address (no proxy) is default-deny.

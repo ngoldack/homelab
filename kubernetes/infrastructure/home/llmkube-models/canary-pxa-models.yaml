@@ -50,8 +50,8 @@ spec:
       vendor: nvidia
       memory: "16Gi"
       # Partial offload: the ~17.7 GiB PXQ4 file cannot fully fit the 16 GiB P100;
-      # 30/41 layers on GPU is the ladder's landing configuration.
-      layers: 30
+      # 30 layers pinned VRAM to 16165 MiB (> 15.5 GiB cap), so 24 lands ~13 GiB.
+      layers: 24
   resources:
     cpu: "4"
     memory: "8Gi"

@@ -64,7 +64,10 @@ spec:
   runtimeClassName: nvidia
   nodeSelector:
     hardware/gpu.model: Tesla-P100
-  contextSize: 32768
+  contextSize: 20480
+  # ctx 32768 (production parity) OOMs on the pxa engine: tensors 14239 MiB +
+  # compute reserve 1956 MiB > ~16124 MiB free on the 16 GiB card. 20480 keeps
+  # every bench cell (16,384 + outputs) full-GPU. See results doc.
   flashAttention: true
   cacheTypeK: q8_0
   cacheTypeV: q8_0

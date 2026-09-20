@@ -3,7 +3,7 @@
 # egress-authorizer-policy per the guard's docstring, key policy.json).
 #
 # Schema (validated by load_policy — unknown keys are PolicyError, fail-fast):
-#   {version: str, profiles: {<profile>: {allow: [{host, ports[]}], budget_bytes?}},
+#   {version: str, profiles: {<profile>: {allow: [{host, ports[]}]}},
 #    kill_cidrs?: [CIDR], kill_exact?: [IP]}
 # AllowEntry host semantics (policy.py AllowEntry.matches): an entry starting
 # with "." matches the bare name and any subdomain suffix; otherwise EXACT host
@@ -32,10 +32,13 @@
 # 172.20.0.0/16, service_cidr 172.21.0.0/16). Node/Proxmox/management VLANs are
 # inside RFC1918 ranges the builtin set already kills.
 #
-# Byte budgets: advisory tripwires, not the primary control — real byte
-# accounting needs an Envoy-side reporter, and the authorizer consumes the
-# x-egress-bytes hint only when one is supplied (README). Budgets are set far
-# above any legitimate dependency fetch.
+# Byte budgets were removed 2026-09-20: no Envoy-side byte reporter exists, so
+# the x-egress-bytes hint is never supplied and the tripwire never fires; the
+# rows were inert config paying the cost of a control that cannot signal (plan
+# Unit 2.D). Remove-only — a session that legitimately transfers more than the
+# old ceiling (e.g. a large model artifact through the web profile) is no
+# longer cut off mid-transfer by a phantom budget. Real byte accounting returns
+# with an Envoy byte reporter (EGRESS_BYTES hint), not with config.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -46,11 +49,10 @@ metadata:
 data:
   policy.json: |
     {
-      "version": "2026-09-18.1",
+      "version": "2026-09-18.2",
       "profiles": {
         "offline": {
-          "allow": [],
-          "budget_bytes": 1048576
+          "allow": []
         },
         "core": {
           "allow": [
@@ -59,29 +61,25 @@ data:
             {"host": "proxy.golang.org", "ports": [443]},
             {"host": "sum.golang.org", "ports": [443]},
             {"host": "registry.npmjs.org", "ports": [443]}
-          ],
-          "budget_bytes": 536870912
+          ]
         },
         "python": {
           "allow": [
             {"host": "pypi.org", "ports": [443]},
             {"host": "files.pythonhosted.org", "ports": [443]}
-          ],
-          "budget_bytes": 1073741824
+          ]
         },
         "go": {
           "allow": [
             {"host": "proxy.golang.org", "ports": [443]},
             {"host": "sum.golang.org", "ports": [443]}
-          ],
-          "budget_bytes": 1073741824
+          ]
         },
         "node": {
           "allow": [
             {"host": "registry.npmjs.org", "ports": [443]},
             {"host": "registry.npmjs.com", "ports": [443]}
-          ],
-          "budget_bytes": 1073741824
+          ]
         },
         "web": {
           "allow": [
@@ -90,8 +88,7 @@ data:
             {"host": "proxy.golang.org", "ports": [443]},
             {"host": "sum.golang.org", "ports": [443]},
             {"host": "registry.npmjs.org", "ports": [443]}
-          ],
-          "budget_bytes": 1073741824
+          ]
         }
       },
       "kill_cidrs": [

@@ -48,6 +48,13 @@ spec:
       # 16 MiB segment fills (first restore drill died exactly on this:
       # "recovery ended before configured recovery target was reached").
       archive_timeout: "60"
+      # 100 (CNPG default) -> 200: the worker/API pooled connection sets
+      # plus the claimed-retain LLM fan-out repeatedly blew past the 97
+      # usable connections ("TooManyConnectionsError: sorry, too many
+      # clients already", 2026-09-20). 200 is still well inside the 2Gi
+      # memory limit's headroom for this workload (idle conns are ~1-2MB
+      # each, plus shared_buffers).
+      max_connections: "200"
   # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
   # (objectstore.yaml) owns destination/retention; this reference enables
   # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-

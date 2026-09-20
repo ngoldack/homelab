@@ -153,7 +153,16 @@ spec:
       # chains while keeping the home CPU pool schedulable (the 3-worker setup
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
-      replicaCount: 2
+      # SINGLE WORKER (2026-09-20): the DB connection ceiling forced it. Each
+      # worker keeps a live pooled conn set (observed worker-0 holding 22 of
+      # the cluster's 100 max_connections, worker-1 11) and the claimed-retain
+      # fan-out runs dozens of parallel 10-25min LLM calls (synthetic 429
+      # eviction -> OpenRouter fallback), each holding its DB conn for the
+      # call duration. 2 workers reliably blew past the 97 usable connections
+      # -> "TooManyConnectionsError: sorry, too many clients already" storms
+      # in every worker poll loop. 1 worker halves the pool AND the LLM
+      # concurrency; throughput returns when the model provider does.
+      replicaCount: 1
       # Memory raised three times on 2026-09-18. Evidence, not estimation —
       # live VmRSS of a booting worker, sampled every 2s:
       #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)

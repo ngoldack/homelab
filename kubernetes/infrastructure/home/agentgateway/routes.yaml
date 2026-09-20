@@ -75,6 +75,21 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: synthetic-hf-openai-gpt-oss-120b
+    # OpenAI-compatible path for browser-side AI assistants (Headlamp's AI
+    # plugin normalizes its baseUrl to end in /v1 and appends
+    # /chat/completions, so this is the exact path such a client emits).
+    # JWT-authenticated (the gateway's Strict JWT policy); NOT under /v1/key/*
+    # (apiKeyAuthentication Strict on X-Api-Key would reject a JWT-only
+    # request). Targets the general-purpose chain: synthetic-first with
+    # OpenRouter fallback, so it stays healthy while synthetic rate-limits.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /assistant/v1/chat/completions
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: general-purpose-chain
     - matches:
         - path:
             type: PathPrefix

@@ -15,6 +15,10 @@ resources:
   # dependsOn monitoring-crds, which dependsOn infra-controllers.
   - monitoring-crds.yaml
   - monitoring.yaml
+  # metrics-server: the Kubernetes Metrics API (metrics.k8s.io) provider that
+  # Headlamp's native per-pod usage column reads. Depends on infra-controllers
+  # for the shared HelmRepository (sources.yaml).
+  - metrics-server.yaml
   # Immich and its database operator.
   - cnpg-operator.yaml
   - immich.yaml

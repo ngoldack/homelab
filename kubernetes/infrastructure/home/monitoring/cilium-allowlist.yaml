@@ -139,6 +139,16 @@ spec:
     # Health probes from kubelet.
     - fromEntities:
         - health
+    # Headlamp's Prometheus plugin queries vlsingle (9428) directly for its
+    # "Show Prometheus metrics" graphs — the destination half of the headlamp
+    # egress rule in ../headlamp/cilium-allowlist.yaml. The source half is
+    # required too; without it the query is dropped (fail-closed, by design).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: headlamp
+      toPorts:
+        - ports:
+            - {port: "9428", protocol: TCP}
     # The VictoriaMetrics operator runs an admission webhook on 9443; the API
     # server calls it from the node, i.e. as kube-apiserver/host/remote-node —
     # the same triple the cert-manager webhooks needed.

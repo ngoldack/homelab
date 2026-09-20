@@ -1,0 +1,23 @@
+# metrics-server default-deny — same semantics as every control namespace:
+# selecting an endpoint with an ingress/egress section flips that direction to
+# default-deny; the allowlist in cilium-allowlist.yaml is the sole exception.
+#
+# metrics-server's inbound is the Kubernetes API server forwarding
+# /apis/metrics.k8s.io/* (Headlamp reaches the apiserver, which proxies to this
+# release's APIService on 443). Its outbound is the kubelet reads it performs
+# on each node. Nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: metrics-server-default-deny
+  namespace: metrics-server
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in metrics-server. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

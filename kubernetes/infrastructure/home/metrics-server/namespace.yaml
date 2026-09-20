@@ -1,0 +1,20 @@
+# The metrics-server namespace: serves the Kubernetes Metrics API
+# (v1beta1.metrics.k8s.io) that Headlamp's native per-pod CPU/memory usage
+# column reads. metrics-server talks to each node's kubelet (via the
+# apiserver's node-status-port proxy) and aggregates container resource
+# metrics into the standardized Metrics API. It is separate from the
+# VictoriaMetrics Prometheus graphs — those are Headlamp's Prometheus plugin
+# pointed at vlsingle (see the headlamp allowlist comment), and this serves
+# the OTHER surfate: the in-dashboard usage bars.
+#
+# Pod Security Admission: audit+warn at `restricted` (the chart's shipped
+# securityContext already satisfies restricted — non-root, RuntimeDefault
+# seccomp, capped capabilities, read-only root).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics-server
+  labels:
+    app.kubernetes.io/name: metrics-server
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

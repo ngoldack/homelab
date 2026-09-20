@@ -86,37 +86,37 @@ spec:
         endpoints:
           custom:
             - name: "agentgateway"
-              apiKey: "${AGENTGATEWAY_API_KEY}"
+              apiKey: "$${AGENTGATEWAY_API_KEY}"
               baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/general-purpose"
               headers:
-                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+                X-Api-Key: "$${AGENTGATEWAY_API_KEY}"
               models: {default: ["general-purpose"], fetch: false}
               titleConvo: true
               titleModel: "general-purpose"
               modelDisplayLabel: "agentgateway"
             - name: "agentgateway-coding"
-              apiKey: "${AGENTGATEWAY_API_KEY}"
+              apiKey: "$${AGENTGATEWAY_API_KEY}"
               baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/coding-large"
               headers:
-                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+                X-Api-Key: "$${AGENTGATEWAY_API_KEY}"
               models: {default: ["coding-large"], fetch: false}
               titleConvo: true
               titleModel: "coding-large"
               modelDisplayLabel: "agentgateway (coding)"
             - name: "agentgateway-fast"
-              apiKey: "${AGENTGATEWAY_API_KEY}"
+              apiKey: "$${AGENTGATEWAY_API_KEY}"
               baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/coding-small"
               headers:
-                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+                X-Api-Key: "$${AGENTGATEWAY_API_KEY}"
               models: {default: ["coding-small"], fetch: false}
               titleConvo: true
               titleModel: "coding-small"
               modelDisplayLabel: "agentgateway (fast)"
             - name: "agentgateway-free"
-              apiKey: "${AGENTGATEWAY_API_KEY}"
+              apiKey: "$${AGENTGATEWAY_API_KEY}"
               baseURL: "http://agentgateway.agentgateway.svc.cluster.local/v1/key/free"
               headers:
-                X-Api-Key: "${AGENTGATEWAY_API_KEY}"
+                X-Api-Key: "$${AGENTGATEWAY_API_KEY}"
               models: {default: ["free"], fetch: false}
               titleConvo: true
               titleModel: "free"

@@ -9,13 +9,12 @@
 # Dockerfile is fetched from that tree by path, exactly like llama-kv-broker.yaml:
 # `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
 # and the Dockerfile's COPY sources are repo-relative.
-# ACTION REQUIRED — the context SHA below (4cb8c87, 2026-09-18) PREDATES the Go
-# port: the Dockerfile in that tree is the former Python one, so running this Job
-# as written rebuilds the PYTHON image. Bump the context SHA to a commit whose tree
-# carries the Go sources (image-builds/hermes-egress-guard/go/ incl. go.mod, plus
-# the rewritten Dockerfile) — together with the --output tag and the Job name suffix
-# — then run it; THAT build produces the Go image. Never run it against the old SHA
-# and re-pin the result.
+# GO BUILD — the context SHA below (fe3dfb3, "port authorizer+reaper to Go") is the
+# commit whose tree carries the Go sources (image-builds/hermes-egress-guard/go/
+# incl. go.mod and cmd/guard) and the rewritten Dockerfile, so this Job now builds
+# the Go image. It replaces the 4cb8c87 pin, which pointed at the former Python
+# tree; never re-pin a digest built from that SHA. The context SHA, the --output
+# tag and the Job name suffix travel together (Jobs are immutable).
 #
 # SIGNING — the job runs the docs/hermes-review.md Unit 4.2 pipeline against the
 # pushed DIGEST: trivy CRITICAL gate -> CycloneDX SBOM (attached with cosign) ->
@@ -28,8 +27,8 @@
 # comes from the password item in the same secret. None of this is new work —
 # only the Dockerfile's sources changed, from Python to Go.
 #
-# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3 — after a GO build,
-# the digest printed by buildctl is pinned in hermes-egress/authorizer.yaml and
+# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3 — the digest
+# printed by buildctl is pinned in hermes-egress/authorizer.yaml and
 # hermes-egress/reaper.yaml. Last built digest (the Python image, 2026-09-18):
 #   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
 #
@@ -40,7 +39,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-egress-authorizer-s3
+  name: build-hermes-egress-authorizer-s4
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -123,7 +122,7 @@ spec:
 
           echo "== provenance attest ==" &&
 
-          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"4cb8c87"}},"buildMetadata":{"reproducible":"false"}}''
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"fe3dfb3"}},"buildMetadata":{"reproducible":"false"}}''
           > /tmp/prov.json &&
 
           DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json

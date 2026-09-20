@@ -17,7 +17,7 @@
 
 ## Slot-persistence verdict
 
-**RESTORE BUG: FIXED BY PXA** on every tested qwen35moe-hybrid model (Qwen3.6 GGUF and Fusion4-PXQ2; coder pending).
+**RESTORE BUG: FIXED BY PXA** on every tested qwen35moe-hybrid model (Qwen3.6 GGUF, Fusion4-PXQ2, Coder-PXQ4).
 
 - Production (llama-p100, documented flaw reproduced): save 200 (790 ms, 145 MB) → erase → restore 200 (`n_restored: 7312`) → next identical request **re-evaluated all 7432 tokens in 69.7 s** (cached = 0; the ~44 s pathology).
 - **PXA canary (Qwen3.6 GGUF):** save 200 (`n_saved: 8768`, ~327 MB ring) → **pod delete / process restart** → file persisted on the dedicated PVC → restore 200 (`n_restored: 8768`, 1.3 s) → next request evaluated only the **156-token delta in 3.07 s** (prompt_n = 156 vs 8768; cached prefix ≈ 8768 ≥ 8000). Turn-1 cold was 85.6 s for comparison.
@@ -36,9 +36,9 @@ The mechanism repair (`--kv-unified` + context checkpoints) makes the restored r
 
 ## Fidelity / output equivalence
 
-- Cross-engine byte-equality (same prompt, temp 0) measured between production and pxa on the shared GGUF; kernels differ (pxa tile-f16 FA, differing accumulation) so outputs are *reported*, not required equal. (Paired runs collected; equality ratio in commit notes.)
-- JSON tool-call schema compliance: 100% (3/3) on both pxa canaries (qwen36 GGUF, fusion4).
-- Determinism (pxa, two identical temp-0 runs): stable acros the ladder.
+- **Cross-engine byte-equality was NOT measured.** The window design keeps one engine resident at a time (exclusive 16 GiB card), and `hack/llm-bench.sh` records only summary timings, not response content. A paired temp-0 comparison would require both services up simultaneously (impossible on this single card) or a second window per prompt. Kernel differences alone (pxa tile-f16 flash-attention, differing accumulation order) mean exact byte equality between the engines is not expected.
+- JSON tool-call schema compliance: 100% (3/3) on all three pxa canaries (Qwen3.6 GGUF, Fusion4-PXQ2, Coder-PXQ4). Production was not given the controlled tool-cell (the pxa-ab suite's JSON cell ran only on the canaries; production's `/v1/chat/completions` JSON path is exercised by the broker/agentgateway in normal service, not measured here).
+- Per-engine determinism was spot-checked (sanity completions at temp 0), not a repeated-run byte-gate; pxa's own bit-exactness gates were not re-run here.
 
 ## Caveats
 

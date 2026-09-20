@@ -1,29 +1,7 @@
-# Build the Hermes gateway image (hermes-agent-sandbox-plugin).
-#
-# --opt=context pins the repo commit whose Dockerfile carries the build: the
-# base image is index-digest-pinned, the plugin venv is wired via a .pth
-# derived from the interpreter, and the build asserts the plugin is importable
-# and discoverable. It derives from the Hermes base image
-# (nousresearch/hermes-agent:v2026.9.7) and installs the agent-sandbox SDK +
-# plugin, registering the plugin via the hermes_agent.plugins entry point.
-#
-# OUTPUT: this Job records the digest of the image it BUILT (the base image's
-# digest lives in the Dockerfile). Last built digest — the one
-# hermes/statefulset.yaml pins today:
-#   sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
-# Previous build (context ...#970fd38265526b9b150471093bf867fb540b32b6),
-# pinned until 2026-09-17:
-#   sha256:246a3c50471e5b3c62a87eaab62bbedec9a8874979af4ca4d118ab6f7f7aed37
-# Before that (context ...#035bc51a1a73):
-#   sha256:df25223f2264f0f5415652c248d77e394d6709dc646c4cefca9321b1ffddcc1c
-# Re-record the digest here and re-pin the StatefulSet after every rebuild.
-#
-# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
-# tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-2fbcf07
+  name: build-hermes-agent-sandbox-plugin-s1
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -34,40 +12,122 @@ spec:
       nodeSelector:
         topology.homelab/site: home
       containers:
-        - name: buildctl
-          image: moby/buildkit:v0.31.0
-          command:
-            - buildctl
-          args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#2fbcf0733e1390a46322a67561631101e2604b2c
-            - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07,push=true
-            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache
-            - --progress=plain
-          env:
-            - name: DOCKER_CONFIG
-              value: /docker
-          volumeMounts:
-            - name: certs
-              mountPath: /certs
-              readOnly: true
-            - name: docker
-              mountPath: /docker
-              readOnly: true
-      volumes:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+
+          echo "== fetch cosign (pinned) ==" &&
+
+          curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64
+          &&
+
+          printf ''caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n''
+          | sha256sum -c - &&
+
+          chmod +x /usr/local/bin/cosign &&
+
+          echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+
+          curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          &&
+
+          printf ''2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n''
+          | sha256sum -c - &&
+
+          tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+
+          chmod +x /usr/local/bin/trivy &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#2fbcf0733e1390a46322a67561631101e2604b2c''
+          ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          IMAGE=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07;
+
+          echo "== trivy gate ==" &&
+
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
+          &&
+
+          echo "== SBOM ==" &&
+
+          trivy image --format cyclonedx -o /tmp/sbom.xml --no-progress "$IMAGE" &&
+
+          echo "== attach sbom ==" &&
+
+          export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+
+          DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.xml --type cyclonedx
+          "$IMAGE" &&
+
+          echo "== provenance attest ==" &&
+
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"2fbcf0733e1390a46322a67561631101e2604b2c"}},"buildMetadata":{"reproducible":"false"}}''
+          > /tmp/prov.json &&
+
+          DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json
+          --key /cosign/cosign.key --tlog-upload=false "registry.ngoldack.de/hermes-agent-sandbox-plugin@$DIGEST"
+          &&
+
+          echo "== sign LAST ==" &&
+
+          DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false
+          "registry.ngoldack.de/hermes-agent-sandbox-plugin@$DIGEST" &&
+
+          echo "SIGNED $IMAGE ($DIGEST)"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
         - name: certs
-          secret:
-            secretName: buildctl-client-tls
+          mountPath: /certs
+          readOnly: true
         - name: docker
-          secret:
-            secretName: registry-credentials
-            items:
-              - key: .dockerconfigjson
-                path: config.json
+          mountPath: /docker
+          readOnly: true
+        - name: cosign
+          mountPath: /cosign
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      - name: cosign
+        secret:
+          secretName: cosign-signing-key
+          items:
+          - key: cosign.key
+            path: cosign.key
+          - key: password
+            path: password

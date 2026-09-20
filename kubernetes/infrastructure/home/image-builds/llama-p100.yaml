@@ -1,29 +1,10 @@
-# Build mainline llama.cpp v0.4.0 + shinbunbun's 29 P100 patches for the P100.
-#
-# WHY THIS IMAGE — the ONLY measured P100 path to >= 20 t/s decode on a
-# Qwen3.8-27B-class model (see the Dockerfile's header for the measurement
-# lineage and the ik-vs-mainline reasoning). It serves alongside ik:
-# ik sm60 for the deep-prompt-crash-fixed fallback; this image is the primary
-# >= 20 t/s candidate (native qwen35/qwen35moe + MTP on mainline v0.4.0).
-#
-# BUILD SHAPE — self-contained (qwen: the Dockerfile clones BOTH upstreams at
-# pinned SHAs and applies the 29 patches itself), so the operator context is
-# only provenance; nothing is COPY'd from it. The Dockerfile ships as a
-# ConfigMap (llama-p100-dockerfile), mounted at /dockerfile — same
-# --local dockerfile + dockerfilekey mechanism as build-ik-llama-19dfb71.
-#
-# RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the tag, and the
-# PATCHES_SHA/LLAMA_REF args in the Dockerfile together; Flux prunes the old Job.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-llama-p100-5ac8471
+  name: build-llama-p100-s1
   namespace: buildkit
 spec:
   backoffLimit: 2
-  # Whole-source clone + 29 patches + a CUDA compile of ~100 .cu files on a
-  # single arch. Generous, like the ik Job; the registry buildcache makes
-  # rebases incremental.
   activeDeadlineSeconds: 10800
   template:
     spec:
@@ -31,60 +12,128 @@ spec:
       nodeSelector:
         topology.homelab/site: home
       containers:
-        - name: buildctl
-          # Same version as the daemon (chart 1.8.0 -> appVersion v0.31.0).
-          image: moby/buildkit:v0.31.0
-          command:
-            - buildctl
-          args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            # Provenance only — the Dockerfile self-clones its real source at
-            # the pinned SHA and never COPYs from this context.
-            - --opt=context=https://github.com/ggml-org/llama.cpp.git#5ac847190e979e0da7c4a21806630805f396d487
-            # Our Dockerfile (with the PINNED patch-application logic), from the
-            # ConfigMap below.
-            - --local=dockerfile=/dockerfile
-            - --opt=dockerfilekey=dockerfile
-            # Single Pascal arch — the entire point of this image.
-            - --opt=build-arg:CUDA_DOCKER_ARCH=60
-            # Pushes to the cluster's own Zot (../registry/), same TLS setup as
-            # the ik image.
-            - --output=type=image,name=registry.ngoldack.de/llama-p100:0.4.0-p100,push=true
-            # Dedicated cache ref so this engine's layers don't collide with
-            # ik's buildcache.
-            - --export-cache=type=registry,ref=registry.ngoldack.de/llama-p100:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/llama-p100:buildcache
-            - --progress=plain
-          env:
-            - name: DOCKER_CONFIG
-              value: /docker
-          volumeMounts:
-            - name: certs
-              mountPath: /certs
-              readOnly: true
-            - name: docker
-              mountPath: /docker
-              readOnly: true
-            - name: dockerfile
-              mountPath: /dockerfile
-              readOnly: true
-      volumes:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+
+          echo "== fetch cosign (pinned) ==" &&
+
+          curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64
+          &&
+
+          printf ''caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n''
+          | sha256sum -c - &&
+
+          chmod +x /usr/local/bin/cosign &&
+
+          echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+
+          curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          &&
+
+          printf ''2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n''
+          | sha256sum -c - &&
+
+          tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+
+          chmod +x /usr/local/bin/trivy &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ggml-org/llama.cpp.git#5ac847190e979e0da7c4a21806630805f396d487''
+          ''--local=dockerfile=/dockerfile'' ''--opt=dockerfilekey=dockerfile'' ''--opt=build-arg:CUDA_DOCKER_ARCH=60''
+          ''--output=type=image,name=registry.ngoldack.de/llama-p100:0.4.0-p100,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/llama-p100:buildcache,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/llama-p100:buildcache''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          IMAGE=registry.ngoldack.de/llama-p100:0.4.0-p100;
+
+          echo "== trivy gate ==" &&
+
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
+          &&
+
+          echo "== SBOM ==" &&
+
+          trivy image --format cyclonedx -o /tmp/sbom.xml --no-progress "$IMAGE" &&
+
+          echo "== attach sbom ==" &&
+
+          export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+
+          DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.xml --type cyclonedx
+          "$IMAGE" &&
+
+          echo "== provenance attest ==" &&
+
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"5ac847190e979e0da7c4a21806630805f396d487"}},"buildMetadata":{"reproducible":"false"}}''
+          > /tmp/prov.json &&
+
+          DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json
+          --key /cosign/cosign.key --tlog-upload=false "registry.ngoldack.de/llama-p100@$DIGEST"
+          &&
+
+          echo "== sign LAST ==" &&
+
+          DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false
+          "registry.ngoldack.de/llama-p100@$DIGEST" &&
+
+          echo "SIGNED $IMAGE ($DIGEST)"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
         - name: certs
-          secret:
-            secretName: buildctl-client-tls
+          mountPath: /certs
+          readOnly: true
         - name: docker
-          secret:
-            secretName: registry-credentials
-            items:
-              - key: .dockerconfigjson
-                path: config.json
+          mountPath: /docker
+          readOnly: true
         - name: dockerfile
-          configMap:
-            # Generated by configMapGenerator in this directory's
-            # kustomization.yaml from llama-p100/dockerfile.
-            name: llama-p100-dockerfile
+          mountPath: /dockerfile
+          readOnly: true
+        - name: cosign
+          mountPath: /cosign
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      - name: dockerfile
+        configMap:
+          name: llama-p100-dockerfile
+      - name: cosign
+        secret:
+          secretName: cosign-signing-key
+          items:
+          - key: cosign.key
+            path: cosign.key
+          - key: password
+            path: password

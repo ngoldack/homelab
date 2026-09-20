@@ -1,146 +1,139 @@
-# Build ik_llama.cpp's llama-server for the P100, natively.
-#
-# WHY THIS IMAGE EXISTS
-#
-# ik_llama.cpp publishes no container images — only Dockerfiles — so there is
-# nothing to pull. And the mainline llama.cpp image this cluster currently runs
-# (ghcr.io/ggml-org/llama.cpp:server-cuda12, see ../llmkube/helmrelease.yaml)
-# is built for these architectures:
-#     50-virtual 61-virtual 70-virtual 75-virtual 80-virtual 86-real
-# The P100 is compute 6.0. There is no 60 in that list, and 61 is a different
-# card (it has the __dp4a integer dot-product instruction; 6.0 does not), so
-# the P100 falls back to the compute_50 PTX and JIT-compiles it at load. It
-# runs — but from kernels written for a two-generation-older target, forfeiting
-# the FP16 throughput that is the P100's one real advantage.
-#
-# ik_llama's own ggml/src/CMakeLists.txt defaults to "60;61;70;75;80" when
-# GGML_CUDA_F16 is set, which is exactly the right list — but its Dockerfile
-# hardcodes CUDA_DOCKER_ARCH="86;90" (Ampere and Hopper), which contains
-# nothing a Pascal card can execute at all. So the image has to be built here
-# with CUDA_DOCKER_ARCH=60 regardless.
-#
-# HOW THE BUILD GETS ITS SOURCE AND ITS BUILD FILE
-#
-# The build context is a git URL: BuildKit's Dockerfile frontend accepts it
-# (frontend/dockerui/context.go: DetectGitContext runs on opts["context"]), and
-# gitutil.IsCommitSHA means the fragment may be a full commit SHA, not just a
-# branch — so the source is pinned exactly, fetched by the builder directly
-# from GitHub, and this repo carries no copy of it.
-#
-# The Dockerfile itself is OURS (ik-llama/dockerfile, generated into a ConfigMap
-# by configMapGenerator and mounted at /dockerfile in the buildctl pod — buildkit
-# accepts a local Dockerfile alongside a remote context via `--local dockerfile=`
-# plus `--opt filename=...`). It is a vendored copy of ik's
-# .devops/llama-server-cuda.Dockerfile with one addition: the sm_60 fast-FP16
-# precision carve-out (llama.cpp#25593, turboquant tqp-v0.3.0). llama.cpp exempts
-# only sm_61 from the fast-FP16 math path, so the P100 (sm_60 — the one Pascal
-# card WITH fast FP16 hardware) silently accumulates in fp16 there. The patch
-# routes sm_60 math to fp32 accumulation; ik already does this for FA decode
-# (fattn.cu P100 carve-out), the patch closes FA prefill + MoE-MMQ scale math.
-# Zero expected tg change, free accuracy; the two seds are guarded by greps that
-# fail the build if ik's file shifts under a future bump.
-#
-# GGML_CUDA_F16=ON stays unset: the fp16-on-sm60 storage path has a known quality
-# bug with environment-dependent perf sign (llama.cpp#25593), and the sm_60
-# carve-out is independent of that flag (verified against ik's source — the gates
-# never reference GGML_CUDA_F16).
-#
-# RE-BUILDING
-#
-# The Job name embeds the short commit SHA. To build a newer ik_llama, change
-# the SHA in BOTH the name and the context fragment and the tag: Flux then sees
-# a new Job (Jobs are immutable, so editing one in place would fail) and prunes
-# the old one. That is the whole workflow — one commit, no kubectl.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-ik-llama-19dfb71
+  name: build-ik-llama-s1
   namespace: buildkit
 spec:
-  # A CUDA build is long; do not let a transient registry error restart it
-  # more than twice.
   backoffLimit: 2
-  # 3h. nvcc over ggml-cuda's ~100 .cu files is slow even for a single arch,
-  # and the first build has no registry cache to import.
   activeDeadlineSeconds: 10800
   template:
     spec:
       restartPolicy: Never
-      # buildctl is a thin gRPC client — it does no work itself and needs no
-      # privileges, no GPU and no particular node. All the heavy lifting
-      # happens in the buildkitd pod.
       nodeSelector:
         topology.homelab/site: home
       containers:
-        - name: buildctl
-          # Same version as the daemon (chart 1.8.0 → appVersion v0.31.0).
-          # This non-rootless image is used only because it is where buildctl
-          # ships; nothing in this pod runs privileged.
-          image: moby/buildkit:v0.31.0
-          command:
-            - buildctl
-          args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            # The remote source context. Everything after # is the git ref; a
-            # full commit SHA pins the tree exactly.
-            - --opt=context=https://github.com/ikawrakow/ik_llama.cpp.git#19dfb71bb8386d421f237030f0956de3e944d391
-            # Local Dockerfile (ours, with the sm60 fast-FP16 patch), mounted via
-            - --local=dockerfile=/dockerfile
-            - --opt=dockerfilekey=dockerfile
-            # The point of the whole exercise. Overrides the Dockerfile's
-            # ARG CUDA_DOCKER_ARCH="86;90", which no Pascal card can run.
-            - --opt=build-arg:CUDA_DOCKER_ARCH=60
-            # Pushes to the cluster's own Zot (../registry/), not GHCR. The
-            # hostname resolves via local DNS to the Gateway VIP and is
-            # covered by the existing Let's Encrypt wildcard, so both this
-            # push and containerd's later pull get a valid certificate with no
-            # trust configuration anywhere.
-            - --output=type=image,name=registry.ngoldack.de/ik-llama-server:sm60-19dfb71-fp16,push=true
-            # mode=max exports every intermediate layer, not just the final
-            # ones, so a rebuild after a source bump reuses the CUDA toolchain
-            # layers. This registry cache — not the pod's emptyDir — is what
-            # makes the builder disposable.
-            - --export-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache
-            # Readable in `kubectl logs`; the default tty renderer emits
-            # cursor-control escapes that make a log file unusable.
-            - --progress=plain
-          env:
-            # buildctl resolves registry credentials CLIENT-side and forwards
-            # them over the session, so the token lives here and never touches
-            # the shared builder.
-            - name: DOCKER_CONFIG
-              value: /docker
-          volumeMounts:
-            - name: certs
-              mountPath: /certs
-              readOnly: true
-            - name: docker
-              mountPath: /docker
-              readOnly: true
-            - name: dockerfile
-              mountPath: /dockerfile
-              readOnly: true
-      volumes:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+
+          echo "== fetch cosign (pinned) ==" &&
+
+          curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64
+          &&
+
+          printf ''caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n''
+          | sha256sum -c - &&
+
+          chmod +x /usr/local/bin/cosign &&
+
+          echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+
+          curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          &&
+
+          printf ''2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n''
+          | sha256sum -c - &&
+
+          tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+
+          chmod +x /usr/local/bin/trivy &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ikawrakow/ik_llama.cpp.git#19dfb71bb8386d421f237030f0956de3e944d391''
+          ''--local=dockerfile=/dockerfile'' ''--opt=dockerfilekey=dockerfile'' ''--opt=build-arg:CUDA_DOCKER_ARCH=60''
+          ''--output=type=image,name=registry.ngoldack.de/ik-llama-server:sm60-19dfb71-fp16,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/ik-llama-server:buildcache''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          IMAGE=registry.ngoldack.de/ik-llama-server:sm60-19dfb71-fp16;
+
+          echo "== trivy gate ==" &&
+
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
+          &&
+
+          echo "== SBOM ==" &&
+
+          trivy image --format cyclonedx -o /tmp/sbom.xml --no-progress "$IMAGE" &&
+
+          echo "== attach sbom ==" &&
+
+          export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+
+          DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.xml --type cyclonedx
+          "$IMAGE" &&
+
+          echo "== provenance attest ==" &&
+
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"19dfb71bb8386d421f237030f0956de3e944d391"}},"buildMetadata":{"reproducible":"false"}}''
+          > /tmp/prov.json &&
+
+          DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json
+          --key /cosign/cosign.key --tlog-upload=false "registry.ngoldack.de/ik-llama-server@$DIGEST"
+          &&
+
+          echo "== sign LAST ==" &&
+
+          DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false
+          "registry.ngoldack.de/ik-llama-server@$DIGEST" &&
+
+          echo "SIGNED $IMAGE ($DIGEST)"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
         - name: certs
-          secret:
-            secretName: buildctl-client-tls
+          mountPath: /certs
+          readOnly: true
         - name: docker
-          secret:
-            secretName: registry-credentials
-            # DOCKER_CONFIG points at a DIRECTORY and the file inside it must
-            # be named config.json, but a kubernetes.io/dockerconfigjson Secret
-            # stores it under the key .dockerconfigjson — hence the rename.
-            items:
-              - key: .dockerconfigjson
-                path: config.json
+          mountPath: /docker
+          readOnly: true
         - name: dockerfile
-          configMap:
-            # Generated by configMapGenerator in this directory's
-            # kustomization.yaml from ik-llama/dockerfile.
-            name: ik-llama-dockerfile
+          mountPath: /dockerfile
+          readOnly: true
+        - name: cosign
+          mountPath: /cosign
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      - name: dockerfile
+        configMap:
+          name: ik-llama-dockerfile
+      - name: cosign
+        secret:
+          secretName: cosign-signing-key
+          items:
+          - key: cosign.key
+            path: cosign.key
+          - key: password
+            path: password

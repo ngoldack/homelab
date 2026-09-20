@@ -1,38 +1,10 @@
-# Build the Hermes sandbox runtime image (sandboxd + Go toolchain).
-#
-# INPUT PINS (resolved and recorded in the Dockerfile):
-#   * agent-sandbox v1.0.2 = commit 9a85153590e54cb980f3241f9e7a9228449412c9
-#     (peeled refs/tags/v1.0.2 — the Dockerfile fetches that tag's objects but
-#     checks out that SHA, never the tag);
-#   * golang:1.26.5-bookworm and debian:bookworm-slim pinned by their
-#     multi-arch index digests.
-#
-# Context is this same repo pinned by full commit SHA
-# 2be5991f7fab0656c4ee270d2322b397b278b5ce. NOTE: that SHA predates the
-# 2026-09-17 pinning change (base/commit digests, version stamping, unified
-# cache ref), so bump --opt=context to the commit carrying it before
-# rebuilding; the pins then live in the Dockerfile at that commit.
-#
-# OUTPUT: registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991 (tag =
-# upstream version + this context's SHA fragment, so the tag moves with the
-# context). The image deployed today is the older tag 1.0.3; its manifest
-# digest — the one pinned in hermes-sandbox/sandbox-template.yaml — is
-#   sha256:8317b00f8aa3801b9dc5746f18178a0f4ec3df1e1b51a24e8468b1a3352117f1
-# After this Job completes, read its pushed digest from the Job log and re-pin
-# sandbox-template.yaml in the same change (tag and digest move together).
-#
-# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image tag;
-# use a `-rN` suffix after the context SHA when only the build parameters
-# change. Flux sees a new Job (Jobs are immutable) and prunes the old one.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-sandbox-runtime-2be5991-r2
+  name: build-hermes-sandbox-runtime-s1
   namespace: buildkit
 spec:
   backoffLimit: 2
-  # Go module fetch + sandboxd build + apt install; first build has no
-  # registry cache. 1h is generous without being a hang.
   activeDeadlineSeconds: 3600
   template:
     spec:
@@ -40,44 +12,122 @@ spec:
       nodeSelector:
         topology.homelab/site: home
       containers:
-        - name: buildctl
-          image: moby/buildkit:v0.31.0
-          command:
-            - buildctl
-          args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce
-            - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991,push=true
-            # Cache: --export-cache and --import-cache MUST name the SAME ref —
-            # they used to differ, so nothing was ever reused. Bump the ref in
-            # BOTH lines together (buildcache-v3 -> v4) to abandon a poisoned
-            # or incompatible cache.
-            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3
-            - --progress=plain
-          env:
-            - name: DOCKER_CONFIG
-              value: /docker
-          volumeMounts:
-            - name: certs
-              mountPath: /certs
-              readOnly: true
-            - name: docker
-              mountPath: /docker
-              readOnly: true
-      volumes:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+
+          echo "== fetch cosign (pinned) ==" &&
+
+          curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64
+          &&
+
+          printf ''caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n''
+          | sha256sum -c - &&
+
+          chmod +x /usr/local/bin/cosign &&
+
+          echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+
+          curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          &&
+
+          printf ''2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n''
+          | sha256sum -c - &&
+
+          tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+
+          chmod +x /usr/local/bin/trivy &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce''
+          ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          IMAGE=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991;
+
+          echo "== trivy gate ==" &&
+
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
+          &&
+
+          echo "== SBOM ==" &&
+
+          trivy image --format cyclonedx -o /tmp/sbom.xml --no-progress "$IMAGE" &&
+
+          echo "== attach sbom ==" &&
+
+          export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+
+          DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.xml --type cyclonedx
+          "$IMAGE" &&
+
+          echo "== provenance attest ==" &&
+
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"2be5991f7fab0656c4ee270d2322b397b278b5ce"}},"buildMetadata":{"reproducible":"false"}}''
+          > /tmp/prov.json &&
+
+          DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json
+          --key /cosign/cosign.key --tlog-upload=false "registry.ngoldack.de/hermes-sandbox-runtime@$DIGEST"
+          &&
+
+          echo "== sign LAST ==" &&
+
+          DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false
+          "registry.ngoldack.de/hermes-sandbox-runtime@$DIGEST" &&
+
+          echo "SIGNED $IMAGE ($DIGEST)"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
         - name: certs
-          secret:
-            secretName: buildctl-client-tls
+          mountPath: /certs
+          readOnly: true
         - name: docker
-          secret:
-            secretName: registry-credentials
-            items:
-              - key: .dockerconfigjson
-                path: config.json
+          mountPath: /docker
+          readOnly: true
+        - name: cosign
+          mountPath: /cosign
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      - name: cosign
+        secret:
+          secretName: cosign-signing-key
+          items:
+          - key: cosign.key
+            path: cosign.key
+          - key: password
+            path: password

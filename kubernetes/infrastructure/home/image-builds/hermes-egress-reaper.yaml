@@ -1,80 +1,132 @@
-# Build the egress guard REAPER service image (same hermes-egress-guard
-# sources; the reaper service is selected at runtime by the module path passed
-# as argv; plan Unit 3.3).
-#
-# The guard image is ONE image for both services (authorizer + reaper). Both
-# Jobs assemble the same sources with different output names; the running
-# process picks its role from argv (egress_guard.authorizer |
-# egress_guard.reaper), never from an env var. This Job pushes the reaper tag;
-# hermes-egress-authorizer.yaml pushes the authorizer tag.
-#
-# OUTPUT: this Job records the digest of the image it BUILT. Last built digest:
-#   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
-#   (registry.ngoldack.de/hermes-egress-guard:0.1.0 — the SAME image as the
-#   authorizer's, one build serves both roles; pinned in
-#   hermes-egress/reaper.yaml. The sources were not yet pushed when this build
-#   ran; a rebuild after the push yields the same image content and a new
-#   digest — re-pin.)
-# Re-record the digest here and re-pin hermes-egress/reaper.yaml after
-# every rebuild.
-#
-# RE-BUILDING: bump the Job name suffix and BOTH the context SHA and image
-# tag. Flux sees a new Job (Jobs are immutable), prunes the old one.
-#
-# !! The context SHA above MUST be the commit that contains
-# image-builds/hermes-egress-guard/ — a run against a tree without those
-# sources fails in the Dockerfile's COPY step. The digest recorded above was
-# produced from this working revision through buildkitd directly
-# (buildctl --local context=.), which is the same build the Job performs. Both
-# Jobs build the SAME image (one image, two roles), so their tags match.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-egress-reaper-4cb8c87
+  name: build-hermes-egress-reaper-s1
   namespace: buildkit
 spec:
   backoffLimit: 2
-  activeDeadlineSeconds: 1800
+  activeDeadlineSeconds: 2700
   template:
     spec:
       restartPolicy: Never
       nodeSelector:
         topology.homelab/site: home
       containers:
-        - name: buildctl
-          image: moby/buildkit:v0.31.0
-          command:
-            - buildctl
-          args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            - --opt=context=https://github.com/ngoldack/homelab.git#4cb8c87
-            - --opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile
-            - --output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87,push=true
-            - --export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache
-            - --progress=plain
-          env:
-            - name: DOCKER_CONFIG
-              value: /docker
-          volumeMounts:
-            - name: certs
-              mountPath: /certs
-              readOnly: true
-            - name: docker
-              mountPath: /docker
-              readOnly: true
-      volumes:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+
+          echo "== fetch cosign (pinned) ==" &&
+
+          curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64
+          &&
+
+          printf ''caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n''
+          | sha256sum -c - &&
+
+          chmod +x /usr/local/bin/cosign &&
+
+          echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+
+          curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          &&
+
+          printf ''2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n''
+          | sha256sum -c - &&
+
+          tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+
+          chmod +x /usr/local/bin/trivy &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#4cb8c87'' ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          IMAGE=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87;
+
+          echo "== trivy gate ==" &&
+
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
+          &&
+
+          echo "== SBOM ==" &&
+
+          trivy image --format cyclonedx -o /tmp/sbom.xml --no-progress "$IMAGE" &&
+
+          echo "== attach sbom ==" &&
+
+          export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+
+          DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.xml --type cyclonedx
+          "$IMAGE" &&
+
+          echo "== provenance attest ==" &&
+
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"4cb8c87"}},"buildMetadata":{"reproducible":"false"}}''
+          > /tmp/prov.json &&
+
+          DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json
+          --key /cosign/cosign.key --tlog-upload=false "registry.ngoldack.de/hermes-egress-guard@$DIGEST"
+          &&
+
+          echo "== sign LAST ==" &&
+
+          DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false
+          "registry.ngoldack.de/hermes-egress-guard@$DIGEST" &&
+
+          echo "SIGNED $IMAGE ($DIGEST)"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
         - name: certs
-          secret:
-            secretName: buildctl-client-tls
+          mountPath: /certs
+          readOnly: true
         - name: docker
-          secret:
-            secretName: registry-credentials
-            items:
-              - key: .dockerconfigjson
-                path: config.json
+          mountPath: /docker
+          readOnly: true
+        - name: cosign
+          mountPath: /cosign
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      - name: cosign
+        secret:
+          secretName: cosign-signing-key
+          items:
+          - key: cosign.key
+            path: cosign.key
+          - key: password
+            path: password

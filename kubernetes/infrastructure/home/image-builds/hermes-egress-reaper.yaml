@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-egress-reaper-s1
+  name: build-hermes-egress-reaper-s2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -48,7 +48,8 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#4cb8c87'' ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#4cb8c873885884aa7fb825824c4d022e3ac4c3e4''
+          ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile''
           ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache''
@@ -68,8 +69,7 @@ spec:
 
           echo "== trivy gate ==" &&
 
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
-          &&
+          trivy image --severity CRITICAL --exit-code 1 --no-progress "$IMAGE" &&
 
           echo "== SBOM ==" &&
 

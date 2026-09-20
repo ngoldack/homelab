@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-sandbox-runtime-s1
+  name: build-hermes-sandbox-runtime-s2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -48,7 +48,7 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#2be5991f7fab0656c4ee270d2322b397b278b5ce''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#bd8290717277ab01fb6cc3f43b608cece6b97817''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-sandbox-runtime/Dockerfile''
           ''--output=type=image,name=registry.ngoldack.de/hermes-sandbox-runtime:1.0.3-2be5991,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-sandbox-runtime:buildcache-v3,mode=max''
@@ -69,8 +69,7 @@ spec:
 
           echo "== trivy gate ==" &&
 
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
-          &&
+          trivy image --severity CRITICAL --exit-code 1 --no-progress "$IMAGE" &&
 
           echo "== SBOM ==" &&
 

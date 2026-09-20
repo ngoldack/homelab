@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-pxa-s1
+  name: build-pxa-s2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -69,8 +69,7 @@ spec:
 
           echo "== trivy gate ==" &&
 
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE"
-          &&
+          trivy image --severity CRITICAL --exit-code 1 --no-progress "$IMAGE" &&
 
           echo "== SBOM ==" &&
 

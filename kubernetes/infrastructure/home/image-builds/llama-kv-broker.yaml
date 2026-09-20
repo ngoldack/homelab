@@ -1,4 +1,4 @@
-# Build the llama-kv-broker image (stdlib-only Go reverse proxy that owns the
+# Build + SIGN the llama-kv-broker image (stdlib-only Go reverse proxy that owns the
 # per-session KV slot files in front of the qwen36-35b llama-server).
 #
 # BUILD SHAPE — the build context is THIS REPO at the pinned commit and the
@@ -7,11 +7,20 @@
 # `--opt=filename=<repo-relative Dockerfile>`, and the Dockerfile's COPY sources
 # are repo-relative. The pin is the commit whose tree carries the broker sources
 # and this Dockerfile; bump it (with the Job name and tag) whenever either moves.
-# A ConfigMap-as-context was tried for this build and dropped: this builder only
-# resolves single-file COPY sources from a mounted directory, and the broker has
-# three of them.
 #
-# OUTPUT: registry.ngoldack.de/llama-kv-broker:3 — the digest printed by buildctl
+# SIGNING — the job now runs the docs/hermes-review.md Unit 4.2 pipeline against
+# the pushed DIGEST: trivy CRITICAL/HIGH gate -> CycloneDX SBOM (attached with
+# cosign) -> SLSA provenance attestation -> signature LAST (--tlog-upload=false).
+# The signature proves the SBOM + attestation exist and the gate passed; an
+# image that fails the gate is left UNSIGNED and the Job fails loudly so the
+# digest is never re-pinned. cosign-linux-amd64 v2.4.3 = sha256 caaad125…
+# 4708 (sigstore release, resolved 2026-09-20); trivy v0.74.0 Linux-64bit
+# tarball = sha256 2ae6fe3e…4371a (same trivy version as the image-scan loop:
+# one trivy cluster-wide). The cosign private key is the SOPS-encrypted
+# cosign-signing-key secret (ns buildkit), mounted read-only; COSIGN_PASSWORD
+# comes from the password item in the same secret.
+#
+# OUTPUT: registry.ngoldack.de/llama-kv-broker:4 — the digest printed by buildctl
 # is pinned in kubernetes/infrastructure/home/llmkube-models/kv-broker.yaml.
 #
 # RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag and
@@ -20,12 +29,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-llama-kv-broker-3
+  name: build-llama-kv-broker-4
   namespace: buildkit
 spec:
   backoffLimit: 2
-  # One static Go build over two cached bases; generous.
-  activeDeadlineSeconds: 1800
+  # One static Go build over two cached bases + scan/SBOM/attest/sign; generous.
+  activeDeadlineSeconds: 2700
   template:
     spec:
       restartPolicy: Never
@@ -34,28 +43,45 @@ spec:
       containers:
         - name: buildctl
           # Same version as the daemon (chart 1.8.0 -> appVersion v0.31.0).
+          # Alpine-based (has /bin/sh + apk); shell needed for the signer chain.
           image: moby/buildkit:v0.31.0
           command:
-            - buildctl
+            - /bin/sh
+            - -c
           args:
-            - --addr=tcp://buildkitd:1234
-            - --tlscacert=/certs/ca.crt
-            - --tlscert=/certs/tls.crt
-            - --tlskey=/certs/tls.key
-            - build
-            - --frontend=dockerfile.v0
-            # The repo commit whose tree carries the broker sources + Dockerfile.
-            - --opt=context=https://github.com/ngoldack/homelab.git#2c26ba790e2f8696a9fc34adb87227c51748f5d0
-            # The Dockerfile within that tree (lowercase, like the other in-repo
-            # Dockerfiles under image-builds/).
-            - --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile
-            # Pushes to the cluster's own Zot (../registry/), same TLS setup as
-            # the other images in this directory.
-            - --output=type=image,name=registry.ngoldack.de/llama-kv-broker:3,push=true
-            # export and import MUST name the same ref, or nothing is reused.
-            - --export-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache,mode=max
-            - --import-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache
-            - --progress=plain
+            - >-
+              set -euo pipefail &&
+              apk add --no-cache curl tar gzip >/dev/null 2>&1 &&
+              echo "== fetch cosign (pinned) ==" &&
+              curl -fsSL -o /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64 &&
+              printf 'caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708  /usr/local/bin/cosign\n' | sha256sum -c - &&
+              chmod +x /usr/local/bin/cosign &&
+              echo "== fetch trivy (pinned, same version as image-scan) ==" &&
+              curl -fsSL -o /tmp/trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz &&
+              printf '2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  /tmp/trivy.tgz\n' | sha256sum -c - &&
+              tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy &&
+              chmod +x /usr/local/bin/trivy &&
+              echo "== buildctl build+push ==" &&
+              set +e && buildctl --addr=tcp://buildkitd:1234 --tlscacert=/certs/ca.crt --tlscert=/certs/tls.crt --tlskey=/certs/tls.key build --frontend=dockerfile.v0 --opt=context=https://github.com/ngoldack/homelab.git#2c26ba790e2f8696a9fc34adb87227c51748f5d0 --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile --output=type=image,name=registry.ngoldack.de/llama-kv-broker:4,push=true --export-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache,mode=max --import-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache --progress=plain > /tmp/build.log 2>&1; rc=$?; set -e;
+              cat /tmp/build.log;
+              test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+              DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' /tmp/build.log | tail -1);
+              test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+              echo "DIGEST=$DIGEST";
+              IMAGE=registry.ngoldack.de/llama-kv-broker:4;
+              echo "== trivy gate ==" &&
+              trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress "$IMAGE" &&
+              echo "== SBOM ==" &&
+              trivy image --format cyclonedx-json -o /tmp/sbom.json --no-progress "$IMAGE" &&
+              echo "== attach sbom ==" &&
+              export COSIGN_PASSWORD="$(cat /cosign/password)" &&
+              DOCKER_CONFIG=/docker cosign attach sbom --sbom /tmp/sbom.json --type cyclonedx "$IMAGE" &&
+              echo "== provenance attest ==" &&
+              printf '{"builder":{"name":"https://github.com/ngoldack/homelab"},"source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"2c26ba790e2f8696a9fc34adb87227c51748f5d0"}},"buildMetadata":{"reproducible":"false"}}' > /tmp/prov.json &&
+              DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json --key /cosign/cosign.key --tlog-upload=false "$IMAGE" &&
+              echo "== sign LAST ==" &&
+              DOCKER_CONFIG=/docker cosign sign --key /cosign/cosign.key --tlog-upload=false "$IMAGE" &&
+              echo "SIGNED $IMAGE"
           env:
             - name: DOCKER_CONFIG
               value: /docker
@@ -65,6 +91,9 @@ spec:
               readOnly: true
             - name: docker
               mountPath: /docker
+              readOnly: true
+            - name: cosign
+              mountPath: /cosign
               readOnly: true
       volumes:
         - name: certs
@@ -76,3 +105,11 @@ spec:
             items:
               - key: .dockerconfigjson
                 path: config.json
+        - name: cosign
+          secret:
+            secretName: cosign-signing-key
+            items:
+              - key: cosign.key
+                path: cosign.key
+              - key: password
+                path: password

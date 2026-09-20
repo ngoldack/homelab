@@ -55,6 +55,16 @@ spec:
       toPorts:
         - ports:
             - port: "5000"
+    # cosign/trivy -> registry.ngoldack.de:443 (SBOM attach / attest / sign
+    # steps in the image-builds Jobs): the Gateway data path — post-DNAT the
+    # peer is the gateway identity, not the registry pods on :5000 (same
+    # reasoning as ../hermes-egress/cilium-policy.yaml; copy of the
+    # image-scan 4a rule).
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
     # Base images + build-time fetches (HTTP and HTTPS: some base-image
     # toolchains still fetch over plain HTTP).

@@ -59,7 +59,7 @@ metadata:
   namespace: llmkube-system
 spec:
   modelRef: qwen36-35b
-  replicas: 1
+  replicas: 0
   image: registry.ngoldack.de/pxa:2026.09.13-rc3@sha256:9bf9824d5b02fd3a03d39153e3ef1eca310828e4abcb21c82bbd6b43bef665dc
   runtimeClassName: nvidia
   nodeSelector:
@@ -105,7 +105,7 @@ metadata:
   namespace: llmkube-system
 spec:
   modelRef: pxa-fusion4-35b
-  replicas: 0
+  replicas: 1
   image: registry.ngoldack.de/pxa:2026.09.13-rc3@sha256:9bf9824d5b02fd3a03d39153e3ef1eca310828e4abcb21c82bbd6b43bef665dc
   runtimeClassName: nvidia
   nodeSelector:

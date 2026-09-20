@@ -45,6 +45,10 @@ resources:
   # here (its CNPG/valkey/secrets raw infras are its own Kustomization, and it
   # depends on the clickhouse/seaweedfs operators listed above).
   - langfuse.yaml
+  # LibreChat LLM chat front-end: Helm chart + bundled MongoDB/Meilisearch,
+  # LLM traffic through the agentgateway static-key scope, authentik OIDC,
+  # edge route chat.ngoldack.de. Depends on agentgateway/authentik/network.
+  - librechat.yaml
   # Langfuse LLM platform infra: ClickHouse + SeaweedFS operators (used as the
   # OLAP/blob stores; postgres + valkey come from the existing CNPG/valkey ops).
   - clickhouse-operator.yaml

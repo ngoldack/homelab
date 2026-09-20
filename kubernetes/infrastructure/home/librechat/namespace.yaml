@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: librechat
+  labels:
+    # Gate labels the Gateway's allowedRoutes selectors require. The edge label
+    # is what httproute-edge.yaml attaches chat.ngoldack.de with; LibreChat
+    # authenticates with native OIDC — there is no proxy outpost in front of it
+    # (same choice as headlamp/langfuse 2026-09-20).
+    gateway.ngoldack.de/edge-ingress: "true"
+    # Pod Security Admission: audit+warn at `restricted`, enforcement left to
+    # Talos' cluster default (`baseline`), mirroring headlamp's rationale.
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

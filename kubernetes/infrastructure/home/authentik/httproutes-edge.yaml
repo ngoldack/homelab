@@ -26,6 +26,11 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       namespace: media
+    # agentgateway: the agentgateway.ngoldack.de admin-UI route backends the
+    # authentik proxy outpost (the UI has no auth of its own).
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: agentgateway
   to:
     - group: ""
       kind: Service

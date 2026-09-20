@@ -1,0 +1,21 @@
+# LibreChat via native OIDC. LibreChat does its OWN OIDC handshake against
+# authentik (provider librechat-oidc), so this backend is LibreChat's Service
+# directly (NOT the authentik outpost — the outpost proxy would break
+# LibreChat's /oauth/openid/callback handshake). Unauthenticated requests are
+# redirected by LibreChat itself to authentik.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: librechat-edge
+  namespace: librechat
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - chat.ngoldack.de
+  rules:
+    - backendRefs:
+        - name: librechat
+          port: 3080

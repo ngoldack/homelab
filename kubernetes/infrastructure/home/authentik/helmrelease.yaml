@@ -89,6 +89,12 @@ spec:
         - name: seed-secrets-aigateway
           secret:
             secretName: authentik-oidc-aigateway
+        # LibreChat's OIDC client secret, read via !File
+        # /secrets-librechat/client_secret in the same seed. Its own path,
+        # like the others.
+        - name: seed-secrets-librechat
+          secret:
+            secretName: authentik-oidc-librechat
       volumeMounts:
         - name: seed-secrets
           mountPath: /secrets
@@ -104,6 +110,9 @@ spec:
           readOnly: true
         - name: seed-secrets-aigateway
           mountPath: /secrets-aigateway
+          readOnly: true
+        - name: seed-secrets-librechat
+          mountPath: /secrets-librechat
           readOnly: true
     server:
       # 2 replicas, HOME ONLY. The 2026-09-18 edge straddle (one replica

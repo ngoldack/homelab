@@ -1,0 +1,33 @@
+# LibreChat LLM chat app (Helm chart 2.0.12, bundled MongoDB + Meilisearch),
+# wired to the agentgateway LLM gateway's static-key scope (/v1/key/*) and
+# authentik native OIDC. Depends on:
+#   - agentgateway -> the gateway + api-key Secret its endpoints call
+#   - authentik   -> the librechat-oidc provider its OIDC env references
+#   - network     -> the edge Gateway its HTTPRoute attaches to
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: librechat
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/librechat
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  dependsOn:
+    - name: agentgateway
+    - name: authentik
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

@@ -1,0 +1,17 @@
+# LibreChat default-deny baseline — same semantics as the headlamp pilot
+# (../headlamp/cilium-default-deny.yaml). One pod, one allowlist file.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: librechat-default-deny
+  namespace: librechat
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in librechat. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

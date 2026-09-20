@@ -1,0 +1,24 @@
+# Retry policy for the EDGE data plane's key-authenticated routes.
+#
+# Mirror of policy-retry.yaml targeting local-llm-key-edge: same 429/500
+# single-retry semantics so the edge proxy transparently fails over onto the
+# next chain group exactly like the home proxy.
+#
+# KEEP IN SYNC with policy-retry.yaml.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: key-route-retry-edge
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: local-llm-key-edge
+  traffic:
+    retry:
+      attempts: 2
+      backoff: 1s
+      codes:
+        - 429
+        - 500

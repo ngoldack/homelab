@@ -1,0 +1,74 @@
+# Routes for the EDGE data plane (agentgateway-edge): mirror of routes.yaml
+# (local-llm) parented to the agentgateway-edge Gateway so the edge proxy
+# applies the same /v1/* rules as the home proxy. Parented per-Gateway:
+# agentgateway v1.5.0 scopes each proxy's config to its Gateway, so the
+# route resources are duplicated rather than multi-parented.
+#
+# KEEP IN SYNC with routes.yaml — same rule set, same ordering (first-match
+# wins: exact /v1/chat/completions + /v1/models BEFORE the /v1/chat prefix).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: local-llm-edge
+  namespace: agentgateway
+spec:
+  parentRefs:
+    - name: agentgateway-edge
+      namespace: agentgateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: local-p100
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/models
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: local-p100
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/synthetic-small
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-small
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/synthetic-large
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-large
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/synthetic-deepseek
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-hf-deepseek
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/synthetic-gpt-oss
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: synthetic-hf-openai-gpt-oss-120b
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: chat-chain

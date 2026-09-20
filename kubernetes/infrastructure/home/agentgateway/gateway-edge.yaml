@@ -1,0 +1,32 @@
+# Public ("edge") data plane for the agentgateway: a second Gateway whose
+# generated proxy Deployment runs on the Hetzner ingress node
+# (topology.homelab/site: cloud), colocated with the cilium edge envoy.
+#
+# Split-horizon routing: the public hostname llm.aigateway.svc.ngoldack.de
+# terminates at the edge envoy (network/edge.yaml https-aigateway-svc
+# listener) and is forwarded by httproute-edge.yaml (llm-edge) to THIS
+# gateway's Service — so public LLM requests egress to OpenRouter/synthetic
+# from the datacenter uplink, never over the home wifi bridge. Internal
+# consumers keep hitting the original `agentgateway` Gateway (home node).
+#
+# Both Gateways share the same AgentgatewayBackends, chain health policies and
+# keys; each proxy subscribes to the configuration scoped to its own Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-edge
+  namespace: agentgateway
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: agentgateway-edge

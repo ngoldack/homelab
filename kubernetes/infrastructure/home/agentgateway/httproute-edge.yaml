@@ -32,6 +32,6 @@ spec:
     - llm.aigateway.svc.${CLUSTER_DOMAIN}
   rules:
     - backendRefs:
-        - name: agentgateway
+        - name: agentgateway-edge
           namespace: agentgateway
           port: 80

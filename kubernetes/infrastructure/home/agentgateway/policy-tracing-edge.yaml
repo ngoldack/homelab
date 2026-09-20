@@ -1,0 +1,23 @@
+# Tracing for the EDGE data plane (agentgateway-edge): mirror of
+# policy-tracing.yaml targeting the edge Gateway so public traffic is also
+# traced through the in-cluster OTel collector to Langfuse.
+#
+# KEEP IN SYNC with policy-tracing.yaml.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: tracing-edge
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-edge
+  frontend:
+    tracing:
+      backendRef:
+        name: otel-collector-opentelemetry-collector
+        namespace: agentgateway
+        port: 4317
+      protocol: GRPC
+      randomSampling: "true"

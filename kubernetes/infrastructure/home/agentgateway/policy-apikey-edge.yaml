@@ -1,0 +1,42 @@
+# Static API-key authentication for the EDGE data plane's /v1/key/* path.
+#
+# Mirror of policy-apikey.yaml targeting the local-llm-key-edge route: same
+# X-Api-Key header, same sops secret (agentgateway-api-keys). The edge proxy
+# inherits Permissive JWT + Strict api-key semantics exactly like the home
+# proxy, so CLI consumers (opencode, omp) with the static key work unchanged
+# on the public hostname.
+#
+# KEEP IN SYNC with policy-apikey.yaml.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: api-key-auth-edge
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: local-llm-key-edge
+  traffic:
+    jwtAuthentication:
+      mode: Permissive
+      providers:
+        - issuer: https://authentik.ngoldack.de/application/o/aigateway/
+          audiences:
+            - aigateway-oidc
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: authentik-server
+                namespace: authentik
+                port: 80
+              jwksPath: /application/o/aigateway/jwks/
+              cacheDuration: 5m
+    apiKeyAuthentication:
+      mode: Strict
+      location:
+        header:
+          name: X-Api-Key
+      secretRef:
+        name: agentgateway-api-keys

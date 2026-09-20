@@ -1,0 +1,35 @@
+# JWT authentication for the EDGE data plane (agentgateway-edge).
+#
+# Mirror of policy-jwt.yaml targeting the edge Gateway so public traffic via
+# llm.aigateway.svc.ngoldack.de is validated against the same authentik
+# provider (aigateway-oidc client_credentials). The ReferenceGrant
+# (referencegrant-authentik.yaml) already covers AgentgatewayPolicy in this
+# namespace reaching authentik-server, so no grant change is needed.
+#
+# KEEP IN SYNC with policy-jwt.yaml — same provider, same mode.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: jwt-auth-edge
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-edge
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: https://authentik.ngoldack.de/application/o/aigateway/
+          audiences:
+            - aigateway-oidc
+          jwks:
+            remote:
+              backendRef:
+                kind: Service
+                name: authentik-server
+                namespace: authentik
+                port: 80
+              jwksPath: /application/o/aigateway/jwks/
+              cacheDuration: 5m

@@ -1,0 +1,30 @@
+# AgentgatewayParameters for the EDGE data plane (agentgateway-edge):
+# proxy Deployment pinned to the Hetzner ingress node.
+#
+# nodeSelector topology.homelab/site: cloud + tolerations dedicated=ingress:
+# the ingress node carries the `dedicated=ingress:NoSchedule` taint (see
+# authentik/outpost.yaml) — the toleration is what lets a workload schedule
+# there at all. The same pair is used by the authentik outpost, the proven
+# cloud-site workload on that node. The cilium edge envoy (same node) is the
+# only client of this Service, so ClusterIP suffices — no LAN LB IP to
+# reserve, no L2 announcement (the public A record is external-dns-edge's
+# gateway-httproute source on network/edge.yaml's https-aigateway-svc).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: agentgateway-edge
+  namespace: agentgateway
+spec:
+  service:
+    spec:
+      type: ClusterIP
+  deployment:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            topology.homelab/site: cloud
+          tolerations:
+            - key: dedicated
+              value: ingress
+              effect: NoSchedule

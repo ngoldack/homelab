@@ -27,10 +27,15 @@ resources:
   - helmrelease.yaml
   - gateway.yaml
   - parameters.yaml
+  - gateway-edge.yaml
+  - parameters-edge.yaml
   - backends.yaml
   - routes.yaml
+  - routes-edge.yaml
   - policy-jwt.yaml
   - policy-tracing.yaml
+  - policy-jwt-edge.yaml
+  - policy-tracing-edge.yaml
   - referencegrant-authentik.yaml
   - langfuse-otel.sops.yaml
   - openrouter-key.sops.yaml
@@ -44,5 +49,8 @@ resources:
   - policy-agent-chains-health.yaml
   - httproute-key.yaml
   - policy-apikey.yaml
+  - httproute-key-edge.yaml
+  - policy-retry-edge.yaml
+  - policy-apikey-edge.yaml
   - otel-collector.yaml
   - otel-collector-queue-pvc.yaml

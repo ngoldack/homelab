@@ -63,6 +63,7 @@ spec:
           # selects its role from the FIRST argv (authorizer | reaper). There
           # is no EGRESS_ROLE env — the argv IS the selector, so a wrong or
           # missing arg fails loudly at startup.
+          command: ["/guard"]
           args: ["authorizer"]
           env:
             # The HMAC secret: identity + event signing material. Mounted from

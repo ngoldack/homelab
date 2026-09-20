@@ -150,7 +150,9 @@ spec:
   runtimeClassName: nvidia
   nodeSelector:
     hardware/gpu.model: Tesla-P100
-  contextSize: 32768
+  # ctx 16384: pxa's gallocr reserves the full model + KV-ring budget regardless of
+  # partial offload (19.8 GiB at 32768 > card); 16384 fits (saves ~1.2 GiB ring).
+  contextSize: 16384
   flashAttention: true
   cacheTypeK: q8_0
   cacheTypeV: q8_0

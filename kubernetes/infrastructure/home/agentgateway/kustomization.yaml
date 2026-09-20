@@ -37,6 +37,9 @@ resources:
   - synthetic-key.sops.yaml
   - httproute-edge.yaml
   - api-keys.sops.yaml
+  - hindsight-chain.yaml
+  - policy-hindsight-health.yaml
+  - policy-retry.yaml
   - httproute-key.yaml
   - policy-apikey.yaml
   - otel-collector.yaml

@@ -30,8 +30,10 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: openrouter-union-alpha
-    # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model
-    # (pinned tier, same backend the JWT path uses under /v1/synthetic-gpt-oss).
+    # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model.
+    # Walks the hindsight-chain backend (synthetic primary, OpenRouter
+    # fallback on 429/5xx eviction); the JWT path /v1/synthetic-gpt-oss in
+    # routes.yaml still pins the single synthetic backend.
     - matches:
         - path:
             type: PathPrefix
@@ -39,4 +41,4 @@ spec:
       backendRefs:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
-          name: synthetic-hf-openai-gpt-oss-120b
+          name: hindsight-chain

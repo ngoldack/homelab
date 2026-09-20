@@ -2,6 +2,11 @@
 # responses evict the answering provider on the first occurrence, so the
 # chain fails over to the next priority group (OpenRouter). Without this
 # policy, backends are never evicted and failover never fires.
+#
+# duration: 10m — a general Synthetic 429 ("Too many requests, try again
+# later") must keep hindsight off Synthetic for the window; synthetic's 429
+# carries no Retry-After header (verified live 2026-09-20), so the
+# configured duration governs.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -16,5 +21,5 @@ spec:
     health:
       unhealthyCondition: "response.code >= 500 || response.code == 429"
       eviction:
-        duration: 10s
+        duration: 10m
         consecutiveFailures: 1

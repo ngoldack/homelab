@@ -74,10 +74,16 @@ spec:
         ALLOW_SOCIAL_LOGIN: "true"
         ALLOW_SOCIAL_REGISTRATION: "true"
         OPENID_CLIENT_ID: librechat-oidc
-        # NO trailing slash: LibreChat appends /.well-known/openid-configuration,
-        # and authentik's issuer is https://authentik.ngoldack.de/application/o/
-        # librechat/ (the langfuse/headlamp trailing-slash lesson).
-        OPENID_ISSUER: https://authentik.ngoldack.de/application/o/librechat
+        # Trailing slash REQUIRED: openid-client v6 validates the discovery
+        # document's `issuer` claim byte-for-byte against this value, and
+        # authentik's per-provider issuer is
+        # https://authentik.ngoldack.de/application/o/librechat/ (WITH the
+        # trailing slash). Missing it: "discovered metadata issuer does not
+        # match the expected issuer" at boot (observed 2026-09-20), which
+        # leaves the strategy unregistered and /oauth/openid returning 500.
+        # LibreChat appends /.well-known/openid-configuration itself, so the
+        # slash does not double up.
+        OPENID_ISSUER: https://authentik.ngoldack.de/application/o/librechat/
         OPENID_SCOPE: openid profile email
         OPENID_CALLBACK_URL: /oauth/openid/callback
         OPENID_BUTTON_LABEL: Sign in with authentik

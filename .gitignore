@@ -72,3 +72,5 @@ talosconfig-home.yaml
 # Python bytecode (never commit build artifacts)
 __pycache__/
 *.pyc
+# raw bench response JSONs (regenerated per pass)
+hack/bench-logs/

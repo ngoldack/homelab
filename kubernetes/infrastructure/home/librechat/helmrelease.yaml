@@ -6,10 +6,14 @@ metadata:
 spec:
   interval: 1h
   timeout: 15m
-  # The edge Gateway (network ns) must exist before this namespace's HTTPRoute
-  # can Attach/Accept; the edge route is what exposes chat.ngoldack.de.
-  dependsOn:
-    - name: network
+  # NOTE: no spec.dependsOn here — `dependsOn` in a HelmRelease names other
+  # HelmReleases, and the edge Gateway this app routes through is owned by the
+  # `network` Flux Kustomization, not a HelmRelease. Ordering against network
+  # is expressed at the Kustomization level (clusters/home/librechat.yaml
+  # dependsOn network) — that is the mechanism that gates this namespace's
+  # HTTPRoute attaching to the edge Gateway. An earlier
+  # `dependsOn: [{name: network}]` here stalled the release with "unable to
+  # get 'flux-system/network' dependency: helmreleases... 'network' not found".
   chart:
     spec:
       chart: librechat

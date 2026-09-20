@@ -99,8 +99,9 @@ PYEOF
 }
 # The authorizer reads the token from the CHECK PAYLOAD, not from the HTTP
 # headers of the /check request: flat payloads must carry
-# `proxy_authorization` (see egress_guard/authorizer.py parse_check_request —
-# the Envoy path arrives as attributes.request.http.headers, which Envoy
+# `proxy_authorization` (see image-builds/hermes-egress-guard/go/authorizer.go
+# parse_check_request — the Envoy path arrives as
+# attributes.request.http.headers, which Envoy
 # populates from the real Proxy-Authorization header). Passing it as a curl
 # header alone yields x-egress-reason: token-missing.
 # `tr -d '\n'`: macOS base64 wraps at 76 chars, and a newline inside the JSON

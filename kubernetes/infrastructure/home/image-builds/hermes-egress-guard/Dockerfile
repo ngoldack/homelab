@@ -1,43 +1,66 @@
 # hermes-egress-guard — the ONE image behind both guard services (plan Units
-# 3.2/3.3). Sources are stdlib-only Python (no pip install, no lock file): the
-# package is copied verbatim and each service selects itself by the MODULE
-# PATH passed as argv (egress_guard.authorizer | egress_guard.reaper).
+# 3.2/3.3). This supersedes the Python build: the package was ported to Go
+# (go/, package guard, stdlib only) and is compiled here into a SINGLE static
+# binary, /guard. Each service selects itself by the FIRST argv
+# (`authorizer` | `reaper`, dispatched in go/cmd/guard/main.go); a missing or
+# unknown role exits non-zero, which is the CrashLoopBackOff contract the
+# Deployments rely on for a misconfigured guard. There is NO EGRESS_ROLE env —
+# the argv IS the selector.
 #
-# Base: pinned CPython 3.12 slim (multi-arch index digest resolved from the
-# Docker Hub registry API, 2026-09-18 — same method the
-# hermes-agent-sandbox-plugin Dockerfile documents for its base). WHY slim:
-# the guard installs NOTHING, so python3 + the vendored stdlib is the whole
-# runtime; slim keeps the attack surface and pull cost minimal.
-# WHY buildkit runs with the REPO ROOT as context: COPY paths below are
+# WHY golang:1.27-alpine — the cluster's Go line and the llama-kv-broker
+# precedent (same build stage, same flags). The module declares `go 1.27`;
+# GOTOOLCHAIN=local keeps the build from fetching any other toolchain, so the
+# image resolves entirely from the pinned public tags below. CGO_ENABLED=0
+# yields a static binary, so the runtime needs no libc beyond busybox.
+#
+# WHY alpine:3.21 — the binary is stdlib-only (no pip/venv/interpreter), so the
+# runtime is just the binary plus a minimal userland; alpine keeps the attack
+# surface and pull cost minimal. Explicit tag, never :latest.
+#
+# WHY buildkit runs with the REPO ROOT as context: the COPY paths below are
 # repo-root-relative (same convention as every Dockerfile in image-builds/).
-FROM docker.io/library/python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+FROM golang:1.27-alpine AS build
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+WORKDIR /src/go
+
+# The module + the library package (package guard). The *_test.go siblings are
+# deliberately NOT copied: they guard the port on a developer machine and are
+# not built here (llama-kv-broker precedent).
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/go.mod ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/auth.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/authorizer.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/config.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/http.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/k8sapi.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/metrics.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/policy.go ./
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/reaper.go ./
+# The entrypoint: package main importing the root package by module path
+# (hermes-egress-guard) and dispatching AuthorizerMain / ReaperMain by argv[1].
+COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/cmd/guard/main.go ./cmd/guard/main.go
+
+# A single static binary; -trimpath and -s -w keep build paths and symbols out
+# of the runtime layer.
+RUN go build -trimpath -ldflags="-s -w" -o /out/guard ./cmd/guard
+
+# Build-time gate (replaces the Python image's import gate): the artifact must
+# be a runnable program — an executable, not a library archive — and the argv
+# contract must fail loudly on a missing/unknown role. A library archive would
+# fail here instead of shipping.
+RUN set -e; \
+    if /out/guard >/dev/null 2>&1; then echo "guard with no role exited 0; argv contract broken"; exit 1; fi; \
+    if /out/guard bogus-role >/dev/null 2>&1; then echo "guard with unknown role exited 0; argv contract broken"; exit 1; fi; \
+    echo "guard: /out/guard is a runnable program that rejects a missing/unknown role"
 
 # PSA-restricted runtime shape: unprivileged uid, no writes to the rootfs
-# (read-only rootfs + /tmp emptyDir in the Deployments). The process runs as
-# 10001 with no caps, so the guard cannot bind <1024 or touch the host.
-RUN groupadd -g 10001 guard && useradd -u 10001 -g 10001 -m -s /usr/sbin/nologin guard
-
-# The whole package: stdlib only, every runtime import must resolve from
-# CPython itself (egress_guard/__init__.py contract).
-COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/src/ /opt/egress-guard/
-
-# Build-time gate: every module imports under the runtime interpreter and the
-# package is executable in both roles (config fail-fast surfaces as a
-# non-zero exit, which is exactly the CrashLoopBackOff contract the
-# Deployments rely on for a misconfigured guard).
-RUN python3 -c "import sys; sys.path.insert(0, '/opt/egress-guard'); import egress_guard, egress_guard.authorizer, egress_guard.reaper, egress_guard.k8sapi, egress_guard.auth, egress_guard.policy, egress_guard.http, egress_guard.metrics, egress_guard.config; print('egress_guard %s: all modules importable (both roles)' % egress_guard.__version__)"
-
-ENV PYTHONPATH=/opt/egress-guard
-ENV EGRESS_LISTEN_PORT=8080
-
-# Entrypoint: the Deployment passes the role MODULE as argv
-# (args: [egress_guard.authorizer] | [egress_guard.reaper]); python -c execs
-# that module's main() — both roles define main(argv=None). NOTE the dispatch
-# form: a bare `python3 -c` with the module name as argv would execute that
-# NAME as source (NameError); the -c script below imports it and calls main().
-# No default module: a missing/wrong argv fails loudly (IndexError/ImportError)
-# instead of guessing.
-USER 10001
-WORKDIR /opt/egress-guard
-ENTRYPOINT ["python3", "-c", "import importlib, sys; sys.exit(importlib.import_module(sys.argv[1]).main())"]
-CMD []
+# (readOnlyRootFilesystem + a /tmp emptyDir in the Deployments). The process
+# runs as 10001 with no capabilities, so the guard cannot bind <1024, touch the
+# host, or persist anything into the image.
+FROM alpine:3.21
+RUN addgroup -g 10001 guard && adduser -D -H -u 10001 -G guard -s /sbin/nologin guard
+COPY --from=build /out/guard /guard
+USER 10001:10001
+# The Deployments pass the role as argv (`args: ["authorizer"]` /
+# `["reaper"]`); no default role is compiled in, so a wrong or missing arg
+# fails loudly at startup.
+ENTRYPOINT ["/guard"]

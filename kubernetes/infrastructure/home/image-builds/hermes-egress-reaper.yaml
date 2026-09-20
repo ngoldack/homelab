@@ -1,3 +1,37 @@
+# Build + SIGN the hermes-egress-guard image — the ONE binary behind both egress
+# services (reaper + authorizer), a stdlib-only Go port of the former Python
+# `egress_guard` package. The image entrypoint is the single Go binary /guard,
+# which selects its role from the FIRST argv (`reaper` | `authorizer`); there is
+# no EGRESS_ROLE env. The image is IDENTICAL for both roles, so the digest this
+# Job prints is the same artifact hermes-egress-authorizer.yaml builds and pushes
+# (see there for the build shape, signing chain and pin discipline — the two Job
+# files share one image and must be re-run + re-pinned together).
+#
+# BUILD SHAPE — the build context is THIS REPO at the pinned commit and the
+# Dockerfile is fetched from that tree by path: `--opt=context=<repo>#<sha>` plus
+# `--opt=filename=<repo-relative Dockerfile>`, and the Dockerfile's COPY sources
+# are repo-relative.
+# ACTION REQUIRED — the context SHA below (4cb8c87, 2026-09-18) PREDATES the Go
+# port, so running this Job as written rebuilds the PYTHON image. Bump the context
+# SHA to a commit whose tree carries the Go sources
+# (image-builds/hermes-egress-guard/{go/,go.mod,Dockerfile}) — with the --output
+# tag and Job name suffix — then run it; THAT build produces the Go image.
+#
+# SIGNING — trivy CRITICAL gate -> CycloneDX SBOM (cosign attach) -> SLSA
+# provenance attestation -> signature LAST (--tlog-upload=false everywhere). An
+# image that fails the gate is left UNSIGNED and the Job fails loudly. cosign
+# v2.4.3 = sha256 caaad125…4708; trivy v0.74.0 = sha256 2ae6fe3e…4371a. The
+# cosign key is the SOPS-encrypted cosign-signing-key secret (ns buildkit), and
+# COSIGN_PASSWORD comes from the password item in the same secret.
+#
+# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87 — after a GO build,
+# the digest printed by buildctl is pinned in hermes-egress/reaper.yaml and
+# hermes-egress/authorizer.yaml. Last built digest (the Python image, 2026-09-18):
+#   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
+#
+# RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag and
+# the context SHA together; Flux prunes the old Job. Re-run both guard Job files
+# and re-pin both Deployments in the same change.
 apiVersion: batch/v1
 kind: Job
 metadata:

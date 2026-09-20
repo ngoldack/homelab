@@ -5,12 +5,12 @@
 # session's SandboxClaim with a UID precondition, and exports
 # hermes_quarantine_total / hermes_egress_denied_total on :8080.
 #
-# The reaper source landed as k8sapi.py (REST client: sandboxclaims
+# The reaper source landed as k8sapi.go (REST client: sandboxclaims
 # get/list/delete with UID preconditions, sandboxes get, ConfigMaps
 # get/create/replace restricted to resourceNames hermes-quarantine) — the
 # reaper service itself (role reaper, POST /events + GET /healthz) is part of
-# the same guard image selected by the module path passed as argv
-# (egress_guard.reaper — egress_guard/__init__.py).
+# the same guard image selected by the FIRST argv (reaper — the Go binary
+# /guard dispatches authorizer|reaper).
 #
 # Env vars from k8sapi.client_from_env + the shared config plumbing: the
 # Kubernetes API facts are defaults pointing at the in-cluster endpoint, so
@@ -57,10 +57,11 @@ spec:
           # equals the authorizer's; it is repeated here because a Deployment
           # may not inherit another's pin. Re-pin after every rebuild.
           image: registry.ngoldack.de/hermes-egress-guard@sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
-          # argv dispatch: the image entrypoint imports this module and calls
-          # main(). There is no EGRESS_ROLE env — the module path IS the
-          # selector, so a wrong/missing arg fails loudly at startup.
-          args: ["egress_guard.reaper"]
+          # argv dispatch: the image entrypoint is the Go binary /guard, which
+          # selects its role from the FIRST argv (authorizer | reaper). There
+          # is no EGRESS_ROLE env — the argv IS the selector, so a wrong or
+          # missing arg fails loudly at startup.
+          args: ["reaper"]
           env:
             # Same HMAC secret as the authorizer: the reaper verifies the
             # x-egress-signature over the raw event bytes (auth.verify_event)

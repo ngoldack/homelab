@@ -1,5 +1,5 @@
 # egress-authorizer — plan Unit 3.2. The deterministic ext_authz decision point
-# (image-builds/hermes-egress-guard/src/egress_guard/authorizer.py: POST /check,
+# (image-builds/hermes-egress-guard/go/authorizer.go: POST /check,
 # GET /healthz, both on :8080 by default). It makes NO network call except the
 # signed event POST to the reaper, and NO Kubernetes API call at all (identity
 # is the HMAC token only), so the egress its Cilium allowlist admits for this
@@ -9,12 +9,11 @@
 # endpointSelector matches the reaper pod only. So the authorizer has no API
 # path at all — matching its grants: no API RBAC, no ServiceAccount token.
 #
-# Image: ONE guard image, TWO services selected by the module path passed as
-# argv (egress_guard/__init__.py). Tag + PENDING-digest comment:
-# the build Job (image-builds/hermes-egress-authorizer.yaml) records the
-# manifest digest; the image line below is pinned to it after that build.
+# Image: ONE guard image, TWO services selected by the ROLE passed as the
+# first argv (the Go binary /guard dispatches authorizer|reaper). Tag +
+# PENDING-digest comment:
 #
-# Env vars are exactly the ones authorizer.py:main reads (config.py env_*
+# Env vars are exactly the ones authorizer.go reads (config.go env_*
 # helpers fail-fast on a missing required value or unparseable integer — a
 # wrong key is a CrashLoopBackOff, never a silent misconfiguration).
 apiVersion: apps/v1
@@ -60,10 +59,11 @@ spec:
           # `skopeo inspect`). Re-pin after every rebuild — record the new
           # digest in image-builds/hermes-egress-authorizer.yaml too.
           image: registry.ngoldack.de/hermes-egress-guard@sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
-          # argv dispatch: the image entrypoint imports this module and calls
-          # main(). There is no EGRESS_ROLE env — the module path IS the
-          # selector, so a wrong/missing arg fails loudly at startup.
-          args: ["egress_guard.authorizer"]
+          # argv dispatch: the image entrypoint is the Go binary /guard, which
+          # selects its role from the FIRST argv (authorizer | reaper). There
+          # is no EGRESS_ROLE env — the argv IS the selector, so a wrong or
+          # missing arg fails loudly at startup.
+          args: ["authorizer"]
           env:
             # The HMAC secret: identity + event signing material. Mounted from
             # the SOPS-encrypted egress-hmac Secret (secret.sops.yaml) — the

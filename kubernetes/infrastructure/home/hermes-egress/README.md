@@ -8,7 +8,7 @@ One namespace, three services, one quarantine ledger:
 | Authorizer | `egress-authorizer.hermes-egress.svc.cluster.local:8080` | `POST /check` → 200 allow / 403 deny+strike / 403 + `x-egress-kill: 1`; `GET /healthz` |
 | Reaper | `sandbox-reaper.hermes-egress.svc.cluster.local:8080` | `POST /events` (signed), `GET /healthz`; writes quarantine + deletes claims |
 
-Sources of truth for behavior: `image-builds/hermes-egress-guard/src/egress_guard/` — `auth.py` (token + event HMAC), `policy.py` (rules engine + policy schema), `authorizer.py` (`/check` protocol), `k8sapi.py` (RBAC + CRD groups). This README documents the wire layout those files implement; on conflict the code wins.
+Sources of truth for behavior: `image-builds/hermes-egress-guard/go/` — `auth.go` (token + event HMAC), `policy.go` (rules engine + policy schema), `authorizer.go` (`/check` protocol), `k8sapi.go` (RBAC + CRD groups). This README documents the wire layout those files implement; on conflict the code wins.
 
 ## Session identity (Unit 3.5)
 
@@ -16,7 +16,7 @@ Identity is proven by ONE channel (a gateway-minted HMAC token), and the cluster
 side links an event to objects by the claim label — never by anything the
 sandbox can assert:
 
-1. **Token (the only identity the authorizer uses).** The Hermes gateway mints a `Proxy-Authorization: Basic` token per session and injects it through `HTTP_PROXY`/`HTTPS_PROXY` proxy userinfo (see below). The authorizer verifies the HMAC over session hash + expiry + profile and nothing else: it is deliberately STATELESS and makes no Kubernetes API call (`authorizer.py`: "the authorizer makes no other network call (no DNS, no Kubernetes API)"). The sandbox controls its own HTTP headers, so anything but this verified token is untrusted — a sandbox cannot mint or forge another session's token without the HMAC secret (which never enters the sandbox; only the derived token does).
+1. **Token (the only identity the authorizer uses).** The Hermes gateway mints a `Proxy-Authorization: Basic` token per session and injects it through `HTTP_PROXY`/`HTTPS_PROXY` proxy userinfo (see below). The authorizer verifies the HMAC over session hash + expiry + profile and nothing else: it is deliberately STATELESS and makes no Kubernetes API call (`authorizer.go`: "the authorizer makes no other network call (no DNS, no Kubernetes API)"). The sandbox controls its own HTTP headers, so anything but this verified token is untrusted — a sandbox cannot mint or forge another session's token without the HMAC secret (which never enters the sandbox; only the derived token does).
 2. **Cluster objects are linked by the CLAIM LABEL, not by source address.** The ext_authz `CheckRequest` does carry `attributes.source.address.socketAddress.address` = the sandbox pod IP (Envoy `use_remote_address` on the listener) and the authorizer copies it into the signed event as `source_ip`; the reaper records it in the quarantine ledger for forensics. **No pod-IP → pod → SandboxClaim lookup is implemented** (a stolen token replayed from a different sandbox is *not* detected by the guard today): wiring that would require the authorizer to carry a Kubernetes API client plus pods/claims read RBAC, which the landed authorizer explicitly does not have. The reaper's enforcement leg instead resolves the session's claims by the `workload.hermes.io/session-hash` LABEL — the claim label is what links an event to cluster objects, and it is stamped by the plugin at claim creation, never by the sandbox.
 
 ## Token layout (`auth.py`, authoritative)
@@ -89,4 +89,4 @@ False positives affect only one session. There is no bulk clear.
 
 ## Images
 
-`registry.ngoldack.de/hermes-egress-guard` — one image, two services selected by the module path passed as argv (`egress_guard.authorizer` | `egress_guard.reaper`; see `image-builds/hermes-egress-guard/src/egress_guard/__init__.py`). Digests recorded by the build Jobs; pin before wiring.
+`registry.ngoldack.de/hermes-egress-guard` — one image, two services selected by the ROLE passed as the first argv (`authorizer` | `reaper`) to the Go binary `/guard` (see `image-builds/hermes-egress-guard/go/main.go`). Digests recorded by the build Jobs; pin before wiring.

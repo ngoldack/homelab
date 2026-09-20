@@ -1,7 +1,7 @@
 """Egress identity + proxy plumbing (plan Unit 3.5).
 
 The hermes-egress guard's contracts are implemented by
-``image-builds/hermes-egress-guard/src/egress_guard/`` — auth.py's token byte
+``image-builds/hermes-egress-guard/go/`` — auth.go's token byte
 layout is authoritative and must agree BYTE-FOR-BYTE with what this module
 mints:
 

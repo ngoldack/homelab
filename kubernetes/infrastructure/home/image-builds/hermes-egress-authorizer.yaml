@@ -1,3 +1,41 @@
+# Build + SIGN the hermes-egress-guard image — the ONE binary behind both egress
+# services (authorizer + reaper), a stdlib-only Go port of the former Python
+# `egress_guard` package. The image entrypoint is the single Go binary /guard,
+# which selects its role from the FIRST argv (`authorizer` | `reaper`); there is
+# no EGRESS_ROLE env. The image is IDENTICAL for both roles, so the digest this
+# Job prints is the same artifact hermes-egress-reaper.yaml builds and pushes.
+#
+# BUILD SHAPE — the build context is THIS REPO at the pinned commit and the
+# Dockerfile is fetched from that tree by path, exactly like llama-kv-broker.yaml:
+# `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
+# and the Dockerfile's COPY sources are repo-relative.
+# ACTION REQUIRED — the context SHA below (4cb8c87, 2026-09-18) PREDATES the Go
+# port: the Dockerfile in that tree is the former Python one, so running this Job
+# as written rebuilds the PYTHON image. Bump the context SHA to a commit whose tree
+# carries the Go sources (image-builds/hermes-egress-guard/{go/,go.mod,Dockerfile})
+# — together with the --output tag and the Job name suffix — then run it; THAT build
+# produces the Go image. Never run it against the old SHA and re-pin the result.
+#
+# SIGNING — the job runs the docs/hermes-review.md Unit 4.2 pipeline against the
+# pushed DIGEST: trivy CRITICAL gate -> CycloneDX SBOM (attached with cosign) ->
+# SLSA provenance attestation -> signature LAST (--tlog-upload=false everywhere).
+# An image that fails the gate is left UNSIGNED and the Job fails loudly, so the
+# digest is never re-pinned. cosign-linux-amd64 v2.4.3 = sha256 caaad125…4708;
+# trivy v0.74.0 Linux-64bit tarball = sha256 2ae6fe3e…4371a (same trivy version
+# as the image-scan loop). The cosign private key is the SOPS-encrypted
+# cosign-signing-key secret (ns buildkit), mounted read-only; COSIGN_PASSWORD
+# comes from the password item in the same secret. None of this is new work —
+# only the Dockerfile's sources changed, from Python to Go.
+#
+# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87 — after a GO build,
+# the digest printed by buildctl is pinned in hermes-egress/authorizer.yaml and
+# hermes-egress/reaper.yaml. Last built digest (the Python image, 2026-09-18):
+#   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
+#
+# RE-BUILDING: Jobs are immutable. Bump the Job name suffix, the --output tag and
+# the context SHA together; Flux prunes the old Job. Because one image serves two
+# Deployments, re-run this file AND hermes-egress-reaper.yaml together and re-pin
+# both Deployments, so the two Job files never disagree about what was built.
 apiVersion: batch/v1
 kind: Job
 metadata:

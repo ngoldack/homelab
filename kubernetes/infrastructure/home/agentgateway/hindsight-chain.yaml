@@ -39,6 +39,20 @@ spec:
             openai:
               model: openai/gpt-oss-120b
             policies:
+              ai:
+                # FORCE OpenRouter's provider routing for gpt-oss-120b to the
+                # cheap akashml/bf16 endpoint ONLY (no fallbacks). Without
+                # this, OpenRouter's default routing picked Grok-family
+                # endpoints for gpt-oss-120b, costing ~10x per token (user
+                # report 2026-09-20; the ~30$/M unknown endpoint vs the
+                # akashml bf16 price). `overrides` (not `defaults`) so the
+                # pin always wins even if a client sends its own `provider`.
+                overrides:
+                  - field: provider
+                    value:
+                      only:
+                        - akashml/bf16
+                      allow_fallbacks: false
               auth:
                 secretRef:
                   name: openrouter-key

@@ -14,8 +14,10 @@
 # ACTION REQUIRED — the context SHA below (4cb8c87, 2026-09-18) PREDATES the Go
 # port, so running this Job as written rebuilds the PYTHON image. Bump the context
 # SHA to a commit whose tree carries the Go sources
-# (image-builds/hermes-egress-guard/{go/,go.mod,Dockerfile}) — with the --output
-# tag and Job name suffix — then run it; THAT build produces the Go image.
+# (image-builds/hermes-egress-guard/go/ incl. go.mod + cmd/guard, with the
+# rewritten Dockerfile) — with the --output tag and Job name suffix — then run it;
+# THAT build produces the Go image. Never run it against the old SHA and re-pin the
+# result.
 #
 # SIGNING — trivy CRITICAL gate -> CycloneDX SBOM (cosign attach) -> SLSA
 # provenance attestation -> signature LAST (--tlog-upload=false everywhere). An
@@ -24,7 +26,7 @@
 # cosign key is the SOPS-encrypted cosign-signing-key secret (ns buildkit), and
 # COSIGN_PASSWORD comes from the password item in the same secret.
 #
-# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87 — after a GO build,
+# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3 — after a GO build,
 # the digest printed by buildctl is pinned in hermes-egress/reaper.yaml and
 # hermes-egress/authorizer.yaml. Last built digest (the Python image, 2026-09-18):
 #   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
@@ -35,7 +37,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-egress-reaper-s2
+  name: build-hermes-egress-reaper-s3
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -82,9 +84,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#4cb8c873885884aa7fb825824c4d022e3ac4c3e4''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#fe3dfb307898e50209818e05388fd58e3e431354''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -99,7 +101,7 @@ spec:
 
           echo "DIGEST=$DIGEST";
 
-          IMAGE=registry.ngoldack.de/hermes-egress-guard:0.1.0-4cb8c87;
+          IMAGE=registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3;
 
           echo "== trivy gate ==" &&
 

@@ -137,18 +137,6 @@ spec:
       toPorts:
         - ports:
             - {port: "3000", protocol: TCP}
-    # The proxy outposts forward authenticated requests to the media apps
-    # they front (the media HTTPRoutes' service URLs).
-    # The outpost fronts the agentgateway control-plane UI (seed.yaml:
-    # agentgateway-ui-proxy -> agentgateway-ui:15000). The outpost pod lives
-    # in this namespace, so this rule is the client half of that hop — without
-    # it the outpost answers 502 after a successful SSO redirect.
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: agentgateway
-      toPorts:
-        - ports:
-            - {port: "15000", protocol: TCP}
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: media

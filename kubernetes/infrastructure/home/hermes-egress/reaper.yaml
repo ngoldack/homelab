@@ -56,7 +56,7 @@ spec:
           # authorizer (one image, two roles selected by argv), so the digest
           # equals the authorizer's; it is repeated here because a Deployment
           # may not inherit another's pin. Re-pin after every rebuild.
-          image: registry.ngoldack.de/hermes-egress-guard@sha256:65b188a78da480483c0e2fd4be67df5243d94ddae6856a5e2ea4727d9b735578
+          image: registry.ngoldack.de/hermes-egress-guard@sha256:958ab9765875ba6927dd1e79d6dd7947278f5971a32c2d9ac9deb2b5bc6f7e9f
           # argv dispatch: the image entrypoint is the Go binary /guard, which
           # selects its role from the FIRST argv (authorizer | reaper). There
           # is no EGRESS_ROLE env — the argv IS the selector, so a wrong or

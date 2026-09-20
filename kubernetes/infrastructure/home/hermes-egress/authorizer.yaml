@@ -58,7 +58,7 @@ spec:
           # revision's sources through buildkitd:1234 and verified with
           # `skopeo inspect`). Re-pin after every rebuild — record the new
           # digest in image-builds/hermes-egress-authorizer.yaml too.
-          image: registry.ngoldack.de/hermes-egress-guard@sha256:65b188a78da480483c0e2fd4be67df5243d94ddae6856a5e2ea4727d9b735578
+          image: registry.ngoldack.de/hermes-egress-guard@sha256:958ab9765875ba6927dd1e79d6dd7947278f5971a32c2d9ac9deb2b5bc6f7e9f
           # argv dispatch: the image entrypoint is the Go binary /guard, which
           # selects its role from the FIRST argv (authorizer | reaper). There
           # is no EGRESS_ROLE env — the argv IS the selector, so a wrong or

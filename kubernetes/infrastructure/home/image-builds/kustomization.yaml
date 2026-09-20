@@ -9,6 +9,7 @@ resources:
   - ik-llama.yaml
   - hermes-sandbox-runtime.yaml
   - llama-p100.yaml
+  - pxa.yaml
   - hermes-agent-sandbox-plugin.yaml
   - github-runner.yaml
   - llama-kv-broker.yaml
@@ -35,6 +36,12 @@ configMapGenerator:
   - name: llama-p100-dockerfile
     namespace: buildkit
     files: [llama-p100/dockerfile]
+    options:
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: pxa-dockerfile
+    namespace: buildkit
+    files: [pxa/dockerfile]
     options:
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled

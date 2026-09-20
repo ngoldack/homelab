@@ -1,0 +1,37 @@
+# PXA engine, built from poisonxa16/pxa @ v2026.09.13-rc3 (3c5b80d918d690f51a856cd0d35edb9b9f828121) for the P100.
+# Adapted from the project's docker/Dockerfile: engine-only (no upstream-ik stage), arch 60 only,
+# root runtime (no USER pxq) so KV volume permissions match the llama-p100 production image.
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS build
+
+ARG CUDA_ARCHS=60
+RUN apt-get update && apt-get install -y -qq --no-install-recommends build-essential cmake git ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git init -q . && git remote add origin https://github.com/poisonxa16/pxa && \
+    git fetch --depth 1 --no-tags origin 3c5b80d918d690f51a856cd0d35edb9b9f828121 && git checkout -q FETCH_HEAD && \
+    git --no-pager log -1 --format="pxa %H %ad %s" > /src/PXA-REV
+
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \
+      -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" -DBUILD_SHARED_LIBS=ON -DLLAMA_CURL=OFF \
+      -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs -lcuda" \
+      -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs -lcuda" \
+    && cmake --build build --target llama-server -j 4
+
+FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04 AS runtime
+
+RUN apt-get update && apt-get install -y -qq --no-install-recommends curl ca-certificates libgomp1 && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/build/bin/llama-server    /usr/local/bin/llama-server
+COPY --from=build /src/build/src/libllama.so     /usr/local/lib/
+COPY --from=build /src/build/ggml/src/libggml.so /usr/local/lib/
+COPY --from=build /src/build/examples/mtmd/libmtmd.so /usr/local/lib/
+COPY --from=build /src/PXA-REV /usr/local/share/pxa-rev
+RUN ldconfig
+
+ENV LLAMA_ARG_HOST=0.0.0.0
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+    CMD curl -f "http://127.0.0.1:8080/health" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/llama-server"]

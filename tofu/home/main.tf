@@ -611,3 +611,20 @@ check "single_controlplane_only" {
   }
 }
 
+# Enforce the host memory floor so the fleet cannot exceed
+# (max_memory_gb - reserved.memory = 88 GiB) and then lose a VM to the kernel
+# OOM killer. Policy: the host gets a 6 GiB floor (Proxmox + kernel + PVE +
+# SHRUNK ZFS ARC) and everything else goes to the VMs. Ballooning is OFF
+# (memory.dedicated in the VM block), so allocated == committed with no
+# reclaim. This check is the guardrail that keeps the fleet at-or-under the
+# floor; the ARC cap (zfs_arc_max) is what keeps the host INSIDE its 6 GiB.
+# History: the fleet sat ~0-free at 84 GiB on 2026-09-20 and the kernel OOM
+# killer reaped qemu processes for VMs 104/105 on 2026-09-11/12 — cp-main
+# (103) is the fatal victim.
+check "fleet_memory_within_host_ceiling" {
+  assert {
+    condition     = local.cluster_capacity.total_memory_gb <= var.proxmox_nodes[var.proxmox_node].max_memory_gb - var.proxmox_nodes[var.proxmox_node].reserved.memory
+    error_message = "Fleet commits ${local.cluster_capacity.total_memory_gb} GiB; the host ceiling ${var.proxmox_nodes[var.proxmox_node].max_memory_gb} GiB minus the ${var.proxmox_nodes[var.proxmox_node].reserved.memory} GiB host floor allows at most ${var.proxmox_nodes[var.proxmox_node].max_memory_gb - var.proxmox_nodes[var.proxmox_node].reserved.memory} GiB of VM memory. Reduce node memory, or shrink the ARC - never grow past the floor or the host OOM-kills a VM (cp-main 103 is the single control plane)."
+  }
+}
+

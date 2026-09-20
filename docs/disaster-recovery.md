@@ -96,45 +96,79 @@ Verification after each step: apiserver healthy, all nodes Ready, a pod
 restart succeeds, a fresh etcd snapshot decrypts, and alert delivery still
 arrives at the external destination.
 
-## Known failure mode: control-plane VM reboots (open, 2026-09-19)
+## Known failure mode: control-plane VM reboots (resolved root cause — host OOM, 2026-09-20)
 
-`talos-bno-yij` (the sole control plane, `cp-main`) rebooted **three times in
-one morning** — approximately 09:13, 10:21 and 11:56 UTC — with the worker VMs
-on the same Proxmox host unaffected (`talos-3bi-1fl` ~2.5 days uptime,
-`talos-919-w9u` ~6.5 days). Observed signature and blast radius:
+`talos-bno-yij` (the sole control plane, `cp-main`) rebooted repeatedly with
+the worker VMs unaffected. **Root cause confirmed via the host: the Proxmox
+host was critically memory-exhausted and the kernel OOM killer was reaping VM
+qemu processes.** Observed signature and blast radius:
 
 - Each reboot produces a Kubernetes `Rebooted` node event and a window where
   the API refuses connections: in-cluster clients get `connect: connection
   refused` on `172.21.0.1:443`, workstation clients a timeout on
   `10.30.0.10:6443`.
-- Guest side shows no cause: no kernel panic, no OOM kill, no
-  `MemoryPressure`, ~4 GiB free of 8 GiB.
 - **Cascade:** each API blip makes the CloudNativePG operator exit(1) at
   startup (`failed to get server groups ... connection refused`; 91 restarts
   accumulated), which flips the `cnpg-operator` Flux Kustomization
-  not-ready and blocks its dependents (`hindsight`, `cnpg-restore-drills`)
-  for minutes. A deploy that lands in that window stalls.
+  not-ready and blocks its dependents for minutes.
 
-Triage (host access required — the Proxmox API `https://10.20.10.21:8006` is
-not reachable from the workstation while its VPN is up):
+### Confirmed evidence (host-side, 2026-09-20)
+
+- `free`: `94 total, 91 used, **0 free**, 2 available, **0 swap**` — and
+  `Committed_AS` (93.6 GiB) at ~2x the kernel commit limit.
+- OOM kills are real and recurring:
+  `dmesg | grep 'Out of memory: Killed'` shows qemu/kvm processes for VMs
+  104/105 killed on 2026-09-11/12 (anon-rss 50–67 GiB each).
+- Ballooning is OFF for every VM (`memory.dedicated` in `tofu/home/main.tf`),
+  so **allocated == committed** with no reclaim — the only safe lever was the
+  allocation itself.
+- ZFS ARC was not capped in practice: `arcstats c_max = 4.7 GiB` despite the
+  module param; `/etc/modprobe.d/zfs.conf` previously asked for 2 GiB.
+- Watchdog device: **absent** (ruled out). Backup job: `mode=snapshot` every
+  2 h — snapshot mode does not reboot (ruled out).
+- **Separate finding:** a Proxmox API token `root@pam!k8s` (and full
+  `root@pam`) issued `qmreset`/`qmstop`/`qmstart` against VM 103 on
+  2026-09-18 09:33–10:12. Identify that automation and stop it from touching
+  the control plane.
+
+### Remediation applied / queued (2026-09-20)
+
+1. **Tofu budget (drafted, unapplied):** host floor = 6 GiB
+   (`reserved.memory = 6`), VMs take the remaining 88 GiB (cp 8 + eff 32 +
+   perf 48); `fleet_memory_within_host_ceiling` check enforces
+   `fleet <= max_memory_gb - reserved.memory`.
+2. **ARC:** `/etc/modprobe.d/zfs.conf` now `options zfs zfs_arc_max=1073741824`
+   (1 GiB), backup at `zfs.conf.bak.20260920`. Binds at next module load
+   (**requires a host reboot**).
+
+### Reboot/apply runbook (one maintenance window)
 
 ```sh
-# on pmx-main
-journalctl -u pvedaemon -u pveproxy -u qmeventd --since today | grep -i 'VM 1'
-grep -i watchdog /etc/pve/qemu-server/<vmid>.conf   # watchdog device?
-cat /etc/pve/jobs.cfg                               # backup job in stop mode?
-dmesg -T | grep -iE 'oom|killed process'            # host memory pressure
+# 1) Reboot pmx-main (binds the 1 GiB ARC cap; VMs return via onboot=1)
+reboot
+
+# 2) After boot, verify the ARC cap took and the host is at its 6 GiB floor
+cat /proc/spl/kstat/zfs/arcstats | grep -E '^c_max '
+free -g                                  # expect: used ~90 (84 VMs + 6 host)
+
+# 3) Apply the tofu budget (grows wk-main-efficiency 28 -> 32 GiB; the VM
+#    must restart for dedicated memory to change)
+cd tofu/home && tofu plan && tofu apply -target=proxmox_virtual_environment_vm.talos_nodes
+
+# 4) Verify the fleet and that no VM qemu is near OOM territory
+free -g                                  # expect: 88 GiB VMs + 6 GiB host
+tail -20 /var/log/pve/qemu-server/*.log 2>/dev/null
 ```
 
-Until the host cause is fixed, treat control-plane availability as degraded:
-expect ~hourly API interruptions, and re-run a stalled `flux reconcile` /
-`task check` after the node returns.
+Until then. treat control-plane availability as degraded and re-run a stalled
+`flux reconcile` / `task check` after any node return.
 
 ## Open items
 
-- The control-plane VM reboot cause (see the failure-mode section above):
-  needs the Proxmox host's task log/journal, the VM's watchdog config and the
-  backup-job mode — not obtainable from inside the cluster.
+- The control-plane VM reboot cause is **resolved** (host OOM, see the
+  failure-mode section above) with the ARC cap + 6 GiB host floor queued.
+  Remaining follow-up: identify and constrain the `root@pam!k8s` Proxmox
+  token observed issuing `qmreset` on VM 103.
 - The first live drill run, and its measured duration, must be recorded here —
   the table above says "designed" until then.
 - The control-plane rebuild rehearsal (rebuild `cp-main`, restore etcd,

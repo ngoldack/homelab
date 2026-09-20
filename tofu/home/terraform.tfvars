@@ -41,21 +41,21 @@ proxmox_nodes = {
     max_cpu_cores = 24
     cpu_threads   = 32
     cpu_model     = "i9-13900HX"
-    # Host OS reservation (user policy): 2 GiB RAM floor of hard reserve +
-    # the ZFS ARC cap (~1 GiB) + headroom => 4 GiB, and 2 efficiency threads
-    # for the host itself (headless).
+    # Host OS reservation (user policy): 6 GiB floor total for the host —
+    # Proxmox + kernel + PVE services + a SHRUNK ZFS ARC. Everything else goes
+    # to the VMs. ZFS ARC is capped low (zfs_arc_max) so it cannot grow into
+    # VM memory; keep that cap bound so the host stays within this floor.
     #
-    # This reserve used to be razor-thin, and it eventually bit: the fleet
-    # allocating 92 of the 94 usable GiB stopped wk-main-performance booting
-    # at all ("QEMU exited with code 1" = the host cannot hand back the
-    # memory once ZFS ARC has grown into the free space). The consolidation
-    # (two workers) sized the fleet at 86 GiB of the 90 allocatable, so the
-    # host keeps ~8 GiB of REAL slack above this floor. Keep it that way:
-    # check the fleet total against max_memory_gb before growing any node's
-    # memory — an inflated ceiling here doesn't fail loudly, it just quietly
-    # under-counts what the host needs for itself.
+    # History: the reserve and ARC used to be razor-thin, and it bit. The fleet
+    # allocating 92 of 94 usable GiB stopped wk-main-performance booting
+    # ("QEMU exited with code 1"), and even at 84 GiB the host sat ~0 free on
+    # 2026-09-20, so the kernel OOM killer reaped VM qemu processes (104/105;
+    # cp-main 103 is the fatal victim). The fix is NOT to starve the VMs — it
+    # is to hold ZFS ARC within this 6 GiB floor so the VMs (dedicated, no
+    # balloon) can own the remaining 88 GiB. Check the fleet total against
+    # max_memory_gb before growing any node, and keep the ARC cap in force.
     reserved = {
-      memory = 4
+      memory = 6
       cpu    = { class = "efficiency", count = 2 }
     }
     # big.LITTLE: 8 P-cores (HT) = threads 0-15, 16 E-cores (no HT) = 16-31.
@@ -92,8 +92,8 @@ nodes = {
     # memory pressure: with no swap, Talos's OOM controller started SIGKILLing
     # besteffort pods in a tight loop, which starved the control plane
     # (apiserver TLS handshake timeouts, controller-manager and scheduler
-    # not ready). Fleet total stays inside the allocatable budget
-    # (8 + 28 + 48 = 84 of 94).
+    # not ready). Fleet totals 8 + 32 + 48 = 88 GiB = 94 usable - 6 host floor
+    # (enforced by fleet_memory_within_host_ceiling in main.tf; ARC shrunk).
     memory     = 8192
     disk_size  = 32
     talos_role = "controlplane"
@@ -125,14 +125,14 @@ nodes = {
     host      = "pmx-main"
     vm_id     = 104
     cpu_cores = 10
-    # 28 GiB (was 32 at plan time): first boot of the consolidated fleet
-    # OOM-killed the P100 VM's qemu mid-start (kernel global OOM, 82 GiB of
-    # VM commits + qemu/VFIO overhead + PVE services against 94 physical —
-    # the allocatable arithmetic must leave ~12 GiB of REAL slack, not just
-    # the 4 GiB reserved floor). Still absorbs media's role and nets +4 over
-    # the old split; demand concentration post-consolidation is HERE, but
-    # the host budget binds first.
-    memory    = 28672
+    # 32 GiB: the general worker carries everything non-nvidia/non-control-plane
+    # plus the media role and the iGPU. Sized to fill the VM pool (88 GiB) under
+    # the 6 GiB host floor: ballooning is off (memory.dedicated), so the only
+    # cap that matters is allocated <= (max_memory_gb - reserved.memory) — ARC
+    # is shrunk so ZFS cannot grow into this. Raised back to 32 on 2026-09-20
+    # after an earlier OOM-driven trim to 24 proved unnecessary once the ARC cap
+    # (not VM size) was the true pressure valve.
+    memory    = 32768
     disk_size = 48
 
     talos_role = "worker"
@@ -169,13 +169,14 @@ nodes = {
   # merge, all 16 P-class threads and 48 GiB (the pre-carve shape restored;
   # Kata sandbox workloads also land here, label-pinned).
   #
-  # 48 GiB, not 64: the VM stopped starting at 64 ("QEMU exited with code 1"
-  # = allocation failure — see the host reserved block above).
-  # Kept in sync with the live VM, which was resized by hand first: without
-  # this line the next apply would push it straight back to the old size and
-  # break the node again.
-  # Fleet total: 6 (cp) + 28 (eff) + 48 (perf) = 82 GiB committed, ~12 GiB
-  # real host slack.
+  # 48 GiB — the x16 P100 AI/inference worker plus Kata sandboxes. At the top
+  # of the 88 GiB VM pool (94 usable - 6 host). Ballooning is off
+  # (memory.dedicated), so allocated == committed; the ZFS ARC is shrunk so it
+  # never grows into this budget.
+  # 48 is the proven ceiling for this VM: it would not start at 64 ("QEMU
+  # exited with code 1" = allocation failure). A hand-resize on the live VM
+  # must precede any tfvars change so the next apply doesn't revert the size.
+  # Fleet total: 8 (cp) + 32 (eff) + 48 (perf) = 88 GiB = 94 usable - 6 host.
   wk-main-performance = {
     host      = "pmx-main"
     vm_id     = 105

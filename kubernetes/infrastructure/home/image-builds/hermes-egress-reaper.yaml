@@ -25,7 +25,7 @@
 # cosign key is the SOPS-encrypted cosign-signing-key secret (ns buildkit), and
 # COSIGN_PASSWORD comes from the password item in the same secret.
 #
-# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3 — the digest
+# OUTPUT: registry.ngoldack.de/hermes-egress-guard:0.1.0-e57ae0a — the digest
 # printed by buildctl is pinned in hermes-egress/reaper.yaml and
 # hermes-egress/authorizer.yaml. Last built digest (the Python image, 2026-09-18):
 #   sha256:0536c29113325512bcd792be91df40864153b89ff677098ce22b35fcd5d7fe5f
@@ -36,7 +36,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-egress-reaper-s4
+  name: build-hermes-egress-reaper-s5
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -83,9 +83,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#fe3dfb307898e50209818e05388fd58e3e431354''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#e57ae0a5dae46554329a715df86c61d0d8f51a4f''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-egress-guard/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-egress-guard:0.1.0-e57ae0a,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-egress-guard:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -100,7 +100,7 @@ spec:
 
           echo "DIGEST=$DIGEST";
 
-          IMAGE=registry.ngoldack.de/hermes-egress-guard:0.1.0-fe3dfb3;
+          IMAGE=registry.ngoldack.de/hermes-egress-guard:0.1.0-e57ae0a;
 
           echo "== trivy gate ==" &&
 
@@ -119,7 +119,7 @@ spec:
 
           echo "== provenance attest ==" &&
 
-          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"fe3dfb3"}},"buildMetadata":{"reproducible":"false"}}''
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"e57ae0a"}},"buildMetadata":{"reproducible":"false"}}''
           > /tmp/prov.json &&
 
           DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json

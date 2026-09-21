@@ -1,51 +1,24 @@
 # Health/eviction policies for the agent chains (agent-chains.yaml).
 #
-# Synthetic's 429s are NOT all equal — the failover decision depends on which
-# of three flavors the response is, and agentgateway evicts a provider only
-# when unhealthyCondition matches:
+# DELIBERATELY MINIMAL. All of the 429-flavour reasoning that used to live here
+# — which 429 means "fail over" and which is the transient concurrency case —
+# now lives in the proxy that fronts every Synthetic provider
+# (image-builds/synthetic-proxy). That proxy reads Synthetic's answer, decides,
+# remembers the decision per API key, and reports the Synthetic leg as plain
+# UNHEALTHY (503) when it must not be used again. The body/header sniffing, and
+# the response-body buffering it required, are gone from this file.
 #
-#   | flavor                    | signal                                     | fail over? |
-#   |---------------------------|--------------------------------------------|------------|
-#   | parallel-limit 429        | has `Retry-After` header (concurrency)     | NO         |
-#   | generic 429 (rate limit)  | body: "Too many requests, try again later" | YES        |
-#   | quota-exceeded 429        | body: "exceeded your subscription rate     | YES        |
-#   |                           |        limits"                             |            |
+# So the contract is one line: the proxy said the leg is unhealthy -> evict and
+# fail the chain over to the next priority group (OpenRouter). Anything that is
+# not a 5xx is left alone — including Synthetic's transient parallel-limit 429,
+# which the proxy deliberately passes through untouched.
 #
-# VERIFIED (operator 2026-09-20): the parallel-limit 429 is the ONLY flavor
-# that carries a Retry-After header; the generic 429 does not. So the header
-# cleanly isolates the transient concurrency case, and each fail-over flavor
-# is also positively body-matched:
-#
-#   - parallel-limit 429 ("max 4 parallel requests per model") is a transient
-#     concurrency condition that recovers as in-flight calls finish; evicting
-#     on it would burn a failover for no reason -> excluded via `has(Retry-
-#     After)` and no body match.
-#   - generic 429 is Synthetic's rate-limit state that only clears if NO new
-#     request pokes it for a recovery window -> MUST fail over.
-#   - quota-exceeded 429 -> MUST fail over.
-#
-# CEL: evict on 5xx, or on a 429 that carries no Retry-After header, or whose
-# body is the generic or quota-exceeded error. The body clauses make the
-# fail-over flavors independent of header behavior; `!has(Retry-After)` covers
-# the case where a fail-over 429 happens to omit the header.
-#
-# Body matching uses `response.bodyPrefix` (the response head), NOT
-# `response.body` — agentgateway populates a body field only when a CEL
-# expression references it, so referencing the full `response.body` buffers
-# an entire streaming SSE completion before the health decision (latency/
-# memory, may break streaming). The generic and quota-exceeded error bodies
-# are small and at the head, so `bodyPrefix.contains(...)` discriminates
-# identically without buffering the stream.
-#
-# duration: 1h — the base recovery window for a generic 429: Synthetic's
-# rate-limit state clears only after ~1h with no new request (verified by
-# operator 2026-09-20; a 429 that kept being poked stayed in the 429 state
-# for 8h+ despite available quota). The chains fail over to OpenRouter for
-# this window and then try Synthetic again. When a 429 DOES include
-# Retry-After (the concurrent-limit flavor), agentgateway uses that header as
-# the eviction duration — but that flavor is excluded above, so it is never
-# evicted.
----
+# duration: 5m — short on purpose. The proxy holds a bad key off for its own
+# UNHEALTHY_AFTER window and answers 503 locally WITHOUT touching Synthetic, so
+# this eviction only has to stop the gateway hammering in the meantime. Traffic
+# returns to Synthetic within minutes of the proxy's hold-off lapsing instead of
+# waiting out a stale hour, and only one probe per eviction window reaches
+# Synthetic because the proxy short-circuits the rest.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -59,13 +32,9 @@ spec:
   backend:
     health:
       unhealthyCondition: >-
-        response.code >= 500 ||
-        (response.code == 429 &&
-        (!("retry-after" in response.headers) ||
-        response.bodyPrefix.contains("Too many requests, try again later") ||
-        response.bodyPrefix.contains("exceeded your subscription rate limits")))
+        response.code >= 500
       eviction:
-        duration: 1h
+        duration: 5m
         consecutiveFailures: 1
 ---
 apiVersion: agentgateway.dev/v1alpha1
@@ -81,13 +50,9 @@ spec:
   backend:
     health:
       unhealthyCondition: >-
-        response.code >= 500 ||
-        (response.code == 429 &&
-        (!("retry-after" in response.headers) ||
-        response.bodyPrefix.contains("Too many requests, try again later") ||
-        response.bodyPrefix.contains("exceeded your subscription rate limits")))
+        response.code >= 500
       eviction:
-        duration: 1h
+        duration: 5m
         consecutiveFailures: 1
 ---
 apiVersion: agentgateway.dev/v1alpha1
@@ -103,13 +68,9 @@ spec:
   backend:
     health:
       unhealthyCondition: >-
-        response.code >= 500 ||
-        (response.code == 429 &&
-        (!("retry-after" in response.headers) ||
-        response.bodyPrefix.contains("Too many requests, try again later") ||
-        response.bodyPrefix.contains("exceeded your subscription rate limits")))
+        response.code >= 500
       eviction:
-        duration: 1h
+        duration: 5m
         consecutiveFailures: 1
 ---
 apiVersion: agentgateway.dev/v1alpha1
@@ -125,11 +86,7 @@ spec:
   backend:
     health:
       unhealthyCondition: >-
-        response.code >= 500 ||
-        (response.code == 429 &&
-        (!("retry-after" in response.headers) ||
-        response.bodyPrefix.contains("Too many requests, try again later") ||
-        response.bodyPrefix.contains("exceeded your subscription rate limits")))
+        response.code >= 500
       eviction:
-        duration: 1h
+        duration: 5m
         consecutiveFailures: 1

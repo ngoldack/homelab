@@ -1,8 +1,10 @@
 package syntheticproxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -11,27 +13,39 @@ import (
 	"time"
 )
 
-// quotaExhaustedBody is the refusal the gateway's eviction CEL matches: it
-// contains "exceeded your subscription rate limits" and carries NO Retry-After
-// header, so the chain fails over to OpenRouter instead of treating it as the
-// transient parallel-limit flavor.
-const quotaExhaustedBody = `{"error":"You've exceeded your subscription rate limits. Upgrade, or try again later."}`
-
-// unavailableBody is the 503 body for an unreachable upstream (also evicts, via
-// the CEL's response.code >= 500 clause).
+// unavailableBody is the 503 body for a transport-level failure to reach
+// Synthetic (connection refused, TLS, timeout).
 const unavailableBody = `{"error":"upstream unavailable"}`
 
-// statusKey carries a *statusHolder into the outbound request context so
-// ModifyResponse can record the upstream status for the access log WITHOUT
-// wrapping the ResponseWriter. (Wrapping the writer would put an
-// obviously-safe passthrough through a function CodeQL treats as an
-// untrusted-data sink; letting ReverseProxy write directly keeps the
-// sanctioned API as the only writer and the log accurate.)
+// unhealthyBody is the single error shape this proxy returns when it has
+// decided the Synthetic leg must not be used.
+//
+// WHY one shape for every reason: all the 429-flavour defensive logic now lives
+// HERE, and the gateway's health policy is reduced to the single rule "the
+// proxy reported the leg unhealthy -> evict and fail over". The gateway
+// therefore never sniffs a body or a header, and — because agentgateway
+// populates a response body field only when a CEL references it — the path
+// contains no body buffering at all. The reason is still carried for the logs
+// and for a human reading the error.
+func unhealthyBody(reason string) string {
+	return `{"error":"upstream unhealthy","reason":"` + reason + `"}`
+}
+
+// infoKey carries a *reqInfo into the outbound request context so
+// ModifyResponse can (a) record the upstream status for the access log without
+// wrapping the ResponseWriter — wrapping it would put an obviously-safe
+// passthrough through a function CodeQL treats as an untrusted-data sink — and
+// (b) apply the failover decision to the upstream answer in flight.
 type ctxKey int
 
-const statusKey ctxKey = 0
+const infoKey ctxKey = 0
 
-type statusHolder struct{ code int }
+// reqInfo is the per-request scratch ModifyResponse needs.
+type reqInfo struct {
+	// kh is the caller's key hash; "" when the request carried no credential.
+	kh   string
+	code int
+}
 
 // Proxy is the running reverse proxy plus its per-key state.
 type Proxy struct {
@@ -90,10 +104,12 @@ func NewProxy(cfg Config) *Proxy {
 		// -1 flushes every write immediately; required for SSE token streaming.
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
-			if h, ok := resp.Request.Context().Value(statusKey).(*statusHolder); ok {
-				h.code = resp.StatusCode
-			}
+			info, _ := resp.Request.Context().Value(infoKey).(*reqInfo)
 			p.metrics.IncResponse(resp.StatusCode)
+			p.applyFailoverRule(info, resp)
+			if info != nil {
+				info.code = resp.StatusCode
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -102,6 +118,76 @@ func NewProxy(cfg Config) *Proxy {
 		},
 	}
 	return p
+}
+
+// applyFailoverRule is the whole point of this service: it reads Synthetic's
+// answer, decides whether the leg should be used again, remembers that per key,
+// and rewrites the answer the gateway will see.
+//
+// The rule (header-only, so the SSE body is never read):
+//   - 5xx                       -> Synthetic is broken        -> unhealthy
+//   - 429 WITHOUT Retry-After   -> a real rate limit           -> unhealthy
+//   - 429 WITH Retry-After      -> transient parallel-limit    -> pass through
+//   - anything else             -> healthy
+//
+// The operator-verified discriminator is the Retry-After header: only the
+// transient concurrency flavour sends it, and that flavour must NOT fail the
+// chain over.
+//
+// When the verdict is "unhealthy", the response is rewritten to a 503 IN
+// FLIGHT. That is what makes the gateway's policy a single code-only rule and
+// still fails over on the very request that discovered the problem, rather than
+// only the next one.
+func (p *Proxy) applyFailoverRule(info *reqInfo, resp *http.Response) {
+	var verdict Verdict
+	switch {
+	case resp.StatusCode >= 500:
+		verdict = VerdictUnhealthy
+	case resp.StatusCode == http.StatusTooManyRequests && resp.Header.Get("Retry-After") == "":
+		verdict = VerdictRateLimited
+	default:
+		return
+	}
+
+	if info != nil && info.kh != "" {
+		now := time.Now()
+		p.store.Set(info.kh, KeyState{
+			Verdict:      verdict,
+			RefusedUntil: now.Add(p.cfg.UnhealthyFor),
+			LastCheck:    now,
+		})
+		log.Printf("msg=synthetic-proxy event=hold_off kh=%s verdict=%s upstream_status=%d holdoff=%s",
+			shortHash(info.kh), verdict, resp.StatusCode, p.cfg.UnhealthyFor)
+	}
+
+	rebaseToUnhealthy(resp, verdict.String())
+}
+
+// rebaseToUnhealthy rewrites an upstream answer into this proxy's single
+// unhealthy shape (503 + a small JSON body).
+//
+// The upstream body is closed and replaced rather than read: the original may
+// be a streaming SSE error, and an unconsumed body must not be left for the
+// transport. Content-Encoding/Transfer-Encoding are dropped because the
+// replacement body is neither compressed nor chunked, and Retry-After is
+// dropped so nothing downstream can re-classify this as the transient flavour.
+func rebaseToUnhealthy(resp *http.Response, reason string) {
+	if resp.Body != nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+		_ = resp.Body.Close()
+	}
+	body := []byte(unhealthyBody(reason))
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.StatusCode = http.StatusServiceUnavailable
+	resp.Status = "503 Service Unavailable"
+
+	h := resp.Header
+	h.Del("Content-Encoding")
+	h.Del("Transfer-Encoding")
+	h.Del("Retry-After")
+	h.Del("Content-Length")
+	h.Set("Content-Type", "application/json")
 }
 
 // Handler returns the decision-then-forward handler.
@@ -130,58 +216,55 @@ func (p *Proxy) metricsHandler(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	holder := &statusHolder{code: http.StatusOK}
-	r = r.WithContext(context.WithValue(r.Context(), statusKey, holder))
-
 	auth := r.Header.Get("Authorization")
-	refusal, verdict := p.decide(r.Context(), auth, w, r)
+	kh := ""
+	if auth != "" {
+		kh = HashAuth(auth)
+	}
+	info := &reqInfo{kh: kh, code: http.StatusOK}
+	r = r.WithContext(context.WithValue(r.Context(), infoKey, info))
+
+	refusal, verdict := p.decide(r.Context(), auth, kh, w, r)
 
 	status := refusal
 	if status == 0 {
-		status = holder.code
+		status = info.code
 	}
 	elapsed := time.Since(start)
 	p.metrics.IncRequests(verdict)
 	p.metrics.ObserveDuration(elapsed.Seconds())
 	log.Printf("msg=synthetic-proxy kh=%s verdict=%s status=%d upstream=%s dur_ms=%d",
-		shortHash(HashAuth(auth)), verdict, status, p.upHost, elapsed.Milliseconds())
+		shortHash(kh), verdict, status, p.upHost, elapsed.Milliseconds())
 }
 
 // decide applies the gate and, when allowed, forwards the request. It returns
 // the refusal status (0 when the request was forwarded) and the verdict label.
-func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, r *http.Request) (int, string) {
+func (p *Proxy) decide(ctx context.Context, auth, kh string, w http.ResponseWriter, r *http.Request) (int, string) {
 	now := time.Now()
 
 	// No credential on the request: nothing to key state on. Forward and let
-	// Synthetic (and the gateway's CEL) arbitrate — this is a misconfiguration
+	// Synthetic (and the gateway) arbitrate — this is a misconfiguration
 	// upstream of this proxy, not a reason to deny here.
 	if auth == "" {
 		p.rp.ServeHTTP(w, r)
 		return 0, "passthrough"
 	}
 
-	kh := HashAuth(auth)
 	st, seen := p.store.Get(kh)
 
-	// An in-force refusal short-circuits without touching Synthetic.
+	// An in-force refusal short-circuits without touching Synthetic. This is
+	// the hold-off that lets the gateway's eviction be short.
 	if seen && now.Before(st.RefusedUntil) {
-		writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
-		return http.StatusTooManyRequests, st.Verdict.String()
+		return refuse(w, st.Verdict)
 	}
 
 	// Reuse a recent verdict rather than re-querying on every request.
 	if seen && now.Sub(st.LastCheck) < p.cfg.PollInterval {
-		switch st.Verdict {
-		case VerdictQuotaExhausted:
-			writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
-			return http.StatusTooManyRequests, "quota_exhausted"
-		case VerdictUnhealthy:
-			writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
-			return http.StatusServiceUnavailable, "unhealthy"
-		default:
-			p.rp.ServeHTTP(w, r)
-			return 0, "healthy"
+		if st.Verdict != VerdictHealthy {
+			return refuse(w, st.Verdict)
 		}
+		p.rp.ServeHTTP(w, r)
+		return 0, "healthy"
 	}
 
 	// Fresh evaluation.
@@ -201,8 +284,7 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 			nst.Verdict = VerdictQuotaExhausted
 			nst.RefusedUntil = now.Add(p.cfg.UnhealthyFor)
 			p.store.Set(kh, nst)
-			writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
-			return http.StatusTooManyRequests, "quota_exhausted"
+			return refuse(w, VerdictQuotaExhausted)
 		}
 		p.store.Set(kh, nst)
 		p.rp.ServeHTTP(w, r)
@@ -211,7 +293,8 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 	p.metrics.IncQuota("error")
 
 	// Quota endpoint indeterminate: only positive evidence of a DOWN upstream
-	// justifies refusing. Otherwise fail open and let Synthetic answer.
+	// justifies refusing. Otherwise fail open and let Synthetic answer (its
+	// answer then goes through applyFailoverRule like any other).
 	if perr := p.Probe(ctx, auth); perr != nil {
 		p.metrics.IncProbe("error")
 		p.store.Set(kh, KeyState{
@@ -219,8 +302,7 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 			LastCheck:    now,
 			RefusedUntil: now.Add(p.cfg.UnhealthyFor),
 		})
-		writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
-		return http.StatusServiceUnavailable, "unhealthy"
+		return refuse(w, VerdictUnhealthy)
 	}
 	p.metrics.IncProbe("ok")
 
@@ -256,7 +338,15 @@ func (p *Proxy) Serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-// writeJSON writes a JSON refusal with the exact body and no Retry-After.
+// refuse answers a request from local state, without touching Synthetic. Every
+// refusal is a 503 carrying the reason, for the single code-only rule the
+// gateway now applies.
+func refuse(w http.ResponseWriter, v Verdict) (int, string) {
+	writeJSON(w, http.StatusServiceUnavailable, unhealthyBody(v.String()))
+	return http.StatusServiceUnavailable, v.String()
+}
+
+// writeJSON writes a JSON body with the given status.
 func writeJSON(w http.ResponseWriter, code int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

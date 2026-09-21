@@ -46,6 +46,12 @@ spec:
           # Same version as the daemon (chart 1.8.0 -> appVersion v0.31.0).
           # Alpine-based (has /bin/sh + apk); shell needed for the signer chain.
           image: moby/buildkit:v0.31.0
+          # NOTE: the script below is a folded plain scalar, so it may not contain
+          # `#` comments (they would comment out the rest of the folded line) and a
+          # literal newline must be a blank line. The digest extraction prefers
+          # buildkit's `exporting manifest` line and only falls back to the last
+          # digest in the log - the cache manifest is written LAST when a registry
+          # cache is exported, and pinning that yields a pod that cannot start.
           command:
             - /bin/sh
             - -c
@@ -66,7 +72,12 @@ spec:
               set +e && buildctl --addr=tcp://buildkitd:1234 --tlscacert=/certs/ca.crt --tlscert=/certs/tls.crt --tlskey=/certs/tls.key build --frontend=dockerfile.v0 --opt=context=https://github.com/ngoldack/homelab.git#2c26ba790e2f8696a9fc34adb87227c51748f5d0 --opt=filename=kubernetes/infrastructure/home/image-builds/llama-kv-broker/dockerfile --output=type=image,name=registry.ngoldack.de/llama-kv-broker:7,push=true --export-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache,mode=max --import-cache=type=registry,ref=registry.ngoldack.de/llama-kv-broker:buildcache --progress=plain > /tmp/build.log 2>&1; rc=$?; set -e;
               cat /tmp/build.log;
               test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
-              DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' /tmp/build.log | tail -1);
+              DIGEST=$(grep -oE 'exporting manifest sha256:[a-f0-9]{64}' /tmp/build.log | tail -1 | grep -oE 'sha256:[a-f0-9]{64}');
+              [ -n "$DIGEST" ] || DIGEST=$(grep -oE 'pushing manifest for [^ ]+@sha256:[a-f0-9]{64}' /tmp/build.log | tail -1 | grep -oE 'sha256:[a-f0-9]{64}');
+              if [ -z "$DIGEST" ]; then
+                echo "WARN - no manifest line in the build log, falling back to the last digest";
+                DIGEST=$(grep -oE 'sha256:[a-f0-9]{64}' /tmp/build.log | tail -1);
+              fi;
               test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
               echo "DIGEST=$DIGEST";
               IMAGE=registry.ngoldack.de/llama-kv-broker:7;

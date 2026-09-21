@@ -28,17 +28,13 @@ spec:
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
-      # Placement. Two independent reasons to pin the agents to the
-      # sandbox-capable node:
-      #   1. the Kanban board is one SQLite file on the shared volume and every
-      #      writer (the dispatcher and the workers it spawns) should share one
-      #      NFS client — `database.journal_mode: delete` is the backstop if a
-      #      pod ever lands elsewhere;
-      #   2. that node is where the sandbox runtime and the parent gateway
-      #      already run, and the pinned image is present in its local cache.
-      #      (The digest is absent from the registry — a separate, pre-existing
-      #      repo issue; a pod scheduled anywhere else cannot pull it and sits
-      #      in ImagePullBackOff.)
+      # Placement: pin all four profiles to the sandbox-capable node (the only
+      # node labelled workload.hermes.io/sandbox), because the Kanban board is
+      # one SQLite file on the shared volume and every writer — the dispatcher
+      # and the workers it spawns — should share one NFS client.
+      # `database.journal_mode: delete` is the backstop if a pod ever lands
+      # elsewhere. That node is also where the sandbox runtime and the parent
+      # gateway already run.
       nodeSelector:
         workload.hermes.io/sandbox: "true"
       # Belt and braces: keep the four pods together even if the node selector

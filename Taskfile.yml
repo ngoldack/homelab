@@ -316,7 +316,7 @@ tasks:
       - hack/hermes-e2e.sh
 
   hermes:repin:
-    desc: Print the digest pushed by the newest Hermes gateway build Job (re-pin it in hermes/statefulset.yaml)
+    desc: Print the digest the newest Hermes gateway build Job pushed (re-pin it everywhere it is pinned)
     cmds:
       - |
         set -eu
@@ -332,16 +332,50 @@ tasks:
         }
         echo "job: $job"
         # The log carries several digests (config, image manifest, and the cache
-        # image manifest written last) — only "exporting manifest" is the pushed
-        # image manifest. Cross-check by hand when wanted:
-        #   skopeo inspect --format '{{.Digest}}' docker://<the Job's output tag>
-        digest=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" \
+        # image manifest written LAST). Only "exporting manifest" is the pushed
+        # image manifest — pinning the last digest in the log is how
+        # llama-kv-broker ended up pinned to a buildkit CACHE manifest.
+        digest=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" 2>/dev/null \
           | grep -oE 'exporting manifest sha256:[0-9a-f]{64}' | tail -1 \
-          | grep -oE 'sha256:[0-9a-f]{64}')
-        [ -n "$digest" ] || {
-          echo "no image-manifest digest in $job's log — inspect it by hand" >&2
-          exit 1
-        }
+          | grep -oE 'sha256:[0-9a-f]{64}' || true)
+        if [ -z "$digest" ]; then
+          # Job logs are evicted quickly on this cluster (a one-shot build Job's
+          # log is often unretrievable the next day, which is why this target
+          # used to fail outright). Fall back to the registry: the Job's own
+          # `--output=type=image,name=<ref>,push=true` names the tag it pushed.
+          ref=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit get "$job" \
+            -o jsonpath='{.spec.template.spec.containers[*].args[*]}' 2>/dev/null \
+            | tr ' ' '\n' | grep -oE -- '--output=type=image,name=[^,]+' | tail -1 | sed 's/.*name=//')
+          if [ -n "$ref" ] && command -v skopeo >/dev/null 2>&1; then
+            echo "note: $job has no retrievable log — resolving the pushed tag via the registry: $ref" >&2
+            # Digest of the manifest exactly as served: hash the raw bytes on the
+            # pipe (never through command substitution, which would strip a
+            # trailing newline and change the hash).
+            digest=$(skopeo inspect --raw "docker://$ref" 2>/dev/null \
+              | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1)
+            [ -n "$digest" ] && digest="sha256:$digest"
+          fi
+          if [ -z "$digest" ]; then
+            echo "no image-manifest digest available for $job (log evicted, and no skopeo/tag fallback)." >&2
+            echo "Resolve it by hand, then pin it in hermes/statefulset.yaml and hermes-agents/*.yaml:" >&2
+            echo "  skopeo inspect --raw docker://<the Job's output tag> | shasum -a 256" >&2
+            exit 1
+          fi
+        fi
+        # Prove the digest is an IMAGE and not a buildcache manifest before it
+        # is pinned anywhere (a cache manifest's config mediaType is
+        # application/vnd.buildkit.cacheconfig.v0).
+        if command -v skopeo >/dev/null 2>&1; then
+          media=$(skopeo inspect --raw "docker://${ref:-$digest}" 2>/dev/null \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)\
+              .get('config',{}).get('mediaType',''))" 2>/dev/null || true)
+          case "$media" in
+            application/vnd.oci.image.config.v1+json | \
+              application/vnd.docker.container.image.v1+json) ;;
+            "") : ;;
+            *) echo "REFUSING: ${ref:-$digest} is not an image (config mediaType: $media)" >&2; exit 1 ;;
+          esac
+        fi
         echo "$digest"
 
   tofu:run:

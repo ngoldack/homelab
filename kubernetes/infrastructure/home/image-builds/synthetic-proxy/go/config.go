@@ -40,6 +40,12 @@ type Config struct {
 	Port int
 	// UnhealthyFor is how long a key stays refused after a bad verdict.
 	UnhealthyFor time.Duration
+	// UpstreamHeaderTimeout bounds time-to-first-byte from Synthetic. It is
+	// what stops a connection that is accepted but never answered from hanging
+	// a request indefinitely (and holding a gateway retry slot with no status
+	// code to retry on). It bounds ONLY the wait for headers, so a streaming
+	// SSE completion is unaffected however long it runs.
+	UpstreamHeaderTimeout time.Duration
 	// StoreCap bounds the per-key state map.
 	StoreCap int
 }
@@ -84,6 +90,13 @@ func LoadConfig() (Config, error) {
 	}
 	if c.UnhealthyFor <= 0 {
 		return Config{}, fmt.Errorf("UNHEALTHY_AFTER must be > 0, got %s", c.UnhealthyFor)
+	}
+
+	if c.UpstreamHeaderTimeout, err = envDur("UPSTREAM_HEADER_TIMEOUT", 60*time.Second); err != nil {
+		return Config{}, err
+	}
+	if c.UpstreamHeaderTimeout <= 0 {
+		return Config{}, fmt.Errorf("UPSTREAM_HEADER_TIMEOUT must be > 0, got %s", c.UpstreamHeaderTimeout)
 	}
 
 	if c.StoreCap, err = envInt("STATE_CAP", 1024); err != nil {

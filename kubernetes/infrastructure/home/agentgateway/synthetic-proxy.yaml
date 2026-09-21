@@ -115,6 +115,16 @@ spec:
             # instead of being re-probed every cycle.
             - name: UNHEALTHY_AFTER
               value: 10m
+            # Time-to-first-byte from Synthetic. Without it, a connection that
+            # is accepted but never answered hangs the request indefinitely —
+            # the gateway holds a retry slot with no status code to retry on,
+            # and the client waits forever (the "endless" failure mode rather
+            # than a fast error). Bounds the wait for HEADERS only, so a long
+            # SSE completion still streams for as long as it needs; raising it
+            # is safe for slow models, lowering it trades patience for a
+            # quicker failover.
+            - name: UPSTREAM_HEADER_TIMEOUT
+              value: 60s
           livenessProbe:
             httpGet:
               path: /healthz

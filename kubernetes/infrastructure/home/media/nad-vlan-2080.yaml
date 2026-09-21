@@ -1,16 +1,24 @@
-# VLAN 2080 ("Obfuscated") attachment for the download/indexer pods.
+# VLAN 2080 ("Obfuscated") attachment for the download/indexer pods and the VPN
+# egress gateway that fronts them.
 #
 # macvlan children of each node's second NIC (ens19, Proxmox-tagged 2080).
-# UniFi routes that network through a VPN automatically, so a pod whose
-# default route lives on net1 has its internet egress obfuscated — the reason
-# SABnzbd/Prowlarr/Sonarr/Radarr/Bazarr are attached and Jellyfin is not.
+# The obfuscation is no longer "this VLAN is VPN-routed": the pods' default
+# route points at the vpn-gateway pod (10.20.80.200), which holds the stack's
+# single WireGuard tunnel and NATs their traffic into it. The VLAN is now the
+# transport for that hop, and the only traffic still riding UniFi's own VPN
+# policy on this network is the tunnel's outer UDP to the peer endpoint.
+# See vpn-routes-configmap.yaml and vpn-gateway-configmap.yaml.
+#
+# SABnzbd/Prowlarr/Sonarr/Radarr/Bazarr and the gateway pod are attached;
+# Jellyfin is not.
 #
 # Per-pod addressing comes from the pod annotation, not from this spec:
 #   k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.201/24"]}]'
+# (the gateway pod takes 10.20.80.200).
 # Static IPAM (Talos ships no static/macvlan plugin; the multus DaemonSet's
 # install-cni-plugins init container adds them).
 #
-# The default route is NOT set here — the vlan-routes ConfigMap's init script
+# The default route is NOT set here — the vpn-routes ConfigMap's init script
 # owns routing, because it must also keep the cluster CIDRs on eth0.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition

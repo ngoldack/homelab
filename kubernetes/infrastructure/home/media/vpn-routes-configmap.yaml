@@ -1,0 +1,66 @@
+# Routing for the media download/indexer pods.
+#
+# The goal state inside such a pod:
+#   - default route via the VPN egress gateway pod (10.20.80.200) on the VLAN
+#     2080 macvlan interface -> all internet egress leaves through that pod's
+#     shared WireGuard tunnel
+#   - cluster pod CIDR, service CIDR and the cluster VLAN stay on eth0
+#     -> Service DNS, pod-to-pod API calls (Prowlarr -> Sonarr) and NFS all
+#     keep working over the fast local path
+#   - the VLAN's own gateway (10.20.80.1, UniFi-VPN'd) is left unused: the only
+#     thing that still goes there is the gateway pod's WireGuard endpoint
+#
+# The CNI itself cannot express this: attaching a second interface never
+# removes eth0's default route, and the macvlan annotation has no metric
+# control. Hence a tiny init container (NET_ADMIN) that rewrites the routing
+# table once, before the app starts. Runs per pod start; nothing persists.
+#
+# DNS is untouched: /etc/resolv.conf stays the cluster's (CoreDNS), because it
+# is a per-pod bind mount shared by every container in the pod and the apps
+# need .svc names.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpn-routes
+  namespace: media
+data:
+  attach.sh: |
+    #!/bin/sh
+    set -eu
+
+    # The VPN egress gateway pod's VLAN 2080 address. It owns the WireGuard
+    # tunnel, the NAT and the leak-blocking firewall, so this pod needs nothing
+    # but a default route — no tunnel and no firewall of its own.
+    VPN_GW=10.20.80.200
+
+    # Must match TUNNEL_MTU in vpn-gateway-configmap.yaml: the gateway
+    # encapsulates what we send it, so a 1500-byte packet would not fit a
+    # 1300-byte tunnel. Sizing net1 to the tunnel keeps this pod's TCP MSS (and
+    # any large UDP datagram) inside it, instead of relying on PMTUD.
+    TUNNEL_MTU=1300
+
+    # eth0's gateway is the node-side peer (Cilium's veth address); capture it
+    # before the default route is torn down. This runs again on an
+    # init-container retry, in the same netns, where the default route is
+    # already gone — so fall back to the same peer as seen on the pod-CIDR
+    # route rather than failing.
+    GW=$(ip -4 route show default dev eth0 | awk '/via/ {print $3; exit}')
+    if [ -z "$GW" ]; then
+      GW=$(ip -4 route show 172.20.0.0/16 dev eth0 | awk '/via/ {print $3; exit}')
+    fi
+    test -n "$GW"
+
+    ip link set dev net1 mtu "$TUNNEL_MTU"
+
+    # Tunnel egress first, then re-add the local exceptions. `replace` because a
+    # retry meets its own routes from the previous attempt.
+    ip route del default || true
+    ip route replace default via "$VPN_GW" dev net1
+
+    # 172.20.0.0/16 = pod CIDR, 172.21.0.0/16 = service CIDR,
+    # 10.30.0.0/24  = cluster VLAN (nodes, LB VIPs, TrueNAS).
+    ip route replace 172.20.0.0/16 via "$GW" dev eth0
+    ip route replace 172.21.0.0/16 via "$GW" dev eth0
+    ip route replace 10.30.0.0/24 via "$GW" dev eth0
+
+    ip -4 route

@@ -1,0 +1,148 @@
+# Everything the VPN egress gateway pod runs: bring up the one shared WireGuard
+# tunnel, NAT the app pods' traffic into it, and block every other way out.
+#
+# The gateway is a router, not a client: the media download/indexer pods point
+# their default route at its VLAN 2080 address (10.20.80.200), so the traffic
+# arrives on net1, gets masqueraded into wg0, and leaves through the Proton
+# endpoint. See vpn-routes-configmap.yaml for the app side.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpn-gateway
+  namespace: media
+data:
+  gateway.sh: |
+    #!/bin/sh
+    # Bring up the shared WireGuard tunnel and become the app pods' router.
+    #
+    # wg-quick is deliberately NOT used to bring the tunnel up: it rewrites
+    # /etc/resolv.conf (a per-pod bind mount that every container in this pod
+    # shares, so the app containers' cluster DNS would break) and installs its
+    # own fwmark routing table. It is used only to strip the [Interface]
+    # Address/DNS/MTU keys that `wg setconf` does not understand.
+    set -eu
+
+    WG_IF=wg0
+    WG_CONF=/wg/wg0.conf
+    # Must match TUNNEL_MTU in vpn-routes-configmap.yaml: the app pods size
+    # their own net1 MTU to it so their TCP MSS already fits the tunnel.
+    TUNNEL_MTU=1300
+    # The VLAN 2080 UniFi gateway: next hop for the WireGuard endpoint, whose
+    # own UDP cannot travel through the tunnel it is carrying.
+    VLAN_GW=10.20.80.1
+
+    # 1. Firewall first. Until the tunnel exists nothing forwarded from the
+    #    VLAN may leave by any other path — no fallback to the UniFi-VPN'd VLAN
+    #    gateway, no fallback to eth0. If the tunnel is down the apps fail.
+    nft delete table inet media-vpn 2>/dev/null || true
+    nft -f /scripts/media-vpn.nft
+
+    # 2. Forwarding. The pod netns already carries net.ipv4.ip_forward=1 (the
+    #    CNI sets it for every pod), and /proc/sys is mounted read-only in a pod,
+    #    so this asserts the knob instead of setting it — and fails loudly if a
+    #    future CNI stops providing it, rather than silently forwarding nothing.
+    if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != 1 ]; then
+      echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+    fi
+    if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != 1 ]; then
+      echo "net.ipv4.ip_forward is off in this pod netns; the gateway cannot route" >&2
+      exit 1
+    fi
+
+    # 3. The tunnel.
+    ip link del "$WG_IF" 2>/dev/null || true
+    ip link add "$WG_IF" type wireguard
+    wg-quick strip "$WG_CONF" > /run/wg0.strip.conf
+    wg setconf "$WG_IF" /run/wg0.strip.conf
+    rm -f /run/wg0.strip.conf
+
+    # The Secret's config is the single source of truth for the tunnel address
+    # and the peer endpoint. Its `DNS = 10.2.0.1` line is intentionally unused:
+    # DNS stays on the cluster (see vpn-routes-configmap.yaml).
+    WG_ADDR=$(awk -F' *= *' '/^Address/ {print $2; exit}' "$WG_CONF")
+    WG_ENDPOINT=$(awk -F' *= *' '/^Endpoint/ {print $2; exit}' "$WG_CONF")
+    test -n "$WG_ADDR"
+    test -n "$WG_ENDPOINT"
+    WG_ENDPOINT_IP=${WG_ENDPOINT%:*}
+
+    ip address add "$WG_ADDR" dev "$WG_IF"
+    ip link set dev "$WG_IF" mtu "$TUNNEL_MTU" up
+
+    # 4. Routes: endpoint over the VLAN, everything else through the tunnel,
+    #    cluster CIDRs on eth0 so Services, DNS and NFS keep the local path.
+    #    `replace` throughout: this script runs again whenever the container
+    #    restarts, in the same netns, meeting its own routes from last time.
+    #    The eth0 default route is gone by then, so fall back to the same peer
+    #    as seen on the pod-CIDR route.
+    GW_ETH0=$(ip -4 route show default dev eth0 | awk '/via/ {print $3; exit}')
+    if [ -z "$GW_ETH0" ]; then
+      GW_ETH0=$(ip -4 route show 172.20.0.0/16 dev eth0 | awk '/via/ {print $3; exit}')
+    fi
+    test -n "$GW_ETH0"
+    ip route replace "$WG_ENDPOINT_IP/32" via "$VLAN_GW" dev net1
+    ip route del default || true
+    ip route replace default dev "$WG_IF"
+    ip route replace 172.20.0.0/16 via "$GW_ETH0" dev eth0
+    ip route replace 172.21.0.0/16 via "$GW_ETH0" dev eth0
+    ip route replace 10.30.0.0/24 via "$GW_ETH0" dev eth0
+
+    ip -4 route
+    wg show "$WG_IF"
+
+    # The pod sandbox owns the netns (and with it wg0, the routes and the nft
+    # table); this container only has to stay alive.
+    exec sleep infinity
+
+  media-vpn.nft: |
+    # Egress policy for the app pods whose default route points at this pod.
+    #
+    # Talos' kernel is built with nf_tables + NF_NAT_MASQUERADE but ships no
+    # legacy ip_tables filter table, so nftables — not iptables — is the tool
+    # that works here.
+    table inet media-vpn {
+      chain forward {
+        type filter hook forward priority filter; policy accept;
+        # App pods -> tunnel, and the replies back out to the VLAN.
+        iifname "net1" oifname "wg0" accept
+        iifname "wg0" oifname "net1" accept
+        # Anything else arriving from the VLAN is a leak attempt (the
+        # UniFi-VPN'd VLAN gateway, the cluster path, the internet).
+        iifname "net1" drop
+      }
+
+      chain mss {
+        type filter hook forward priority mangle; policy accept;
+        # Belt and braces next to the app pods' own 1300-byte net1 MTU:
+        # clamp TCP MSS to the tunnel's MTU so a sender that ignores our
+        # MTU still cannot emit a segment the tunnel would drop.
+        oifname "wg0" tcp flags syn tcp option maxseg size set rt mtu
+      }
+
+      chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        # The apps keep their VLAN addresses; inside the tunnel they must
+        # all look like the tunnel address, because the peer's AllowedIPs
+        # are 10.2.0.2/32 and the server drops anything else.
+        oifname "wg0" masquerade
+      }
+    }
+
+  healthcheck.sh: |
+    #!/bin/sh
+    # Is this gateway still doing its job? Three things must hold, and the
+    # liveness probe restarts the container — whose script rebuilds all of them
+    # from the Secret — when any of them breaks:
+    #   - wg0 handshook recently (the config carries PersistentKeepalive = 25,
+    #     so a live tunnel re-handshakes at least every two minutes)
+    #   - the default route still points into the tunnel: a wg0 flap (interface
+    #     down) makes the kernel drop that route and it does NOT come back on
+    #     its own, so a fresh handshake alone does not mean the gateway works
+    #   - the leak-blocking table is still installed
+    set -eu
+    now=$(date +%s)
+    hs=$(wg show wg0 latest-handshakes | awk 'NR==1 {print $2}')
+    test -n "$hs"
+    test "$hs" -gt 0
+    test $((now - hs)) -lt 300
+    ip route show default | grep -q 'dev wg0'
+    nft list table inet media-vpn >/dev/null

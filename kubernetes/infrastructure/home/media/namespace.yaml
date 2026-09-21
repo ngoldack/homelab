@@ -7,7 +7,8 @@
 # hence public-ingress only, no edge-ingress label.
 #
 # The download/indexer pods additionally carry a Multus macvlan interface on
-# VLAN 2080 (UniFi "Obfuscated", auto-VPN-routed); see nad-vlan-2080.yaml.
+# VLAN 2080 (UniFi "Obfuscated") whose default route points at the vpn-gateway
+# pod — the stack's single WireGuard tunnel; see nad-vlan-2080.yaml.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -15,8 +16,9 @@ metadata:
   labels:
     gateway.ngoldack.de/public-ingress: "true"
     # Talos enforces PodSecurity `baseline` cluster-wide, and baseline forbids
-    # adding NET_ADMIN — but the download pods' vlan-routes init container
-    # needs exactly that to install the VPN default route. Same explicit
+    # adding NET_ADMIN — but the download pods' vpn-routes init container needs
+    # it to point their default route at the gateway, and the vpn-gateway pod
+    # needs it to create wg0 and install its nftables policy. Same explicit
     # override (enforce privileged, keep audit/warn at baseline as signal)
     # as the buildkit namespace uses for its privileged builder.
     pod-security.kubernetes.io/enforce: privileged

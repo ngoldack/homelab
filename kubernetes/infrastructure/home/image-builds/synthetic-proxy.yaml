@@ -18,14 +18,19 @@
 # pipeline exists to satisfy the hermes egress supply-chain lane. This proxy is
 # an internal, cluster-only component with no equivalent signing policy, so the
 # Job stays minimal — buildctl build+push, then print the digest to pin in
-# agentgateway/synthetic-proxy.yaml. Adding a signing lane is separate work.
+# agentgateway/synthetic-proxy.yaml.
+#
+# DIGEST SOURCE — the pin is read from the image's own
+# `pushing manifest for <tag>@sha256:…` line, NOT the last sha256 in the log:
+# that last one is the cache-export manifest, which is a DIFFERENT digest (the
+# s1 build printed the wrong one, hence the s2 suffix).
 #
 # WHY no Zot repository pre-create: BuildKit/Zot create the repository on the
 # first push, so this Job only builds and pushes.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-synthetic-proxy-s1
+  name: build-synthetic-proxy-s2
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -59,7 +64,8 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-d9f88cd;
+          DIGEST=$(grep -oE "pushing manifest for $IMAGE@sha256:[a-f0-9]{64}" /tmp/build.log | grep -oE ''sha256:[a-f0-9]{64}'' | tail -1);
 
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
 

@@ -1,0 +1,138 @@
+# synthetic-proxy — the per-key health/quota guard in front of Synthetic.
+#
+# WHY: Synthetic's 429s are three different conditions (transient
+# parallel-limit, a slow-clearing generic rate limit, and hard quota
+# exhaustion) and only the last two should fail the chain over to OpenRouter.
+# Discriminating them by sniffing response bodies inside the gateway is
+# fragile. This service instead asks Synthetic's authoritative /v2/quotas
+# endpoint with the SAME key the gateway injects, keeps per-caller state, and
+# refuses the request itself (429 with the "exceeded your subscription rate
+# limits" body and NO Retry-After) when the key is rate-limited or out of
+# quota — which is exactly what policy-agent-chains-health.yaml /
+# policy-hindsight-health.yaml evicts on. A 503 is returned when Synthetic is
+# unreachable (also evicted, via the CEL's >= 500 clause).
+#
+# NO SECRET: the Deployment mounts no Secret and sets no key env. The gateway
+# injects the Authorization header (policies.auth.secretRef: synthetic-key)
+# into every upstream request; the proxy hashes it (SHA-256) to key its state
+# map and forwards the raw value. A state dump therefore yields no credential.
+#
+# WHY the backends point here: agent-chains.yaml, backends.yaml, chat-chain.yaml
+# and hindsight-chain.yaml repoint each Synthetic provider at
+# synthetic-proxy.agentgateway.svc.cluster.local:8080 (plaintext, no
+# policies.tls — the same shape as the in-cluster local-p100 provider). The
+# proxy then reaches api.synthetic.new:443 itself.
+#
+# CILIUM: no new policy is needed. This pod lives in namespace agentgateway,
+# whose namespace-wide allowlist (cilium-allowlist.yaml, endpointSelector {})
+# already admits in-namespace ingress (the data plane's calls) and egress to
+# `world` on 443 (Synthetic) plus cluster DNS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synthetic-proxy
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/name: synthetic-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synthetic-proxy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge 0 (repo convention) forces maxUnavailable >= 1; the proxy is
+      # stateless besides an in-memory cache, so a brief gap is safe.
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: synthetic-proxy
+    spec:
+      # The proxy never touches the Kubernetes API: it needs no RBAC and no SA
+      # token (its only inputs are env + the requests it serves).
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: synthetic-proxy
+          # Pinned by manifest digest (Docker-Content-Digest of
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-d9f88cd, built from this
+          # revision's sources through buildkitd:1234). Re-pin after every
+          # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
+          image: registry.ngoldack.de/synthetic-proxy@sha256:c199ba0f7ffa688507161bc88094d25898ef4f54f12ff5942f75e484eea722ff
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Defaults are compiled in; they are spelled out here so the
+            # effective configuration is visible in the manifest. A malformed
+            # value is a CrashLoopBackOff (config.go fails fast).
+            - name: SYNTHETIC_UPSTREAM
+              value: https://api.synthetic.new:443
+            - name: SYNTHETIC_QUOTA_PATH
+              value: /v2/quotas
+            - name: HEALTH_PROBE_PATH
+              value: /v1/models
+            - name: LPORT
+              value: "8080"
+            # Verdict freshness: a key's last verdict is reused for this long
+            # before it is re-evaluated on the next request. This is also the
+            # anti-poke guarantee — the proxy issues no unprompted request to
+            # Synthetic, so a key sitting out its rate-limit recovery window is
+            # never prodded (which is what kept the 429 state alive before).
+            - name: QUOTA_POLL_SECONDS
+              value: "300"
+            # How long a quota-exhausted/unhealthy verdict refuses the key.
+            # Matches the gateway's 1h eviction intent for the fail-over case.
+            - name: UNHEALTHY_AFTER
+              value: 1h
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: synthetic-proxy
+  namespace: agentgateway
+  labels:
+    app.kubernetes.io/name: synthetic-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: synthetic-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

@@ -284,6 +284,23 @@ spec:
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
+        # 3600 -> 14400 (4h). The 3600s ceiling was firing while the task was
+        # QUEUED on the global LLM semaphore (`+structured.queued`) or asleep in
+        # 429 retry backoff (`.attempt=1/4.backoff`), not wedged: 11 tasks were
+        # cancelled that way in the 2h to 18:30, and `_mark_failed` makes that
+        # terminal with no re-queue, so their extraction work was discarded and
+        # the queue could never drain. 4h keeps the backstop the ceiling exists
+        # for (a genuinely wedged task holding a slot forever, poller.py:65) while
+        # removing the queue-time kills. Not 0: that deletes the backstop.
+        HINDSIGHT_API_RETAIN_WALL_TIMEOUT: "14400"
+        # 32 (config.py DEFAULT_LLM_MAX_CONCURRENT) -> 96. This is the real
+        # throughput cap: `_global_llm_semaphore` is per PROCESS (llm_wrapper.py:52),
+        # so 3 workers x 32 = 96 concurrent calls, measured as ~140 calls/min with
+        # ~3-5 KB of payload each -- ~300-450k calls for the 1,407 MB backlog. 3x
+        # permits is a 3x drain rate with no new pods and no provider cost change.
+        # No DB impact: the pool is idle during LLM calls (in_use=0), and the
+        # concurrent-OPERATION count is unchanged (still WORKER_MAX_SLOTS 6).
+        HINDSIGHT_API_LLM_MAX_CONCURRENT: "96"
         # Tasks claimed per poll cycle to match 2 replica balance.
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
         # Retain/claim bounds. The claim query selects `task_payload` per

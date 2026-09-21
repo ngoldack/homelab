@@ -77,10 +77,10 @@ spec:
       containers:
         - name: synthetic-proxy
           # Pinned by manifest digest (Docker-Content-Digest of
-          # registry.ngoldack.de/synthetic-proxy:0.1.0-151e64a, built from this
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-1bfd1c0, built from this
           # revision's sources through buildkitd:1234). Re-pin after every
           # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
-          image: registry.ngoldack.de/synthetic-proxy@sha256:f6e19bd5a7899fc1f06fb6be27f2140efae4dcdbca756c232fe7c7e2223ab945
+          image: registry.ngoldack.de/synthetic-proxy@sha256:4f11269087d9dfe03912d548613ee50f41496ab6a5ee0b3060b0c285b347c7ce
           ports:
             - name: http
               containerPort: 8080
@@ -103,8 +103,13 @@ spec:
             # never prodded (which is what kept the 429 state alive before).
             - name: QUOTA_POLL_SECONDS
               value: "300"
-            # How long a quota-exhausted/unhealthy verdict refuses the key.
-            # Matches the gateway's 1h eviction intent for the fail-over case.
+            # How long a bad key is held off LOCALLY, without touching
+            # Synthetic. This is the authoritative no-poke window now: the
+            # gateway's eviction is deliberately short (5m) so it re-probes
+            # cheaply, and this proxy short-circuits those probes from state,
+            # so at most one request per gateway-eviction window reaches
+            # Synthetic — not the continuous poke that kept a 429 alive for
+            # 8h+.
             - name: UNHEALTHY_AFTER
               value: 1h
           livenessProbe:

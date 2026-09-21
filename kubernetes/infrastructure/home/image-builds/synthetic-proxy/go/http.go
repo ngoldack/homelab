@@ -35,11 +35,12 @@ type statusHolder struct{ code int }
 
 // Proxy is the running reverse proxy plus its per-key state.
 type Proxy struct {
-	cfg    Config
-	store  *Store
-	client *http.Client // quota + probe calls (short timeouts)
-	rp     *httputil.ReverseProxy
-	upHost string // "host:port" of the upstream, for logging
+	cfg     Config
+	store   *Store
+	client  *http.Client // quota + probe calls (short timeouts)
+	rp      *httputil.ReverseProxy
+	upHost  string // "host:port" of the upstream, for logging
+	metrics *Metrics
 }
 
 // NewProxy wires the proxy against cfg.
@@ -69,9 +70,10 @@ func NewProxy(cfg Config) *Proxy {
 	}
 
 	p := &Proxy{
-		cfg:    cfg,
-		store:  NewStore(cfg.StoreCap),
-		upHost: target.Host,
+		cfg:     cfg,
+		store:   NewStore(cfg.StoreCap),
+		upHost:  target.Host,
+		metrics: NewMetrics(target.Host),
 		// No overall client timeout: quota/probe calls carry their own ctx.
 		client: &http.Client{Transport: transport},
 	}
@@ -91,6 +93,7 @@ func NewProxy(cfg Config) *Proxy {
 			if h, ok := resp.Request.Context().Value(statusKey).(*statusHolder); ok {
 				h.code = resp.StatusCode
 			}
+			p.metrics.IncResponse(resp.StatusCode)
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -111,8 +114,16 @@ func (p *Proxy) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/metrics", p.metricsHandler)
 	mux.HandleFunc("/", p.handle)
 	return mux
+}
+
+// metricsHandler serves the Prometheus exposition. It is registered before the
+// catch-all, which would otherwise forward /metrics to the upstream.
+func (p *Proxy) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	p.metrics.Write(w, p.store.Len())
 }
 
 // handle logs the outcome of the per-key gate and transparent forward.
@@ -129,8 +140,11 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	if status == 0 {
 		status = holder.code
 	}
+	elapsed := time.Since(start)
+	p.metrics.IncRequests(verdict)
+	p.metrics.ObserveDuration(elapsed.Seconds())
 	log.Printf("msg=synthetic-proxy kh=%s verdict=%s status=%d upstream=%s dur_ms=%d",
-		shortHash(HashAuth(auth)), verdict, status, p.upHost, time.Since(start).Milliseconds())
+		shortHash(HashAuth(auth)), verdict, status, p.upHost, elapsed.Milliseconds())
 }
 
 // decide applies the gate and, when allowed, forwards the request. It returns
@@ -173,6 +187,7 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 	// Fresh evaluation.
 	snap, err := p.CheckQuota(ctx, auth)
 	if err == nil {
+		p.metrics.IncQuota("ok")
 		nst := KeyState{
 			Verdict:                VerdictHealthy,
 			QuotaUsed:              snap.Requests,
@@ -193,10 +208,12 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 		p.rp.ServeHTTP(w, r)
 		return 0, "healthy"
 	}
+	p.metrics.IncQuota("error")
 
 	// Quota endpoint indeterminate: only positive evidence of a DOWN upstream
 	// justifies refusing. Otherwise fail open and let Synthetic answer.
 	if perr := p.Probe(ctx, auth); perr != nil {
+		p.metrics.IncProbe("error")
 		p.store.Set(kh, KeyState{
 			Verdict:      VerdictUnhealthy,
 			LastCheck:    now,
@@ -205,6 +222,7 @@ func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, 
 		writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
 		return http.StatusServiceUnavailable, "unhealthy"
 	}
+	p.metrics.IncProbe("ok")
 
 	p.store.Set(kh, KeyState{Verdict: VerdictHealthy, LastCheck: now})
 	p.rp.ServeHTTP(w, r)

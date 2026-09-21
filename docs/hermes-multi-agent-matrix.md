@@ -116,10 +116,19 @@ Two more mechanics belong to the same boundary:
   task's worker locally and resolves that worker's home as
   `<root>/profiles/<assignee>`.
 - **The board is SQLite on NFS**, so the profiles run
-  `database.journal_mode: delete` (Hermes' documented NFS-safe mode) and the
-  pods co-locate on one node via *preferred* pod affinity. The affinity is
-  best-effort on purpose — a required self-matching affinity rule would deadlock
-  the first pod — and the journal mode is the backstop.
+  `database.journal_mode: delete` (Hermes' documented NFS-safe mode) and all
+  four pods are pinned to one node: `nodeSelector: workload.hermes.io/sandbox=true`
+  — the only node carrying that label, and the one the sandbox runtime and the
+  parent gateway already use. A *preferred* pod affinity (weight 100, same
+  hostname topology) is kept as belt-and-braces rather than as the primary
+  mechanism, because a rule the scheduler must satisfy would deadlock the first
+  pod.
+  The cost of that pin is a **single point of failure for the whole agent
+  fleet**: that node now carries `hermes-0`, the four agents, the sandbox warm
+  pool and the Kata runtime, so a node failure stops every agent at once, and
+  its CPU requests sit near the ceiling (the four profiles are deliberately
+  trimmed to 100m/256Mi requests each so they fit). Spreading them would mean
+  accepting cross-node SQLite writers.
 
 ## Profiles and responsibilities
 
@@ -856,15 +865,28 @@ These are stated so nothing here implies support that does not exist.
 - **One messaging identity per process.** Hermes binds platform credentials per
   process at startup, so three bots mean three gateway processes. This is the
   design; do not try to multiplex them into one.
-- **One dispatcher, one board, one host.** Kanban is single-host by design: the
-  board is a local SQLite file and worker crash detection assumes host-local
-  PIDs. Cross-node SQLite writers are the case to avoid, so the four pods carry
-  *preferred* pod affinity to one node and every profile runs
-  `database.journal_mode: delete` (Hermes' documented NFS-safe mode). The
-  affinity is best-effort, not enforced: a required self-matching affinity rule
-  would leave the first pod permanently unschedulable.
+- **One dispatcher, one board, one host — and that host is now mandatory.**
+  Kanban is single-host by design: the board is a local SQLite file and worker
+  crash detection assumes host-local PIDs, so the four agents are pinned with
+  `nodeSelector: workload.hermes.io/sandbox=true` (the only node with that
+  label) plus a preferred pod affinity, and every profile runs
+  `database.journal_mode: delete` as the backstop. Consequence, stated plainly:
+  that node is a single point of failure for the whole agent fleet, it also
+  hosts `hermes-0`, the sandbox warm pool and the Kata runtime, and its CPU
+  requests are close to the ceiling — the four profiles request 100m/256Mi each
+  for that reason. A node loss takes every agent down together; recovering means
+  either that node coming back or a deliberate move to multi-node placement with
+  cross-node SQLite accepted.
 - **`API_SERVER_KEY` is shared** across all four profiles; per-profile rotation
   of it is not possible without splitting the key.
+- **The agent image pin is the parent gateway's pin.** All four profiles run the
+  same digest as `hermes/statefulset.yaml`, so a stale pin breaks the whole
+  fleet at once. The repo's `registry.ngoldack.de/hermes-agent-sandbox-plugin`
+  tag is MUTABLE: a rebuild pushes a new manifest over it and the previously
+  pinned manifest can be garbage-collected, after which only nodes with a local
+  copy can start a pod (`ImagePullBackOff` elsewhere). Re-pin after any gateway
+  rebuild with `task hermes:repin`, and push the same digest to the parent
+  StatefulSet and to `hermes-agents/*.yaml`.
 - **The board has no backup path** of its own (see Backup and restore).
 - **The `matrix` namespace has no metrics scrape**, so its CNPG cluster is
   outside the data-protection alerting.

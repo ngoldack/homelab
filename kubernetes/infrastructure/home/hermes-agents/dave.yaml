@@ -62,7 +62,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: dave
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
           env:
             - name: HERMES_HOME
               value: /opt/data/profiles/dave
@@ -203,9 +203,15 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
           resources:
+            # Requests are trimmed to fit FOUR of these gateways plus the parent
+            # gateway and the sandbox runtime on one node (the shared SQLite
+            # board wants them co-located; the sandbox node is the only one
+            # labelled workload.hermes.io/sandbox=true). The limits are
+            # untouched: these are guarantees, not caps, and real sandbox work
+            # happens in the Kata microVMs, not in this container.
             requests:
-              cpu: 250m
-              memory: 512Mi
+              cpu: 100m
+              memory: 256Mi
             limits:
               cpu: "2"
               memory: 2Gi
@@ -245,7 +251,7 @@ spec:
         # drops the terminating chunk of chunked bodies from REMOTE upstreams, so
         # the profile's syn-* provider points at this loopback relay instead.
         - name: syn-stream-relay
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
           command: ["/opt/hermes/.venv/bin/python3", "-u", "/opt/relay/stream_relay.py"]
           env:
             - name: RELAY_UPSTREAM
@@ -297,7 +303,7 @@ spec:
         # All four exist everywhere because a Kanban worker may be spawned by the
         # orchestrator on any pod and resolves its home as <root>/profiles/<assignee>.
         - name: seed-profile
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
           command: ["/bin/sh", "-c"]
           env:
             - name: HERMES_CONFIG_REV

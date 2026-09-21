@@ -34,7 +34,9 @@ spec:
           name: openrouter-union-alpha
     # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model.
     # Walks the hindsight-chain backend (synthetic primary, OpenRouter
-    # fallback on 429/5xx eviction).
+    # fallback). The fallback is driven by the proxy's 503 -- see the
+    # equivalent comment in httproute-key.yaml -- not by the gateway reading a
+    # 429.
     - matches:
         - path:
             type: PathPrefix

@@ -43,9 +43,13 @@ spec:
           kind: AgentgatewayBackend
           name: hindsight-chain
     # Agent chains: synthetic-first with OpenRouter fallback (see
-    # agent-chains.yaml). Each walks its own chain backend; a synthetic 429
-    # evicts synthetic for 10 minutes (policy-agent-chains-health.yaml), so
-    # agents keep working through OpenRouter while synthetic cools down.
+    # agent-chains.yaml). Each walks its own chain backend. The proxy in front
+    # of synthetic (see synthetic-proxy.yaml) owns the 429 decision: when it
+    # judges that leg unusable it answers 503, which evicts synthetic for 5m
+    # (policy-agent-chains-health.yaml) and keeps agents working through
+    # OpenRouter while synthetic cools down. Synthetic's transient
+    # parallel-limit 429 is deliberately passed through untouched and does NOT
+    # evict, so a concurrency blip never burns a failover.
     - matches:
         - path:
             type: PathPrefix

@@ -43,6 +43,7 @@ resources:
   - httproute-edge.yaml
   - api-keys.sops.yaml
   - hindsight-chain.yaml
+  - chat-chain.yaml
   - policy-hindsight-health.yaml
   - policy-retry.yaml
   - agent-chains.yaml

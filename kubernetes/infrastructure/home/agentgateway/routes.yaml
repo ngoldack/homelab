@@ -90,6 +90,44 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: general-purpose-chain
+    # Agent chains (R4): JWT-authenticated aliases for the multi-agent LLM
+    # routing (the 4 chains in agent-chains.yaml). Hermes agents call these
+    # paths with the SAME aigateway-oidc JWT the existing /v1/* routes use
+    # (the /v1/key/* static-key variants remain for CLI consumers). Each
+    # walks its own chain backend; synthetic 429 evicts synthetic for 10 min
+    # (policy-agent-chains-health.yaml).
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chain/general-purpose
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: general-purpose-chain
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chain/coding-small
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: coding-small-chain
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chain/coding-medium
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: coding-medium-chain
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chain/coding-large
+      backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: coding-large-chain
     - matches:
         - path:
             type: PathPrefix

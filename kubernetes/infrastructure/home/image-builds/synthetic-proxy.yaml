@@ -8,10 +8,10 @@
 # `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
 # and the Dockerfile's COPY sources are repo-root-relative.
 #
-# CONTEXT SHA — d9f88cd8d81a4f425af7db44f51645456d234f54 is the commit whose tree
-# already carries BOTH the Go sources (image-builds/synthetic-proxy/go/,
-# incl. go.mod + cmd/synthetic-proxy) and the Dockerfile, so this Job builds the
-# Go image on the first try. The context SHA, the --output tag and the Job name
+# CONTEXT SHA — 298cebf is the commit whose tree carries the Go sources
+# (image-builds/synthetic-proxy/go/, incl. go.mod + cmd/synthetic-proxy) and the
+# Dockerfile, including the CodeQL-driven fix that removed the ResponseWriter
+# wrapper. Rebuilt from it so the deployed digest matches the merged source. The context SHA, the --output tag and the Job name
 # suffix travel together (Jobs are immutable): to rebuild, bump all three.
 #
 # WHY NO cosign/trivy pipeline (unlike hermes-egress-authorizer.yaml): that
@@ -30,7 +30,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-synthetic-proxy-s2
+  name: build-synthetic-proxy-s3
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -53,9 +53,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#d9f88cd8d81a4f425af7db44f51645456d234f54''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#298cebf12fa95cca03b6cd37a20f67dd99d1b240''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/synthetic-proxy/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-d9f88cd,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-298cebf,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -64,7 +64,7 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-d9f88cd;
+          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-298cebf;
           DIGEST=$(grep -oE "pushing manifest for $IMAGE@sha256:[a-f0-9]{64}" /tmp/build.log | grep -oE ''sha256:[a-f0-9]{64}'' | tail -1);
 
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };

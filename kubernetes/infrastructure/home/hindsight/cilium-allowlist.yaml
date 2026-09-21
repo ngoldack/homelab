@@ -9,7 +9,15 @@
 # namespace is migrated):
 #   monitoring -> api:8888, worker:8889, database:9187, pooler:9127   (scrapes)
 #   authentik  -> control-plane:3000                                  (outpost)
-#   world      -> api/worker:443 (OpenRouter), database:443 (S3)
+#   world      -> database:443 (S3 backups; still required)
+#                 api/worker:443 existed for OpenRouter, which hindsight no
+#                 longer calls at all (its chain is synthetic-only as of
+#                 2026-09-21 — see agentgateway/hindsight-chain.yaml). Those
+#                 two rules are left in place pending confirmation that
+#                 nothing else on the api/worker pods needs the internet;
+#                 once confirmed they should go, since an unused internet
+#                 egress is exactly what this file's zero-trust framing
+#                 exists to avoid.
 ---
 # The API. Published on the LAN Gateway (reserved `ingress` identity) and
 # scraped by vmagent on its own port; the control-plane talks to it in-cluster.

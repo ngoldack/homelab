@@ -38,8 +38,22 @@ type Config struct {
 	Bind string
 	// Port is the listener port (8080).
 	Port int
-	// UnhealthyFor is how long a key stays refused after a bad verdict.
+	// UnhealthyFor is how long a key stays refused after a TRANSIENT verdict
+	// (transport-level unreachability, a 5xx). Short on purpose: a blip should
+	// not park the chain.
 	UnhealthyFor time.Duration
+	// HoldOffFailover is how long a key stays refused after a verdict that
+	// means Synthetic will not serve it until something changes: a spent
+	// allowance (quota_exhausted) or the generic rate-limit state
+	// (rate_limited).
+	//
+	// This is the LONG window, and it is long for a measured reason rather than
+	// by convention: that rate-limit state clears only after a long stretch with
+	// no new request, so re-probing early both wastes the attempt and holds the
+	// window open. Measured live 2026-09-21 with a 10m window: it lapsed at
+	// 10m02s and the very next burst was still 429, so the proxy spent 14059
+	// refusals re-confirming a state it was itself holding open.
+	HoldOffFailover time.Duration
 	// UpstreamHeaderTimeout bounds time-to-first-byte from Synthetic. It is
 	// what stops a connection that is accepted but never answered from hanging
 	// a request indefinitely (and holding a gateway retry slot with no status
@@ -85,11 +99,18 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("LPORT must be 1..65535, got %d", c.Port)
 	}
 
-	if c.UnhealthyFor, err = envDur("UNHEALTHY_AFTER", 10*time.Minute); err != nil {
+	if c.UnhealthyFor, err = envDur("UNHEALTHY_AFTER", 2*time.Minute); err != nil {
 		return Config{}, err
 	}
 	if c.UnhealthyFor <= 0 {
 		return Config{}, fmt.Errorf("UNHEALTHY_AFTER must be > 0, got %s", c.UnhealthyFor)
+	}
+
+	if c.HoldOffFailover, err = envDur("HOLD_OFF_FAILOVER", time.Hour); err != nil {
+		return Config{}, err
+	}
+	if c.HoldOffFailover <= 0 {
+		return Config{}, fmt.Errorf("HOLD_OFF_FAILOVER must be > 0, got %s", c.HoldOffFailover)
 	}
 
 	if c.UpstreamHeaderTimeout, err = envDur("UPSTREAM_HEADER_TIMEOUT", 60*time.Second); err != nil {

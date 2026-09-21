@@ -218,6 +218,23 @@ func verdictForReason(reason string) Verdict {
 	return VerdictRateLimited
 }
 
+// holdOffFor picks how long a verdict keeps its key off. Two different clocks
+// are wanted, and conflating them is expensive in both directions:
+//
+//   - the failover flavours (a spent allowance, the generic rate limit) need
+//     the LONG one, because that state only clears after a long no-poke
+//     stretch; re-probing early wastes the attempt and holds the window open;
+//   - transport unreachability and 5xx are transient and get the SHORT one, so
+//     a blip does not park the chain for an hour.
+func (p *Proxy) holdOffFor(v Verdict) time.Duration {
+	switch v {
+	case VerdictQuotaExhausted, VerdictRateLimited:
+		return p.cfg.HoldOffFailover
+	default:
+		return p.cfg.UnhealthyFor
+	}
+}
+
 // keyHash is info.kh with a nil guard, for the log lines in this file.
 func keyHash(info *reqInfo) string {
 	if info == nil {
@@ -250,13 +267,14 @@ func (p *Proxy) applyFailoverRule(info *reqInfo, resp *http.Response) {
 
 	if info != nil && info.kh != "" {
 		now := time.Now()
+		hold := p.holdOffFor(verdict)
 		p.store.Set(info.kh, KeyState{
 			Verdict:      verdict,
-			RefusedUntil: now.Add(p.cfg.UnhealthyFor),
+			RefusedUntil: now.Add(hold),
 			LastCheck:    now,
 		})
 		log.Printf("msg=synthetic-proxy event=hold_off kh=%s verdict=%s upstream_status=%d holdoff=%s",
-			shortHash(info.kh), verdict, resp.StatusCode, p.cfg.UnhealthyFor)
+			shortHash(info.kh), verdict, resp.StatusCode, hold)
 	}
 
 	rebaseToUnhealthy(resp, verdict.String())
@@ -381,7 +399,7 @@ func (p *Proxy) decide(ctx context.Context, auth, kh string, w http.ResponseWrit
 		}
 		if snap.Exhausted() {
 			nst.Verdict = VerdictQuotaExhausted
-			nst.RefusedUntil = now.Add(p.cfg.UnhealthyFor)
+			nst.RefusedUntil = now.Add(p.holdOffFor(VerdictQuotaExhausted))
 			p.store.Set(kh, nst)
 			return refuse(w, VerdictQuotaExhausted)
 		}
@@ -399,7 +417,7 @@ func (p *Proxy) decide(ctx context.Context, auth, kh string, w http.ResponseWrit
 		p.store.Set(kh, KeyState{
 			Verdict:      VerdictUnhealthy,
 			LastCheck:    now,
-			RefusedUntil: now.Add(p.cfg.UnhealthyFor),
+			RefusedUntil: now.Add(p.holdOffFor(VerdictUnhealthy)),
 		})
 		return refuse(w, VerdictUnhealthy)
 	}

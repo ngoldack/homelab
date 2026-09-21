@@ -1,14 +1,25 @@
-# Hindsight's LLM chain: synthetic gpt-oss-120b primary, OpenRouter fallback.
+# Hindsight's LLM chain: synthetic ONLY, via the proxy.
 #
-# Groups are priority order (agentgateway failover mechanism): the gateway
-# tries group 1 first and only moves to group 2 once every provider in
-# group 1 is evicted. Eviction is driven by the hindsight-health policy
-# (policy-hindsight-health.yaml) — without it, this backend never fails over.
+# WHY there is no fallback group. This chain used to carry a second priority
+# group pointing at OpenRouter (openai/gpt-oss-120b, pinned to the cheap
+# akashml/bf16 endpoint), which meant every synthetic failure silently moved
+# hindsight's queue — its bulk retain/consolidation fan-out — onto a paid leg.
+# Removed 2026-09-21 at the operator's direction: hindsight runs on synthetic
+# only.
 #
-# Group 1 is a verbatim copy of the synthetic-hf-openai-gpt-oss-120b provider
-# from backends.yaml (keep in sync); group 2 mirrors the openrouter backend
-# shape but pins openai.model so the client's `hf:` model string is replaced
-# per group (openai/gpt-oss-120b is how OpenRouter names the same model).
+# WHY there is no health policy either (the sibling chains each have one, and
+# hindsight deliberately does not). Eviction exists to make a chain move to its
+# NEXT priority group; with a single group there is nothing to move to, so
+# evicting could only make the gateway refuse to try at all. That decision now
+# belongs entirely to the proxy in front of synthetic
+# (image-builds/synthetic-proxy), which holds a bad key off locally and answers
+# its own 429/503 without the gateway having to remember anything — see
+# agentgateway/synthetic-proxy.yaml and policy-agent-chains-health.yaml for the
+# reasoning on the chains that DO still fail over.
+#
+# The provider is a verbatim copy of the synthetic-hf-openai-gpt-oss-120b
+# provider in backends.yaml (keep in sync): same host/port/path, the same
+# `hf:` model string, and the shared synthetic-key secret.
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -29,30 +40,3 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-      - providers:
-          - name: openrouter-gpt-oss
-            host: openrouter.ai
-            port: 443
-            path: /api/v1/chat/completions
-            openai:
-              model: openai/gpt-oss-120b
-            policies:
-              ai:
-                # FORCE OpenRouter's provider routing for gpt-oss-120b to the
-                # cheap akashml/bf16 endpoint ONLY (no fallbacks). Without
-                # this, OpenRouter's default routing picked Grok-family
-                # endpoints for gpt-oss-120b, costing ~10x per token (user
-                # report 2026-09-20; the ~30$/M unknown endpoint vs the
-                # akashml bf16 price). `overrides` (not `defaults`) so the
-                # pin always wins even if a client sends its own `provider`.
-                overrides:
-                  - field: provider
-                    value:
-                      only:
-                        - akashml/bf16
-                      allow_fallbacks: false
-              auth:
-                secretRef:
-                  name: openrouter-key
-              tls:
-                sni: openrouter.ai

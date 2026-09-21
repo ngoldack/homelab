@@ -28,13 +28,22 @@ spec:
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
-      # Co-locate the four agent pods on one node: the Kanban board is a single
-      # SQLite file on the shared volume and keeping every writer (the dispatcher
-      # and the workers it spawns) on one NFS client is what keeps SQLite happy.
-      # PREFERRED, not required: a required rule with a self-matching label
-      # selector deadlocks the first pod (nothing is running yet, so nothing can
-      # schedule). Best-effort co-location is enough because the profiles run
-      # SQLite in `database.journal_mode: delete`, the NFS-safe mode.
+      # Placement. Two independent reasons to pin the agents to the
+      # sandbox-capable node:
+      #   1. the Kanban board is one SQLite file on the shared volume and every
+      #      writer (the dispatcher and the workers it spawns) should share one
+      #      NFS client — `database.journal_mode: delete` is the backstop if a
+      #      pod ever lands elsewhere;
+      #   2. that node is where the sandbox runtime and the parent gateway
+      #      already run, and the pinned image is present in its local cache.
+      #      (The digest is absent from the registry — a separate, pre-existing
+      #      repo issue; a pod scheduled anywhere else cannot pull it and sits
+      #      in ImagePullBackOff.)
+      nodeSelector:
+        workload.hermes.io/sandbox: "true"
+      # Belt and braces: keep the four pods together even if the node selector
+      # is ever relaxed. PREFERRED, not required — a required rule with a
+      # self-matching label selector deadlocks the first pod.
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

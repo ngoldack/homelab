@@ -119,6 +119,14 @@ configMapGenerator:
         grafana_dashboard: "1"
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
+  - name: grafana-dashboard-synthetic-proxy
+    namespace: monitoring
+    files: [dashboards/synthetic-proxy.json]
+    options:
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-cnpg
     namespace: monitoring
     files: [dashboards/cnpg.json]

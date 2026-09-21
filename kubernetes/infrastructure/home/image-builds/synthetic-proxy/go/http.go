@@ -85,18 +85,32 @@ func NewProxy(cfg Config) *Proxy {
 		//
 		// The upstream is reached through the vpn-egress pool (HTTPS_PROXY), and
 		// that pool's load balancing is a PER-CONNECTION decision: the Service
-		// gives each new connection a random Ready tunnel. A reused connection
-		// therefore pins every later request to whichever exit the first one
-		// landed on — and with ForceAttemptHTTP2 on that is *every* request,
-		// because HTTP/2 multiplexes the whole burst onto that single
-		// connection.
+		// gives each new connection a random Ready tunnel. The property that
+		// matters is therefore how many connections this transport opens, and
+		// reuse is what collapses that to one — every request after the first
+		// rides the connection the first one opened, i.e. stays on the exit the
+		// first one landed on until that connection is dropped (90s idle).
 		//
 		// Measured 2026-09-21 with this exact transport behind a logging CONNECT
-		// proxy: keep-alives on -> 1 tunnel in total and a burst of 20
-		// concurrent requests opened 0 new ones; keep-alives off -> a new tunnel
-		// per request. One random egress per request is the entire point of the
-		// pool, so the reuse is what gets given up. The cost is one TCP+TLS
-		// handshake per request, paid through the tunnel.
+		// proxy, serial phase first and bursts after:
+		//
+		//   keep-alives on    10 serial -> 1 tunnel, then a 20-request burst -> 0 new
+		//   keep-alives off   10 serial -> 10 tunnels, 20-request burst -> 29
+		//
+		// Note the ordering: a burst arriving with no warm connection DOES spread
+		// even with keep-alives on (an empty pool makes Go dial once per
+		// concurrent request — 20 tunnels in that run), so a cold burst measured
+		// on its own would hide this. It is the steady state — warm pool,
+		// sustained traffic, which is the state this proxy actually runs in —
+		// that collapses onto a single exit.
+		//
+		// With keep-alives off, HTTP/2 is still negotiated per connection; what
+		// is gone is the *reuse*, and with one request per connection h2 has
+		// nothing to multiplex, which is the point.
+		//
+		// One random egress per request is the entire point of the pool, so the
+		// reuse is what gets given up. The cost is one TCP+TLS handshake per
+		// request, paid through the tunnel.
 		DisableKeepAlives: true,
 		// Time-to-FIRST-BYTE only. Without this, an upstream that accepts the
 		// connection and then never answers hangs the request forever: the

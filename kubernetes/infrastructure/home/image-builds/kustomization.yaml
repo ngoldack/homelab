@@ -15,6 +15,7 @@ resources:
   - llama-kv-broker.yaml
   - hermes-egress-authorizer.yaml
   - hermes-egress-reaper.yaml
+  - synthetic-proxy.yaml
   - cosign-key.sops.yaml
 
 # The ik_llama build needs OUR Dockerfile (with the sm_60 fast-FP16 patch) while

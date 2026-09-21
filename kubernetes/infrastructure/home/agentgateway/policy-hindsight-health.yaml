@@ -29,6 +29,14 @@
 # fail-over flavors independent of header behavior; `!has(Retry-After)` covers
 # the case where a fail-over 429 happens to omit the header.
 #
+# Body matching uses `response.bodyPrefix` (the response head), NOT
+# `response.body` — agentgateway populates a body field only when a CEL
+# expression references it, so referencing the full `response.body` buffers
+# an entire streaming SSE completion before the health decision (latency/
+# memory, may break streaming). The generic and quota-exceeded error bodies
+# are small and at the head, so `bodyPrefix.contains(...)` discriminates
+# identically without buffering the stream.
+#
 # duration: 1h — the base recovery window for a generic 429: Synthetic's
 # rate-limit state clears only after ~1h with no new request (verified by
 # operator 2026-09-20; a 429 that kept being poked stayed in the 429 state
@@ -53,8 +61,8 @@ spec:
         response.code >= 500 ||
         (response.code == 429 &&
         (!("retry-after" in response.headers) ||
-        response.body.contains("Too many requests, try again later") ||
-        response.body.contains("exceeded your subscription rate limits")))
+        response.bodyPrefix.contains("Too many requests, try again later") ||
+        response.bodyPrefix.contains("exceeded your subscription rate limits")))
       eviction:
         duration: 1h
         consecutiveFailures: 1

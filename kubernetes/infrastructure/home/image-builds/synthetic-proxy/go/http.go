@@ -81,6 +81,23 @@ func NewProxy(cfg Config) *Proxy {
 		MaxIdleConnsPerHost: 16,
 		IdleConnTimeout:     90 * time.Second,
 		ForceAttemptHTTP2:   true,
+		// Deliberately no connection reuse.
+		//
+		// The upstream is reached through the vpn-egress pool (HTTPS_PROXY), and
+		// that pool's load balancing is a PER-CONNECTION decision: the Service
+		// gives each new connection a random Ready tunnel. A reused connection
+		// therefore pins every later request to whichever exit the first one
+		// landed on — and with ForceAttemptHTTP2 on that is *every* request,
+		// because HTTP/2 multiplexes the whole burst onto that single
+		// connection.
+		//
+		// Measured 2026-09-21 with this exact transport behind a logging CONNECT
+		// proxy: keep-alives on -> 1 tunnel in total and a burst of 20
+		// concurrent requests opened 0 new ones; keep-alives off -> a new tunnel
+		// per request. One random egress per request is the entire point of the
+		// pool, so the reuse is what gets given up. The cost is one TCP+TLS
+		// handshake per request, paid through the tunnel.
+		DisableKeepAlives: true,
 		// Time-to-FIRST-BYTE only. Without this, an upstream that accepts the
 		// connection and then never answers hangs the request forever: the
 		// gateway would hold a retry slot with no status code to retry on, and

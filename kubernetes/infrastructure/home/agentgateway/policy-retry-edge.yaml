@@ -17,7 +17,7 @@ spec:
       name: local-llm-key-edge
   traffic:
     retry:
-      attempts: 2
+      attempts: 4
       backoff: 1s
       # 503 is synthetic-proxy's "this leg is unhealthy" signal: it rewrites
       # failover-worthy upstream answers AND its own local refusals to 503, and

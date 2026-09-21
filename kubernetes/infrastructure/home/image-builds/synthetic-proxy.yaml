@@ -28,7 +28,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-synthetic-proxy-s5
+  name: build-synthetic-proxy-s6
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -51,9 +51,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#1bfd1c08870c742d736680b2587f058b6a8d2168''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#e5a6b6438577676ff1ed3aabace44acfda11dee4''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/synthetic-proxy/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-1bfd1c0,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-e5a6b64,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -62,7 +62,7 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-1bfd1c0;
+          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-e5a6b64;
           DIGEST=$(grep -oE "pushing manifest for $IMAGE@sha256:[a-f0-9]{64}" /tmp/build.log | grep -oE ''sha256:[a-f0-9]{64}'' | tail -1);
 
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };

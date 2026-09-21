@@ -138,13 +138,106 @@ func NewProxy(cfg Config) *Proxy {
 // FLIGHT. That is what makes the gateway's policy a single code-only rule and
 // still fails over on the very request that discovered the problem, rather than
 // only the next one.
+// The three distinct 429 conditions Synthetic returns, each with a different
+// correct response. They are a closed set so they can be labelled directly in
+// the metrics rather than inferred later from a body.
+const (
+	// reasonQuotaExhausted: the subscription allowance is spent. Fails over.
+	reasonQuotaExhausted = "quota_exhausted"
+	// reasonRateLimited: the generic rate-limit state, which only clears after
+	// a long window with NO new request (the one that stayed 429 for 8h+ while
+	// it kept being poked). Fails over.
+	reasonRateLimited = "rate_limited"
+	// reasonParallelLimit: per-model concurrency ("max 4 parallel requests per
+	// model"). Transient — it clears as in-flight calls finish — and the ONLY
+	// flavour that carries Retry-After, so it must NOT fail over.
+	reasonParallelLimit = "parallel_limit"
+)
+
+// bodyPeekBytes bounds how much of a 429 body is inspected to tell "quota
+// exhausted" from "generic rate limit". Both are short JSON errors at the head.
+const bodyPeekBytes = 8 << 10
+
+// peekBody reads up to n bytes from resp.Body and re-attaches a reader that
+// still yields the WHOLE body (prefix included), returning the prefix. Only
+// ever called on a 429, whose body is a short JSON error — never on the success
+// path, which stays an untouched stream.
+func peekBody(resp *http.Response, n int) []byte {
+	if resp.Body == nil {
+		return nil
+	}
+	var buf bytes.Buffer
+	written, err := io.CopyN(&buf, resp.Body, int64(n))
+	if err != nil && written == 0 {
+		return nil
+	}
+	prefix := buf.Bytes()
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(prefix), resp.Body), resp.Body}
+	return prefix
+}
+
+// classify429 names which of the three flavours this 429 is, and whether it is
+// fail-over-worthy.
+//
+// parallel_limit is identified by the Retry-After header alone: operator-
+// verified that it is the only flavour that sends one. The other two are
+// separated by their bodies (Synthetic's own wording), which is why this is the
+// only place the proxy reads a body — and peekBody puts the prefix back, so a
+// passed-through parallel_limit reaches the client byte-identical.
+//
+// The default for an unrecognised failover-worthy 429 is rate_limited, i.e.
+// anything that is not positively the quota text still fails over. Being wrong
+// in that direction costs one failover; the other direction serves a 429 to the
+// client.
+func classify429(resp *http.Response) (reason string, failover bool) {
+	if resp.Header.Get("Retry-After") != "" {
+		return reasonParallelLimit, false
+	}
+	prefix := peekBody(resp, bodyPeekBytes)
+	if bytes.Contains(prefix, []byte("exceeded your subscription rate limits")) {
+		return reasonQuotaExhausted, true
+	}
+	return reasonRateLimited, true
+}
+
+// verdictForReason maps a failover-worthy 429 reason onto the verdict this
+// proxy reports for the key (and therefore onto the refusal body).
+func verdictForReason(reason string) Verdict {
+	if reason == reasonQuotaExhausted {
+		return VerdictQuotaExhausted
+	}
+	return VerdictRateLimited
+}
+
+// keyHash is info.kh with a nil guard, for the log lines in this file.
+func keyHash(info *reqInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.kh
+}
+
 func (p *Proxy) applyFailoverRule(info *reqInfo, resp *http.Response) {
 	var verdict Verdict
 	switch {
 	case resp.StatusCode >= 500:
 		verdict = VerdictUnhealthy
-	case resp.StatusCode == http.StatusTooManyRequests && resp.Header.Get("Retry-After") == "":
-		verdict = VerdictRateLimited
+	case resp.StatusCode == http.StatusTooManyRequests:
+		reason, failover := classify429(resp)
+		p.metrics.Inc429(reason)
+		if !failover {
+			// Transient concurrency: hand it straight back and remember
+			// nothing, so the chain does not fail over and does not evict.
+			log.Printf("msg=synthetic-proxy event=upstream_429 kh=%s reason=%s action=pass_through",
+				shortHash(keyHash(info)), reason)
+			return
+		}
+		log.Printf("msg=synthetic-proxy event=upstream_429 kh=%s reason=%s action=hold_off",
+			shortHash(keyHash(info)), reason)
+		verdict = verdictForReason(reason)
 	default:
 		return
 	}

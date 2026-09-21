@@ -77,10 +77,10 @@ spec:
       containers:
         - name: synthetic-proxy
           # Pinned by manifest digest (Docker-Content-Digest of
-          # registry.ngoldack.de/synthetic-proxy:0.1.0-1bfd1c0, built from this
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-e5a6b64, built from this
           # revision's sources through buildkitd:1234). Re-pin after every
           # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
-          image: registry.ngoldack.de/synthetic-proxy@sha256:4f11269087d9dfe03912d548613ee50f41496ab6a5ee0b3060b0c285b347c7ce
+          image: registry.ngoldack.de/synthetic-proxy@sha256:01d49d9eb99a218d1556a5d3c61f05004a5cbf7099b9c489cd4193e58e56a49c
           ports:
             - name: http
               containerPort: 8080
@@ -104,14 +104,17 @@ spec:
             - name: QUOTA_POLL_SECONDS
               value: "300"
             # How long a bad key is held off LOCALLY, without touching
-            # Synthetic. This is the authoritative no-poke window now: the
-            # gateway's eviction is deliberately short (5m) so it re-probes
-            # cheaply, and this proxy short-circuits those probes from state,
-            # so at most one request per gateway-eviction window reaches
-            # Synthetic — not the continuous poke that kept a 429 alive for
-            # 8h+.
+            # Synthetic. Deliberately SHORT (10m): the poke rate that justified
+            # the original 1h window no longer exists, because this proxy
+            # short-circuits from state — only ONE request per gateway eviction
+            # window (5m) reaches Synthetic, not the continuous agent traffic
+            # that kept a 429 alive for 8h+. At 1h, two transient upstream 429s
+            # (or a single blip) cost a full hour of OpenRouter; 10m bounds
+            # that while still leaving a real no-poke window, and it outlasts
+            # the gateway's 5m eviction so the proxy stays the authority
+            # instead of being re-probed every cycle.
             - name: UNHEALTHY_AFTER
-              value: 1h
+              value: 10m
           livenessProbe:
             httpGet:
               path: /healthz

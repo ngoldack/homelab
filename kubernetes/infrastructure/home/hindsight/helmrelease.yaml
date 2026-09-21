@@ -1,16 +1,14 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: synthetic gpt-oss-120b ONLY, through the in-cluster agentgateway chain
-# (HINDSIGHT_API_LLM_BASE_URL -> /v1/key/synthetic-gpt-oss -> hindsight-chain
-# -> synthetic-proxy -> api.synthetic.new), at low reasoning effort and
-# strictly JSON via STRICT_SCHEMA. History: the chain used to fall back to
-# OpenRouter, and before that to a 3-member failover chain (incl. the local
-# qwen3-27b leg) whose startup verification crossed the chart's 30s liveness
-# budget and crash-looped the API pod mid-boot (removed 2026-09-13). The
-# OpenRouter fallback group and the chain's eviction policy were both removed
-# 2026-09-21, so hindsight's queue never lands on a paid leg: the proxy holds
-# a bad key off locally instead (see agentgateway/hindsight-chain.yaml).
+# LLM: OpenRouter DIRECT (2026-09-16) — single model
+# ~deepseek/deepseek-v4-flash-latest at low reasoning effort, strictly JSON
+# via STRICT_SCHEMA. The prior 3-member failover chain (incl. the local
+# qwen3-27b leg) made startup verification cross the chart's 30s liveness
+# budget, crash-looping the API pod mid-boot — removed 2026-09-13. The
+# in-cluster Envoy AI Gateway hop (model "chat") was removed 2026-09-16
+# because the aigateway controller is crash-looping and its routes 500;
+# restore it once the gateway is healthy (see the api env block).
 #
 # Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
 # ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and

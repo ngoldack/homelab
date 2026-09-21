@@ -1,0 +1,38 @@
+# Health/eviction policy for the hindsight-chain backend.
+#
+# DELIBERATELY MINIMAL. All of the 429-flavour reasoning that used to live here
+# — which 429 means "fail over" and which is the transient concurrency case —
+# now lives in the proxy that fronts every Synthetic provider
+# (image-builds/synthetic-proxy). That proxy reads Synthetic's answer, decides,
+# remembers the decision per API key, and reports the Synthetic leg as plain
+# UNHEALTHY (503) when it must not be used again. The body/header sniffing, and
+# the response-body buffering it required, are gone from this file.
+#
+# So the contract is one line: the proxy said the leg is unhealthy -> evict and
+# fail the chain over to the next priority group (OpenRouter). Anything that is
+# not a 5xx is left alone — including Synthetic's transient parallel-limit 429,
+# which the proxy deliberately passes through untouched.
+#
+# duration: 5m — short on purpose. The proxy holds a bad key off for its own
+# UNHEALTHY_AFTER window and answers 503 locally WITHOUT touching Synthetic, so
+# this eviction only has to stop the gateway hammering in the meantime. Traffic
+# returns to Synthetic within minutes of the proxy's hold-off lapsing instead of
+# waiting out a stale hour, and only one probe per eviction window reaches
+# Synthetic because the proxy short-circuits the rest.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: hindsight-health
+  namespace: agentgateway
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: hindsight-chain
+  backend:
+    health:
+      unhealthyCondition: >-
+        response.code >= 500
+      eviction:
+        duration: 5m
+        consecutiveFailures: 1

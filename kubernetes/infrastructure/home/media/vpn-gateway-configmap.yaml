@@ -5,6 +5,11 @@
 # their default route at its VLAN 2080 address (10.20.80.200), so the traffic
 # arrives on net1, gets masqueraded into wg0, and leaves through the Proton
 # endpoint. See vpn-routes-configmap.yaml for the app side.
+#
+# Flux runs kustomize-controller's post-build envsubst over this file in strict
+# mode (this Kustomization substitutes CLUSTER_DOMAIN), so a dollar-brace
+# variable written in these scripts is read as a substitution and aborts the
+# reconcile. Shell variables here stay brace-less — no brace expansion.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -63,7 +68,7 @@ data:
     WG_ENDPOINT=$(awk -F' *= *' '/^Endpoint/ {print $2; exit}' "$WG_CONF")
     test -n "$WG_ADDR"
     test -n "$WG_ENDPOINT"
-    WG_ENDPOINT_IP=${WG_ENDPOINT%:*}
+    WG_ENDPOINT_IP=$(echo "$WG_ENDPOINT" | cut -d: -f1)
 
     ip address add "$WG_ADDR" dev "$WG_IF"
     ip link set dev "$WG_IF" mtu "$TUNNEL_MTU" up

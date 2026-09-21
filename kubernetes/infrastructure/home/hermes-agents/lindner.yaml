@@ -201,14 +201,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/data
-            - name: router-token
-              mountPath: /opt/data/router-token
-              subPath: token
-              readOnly: true
-            - name: egress-hmac
-              mountPath: /opt/data/egress-hmac
-              subPath: EGRESS_HMAC_SECRET
-              readOnly: true
             - name: tmp
               mountPath: /tmp
       initContainers:
@@ -369,18 +361,6 @@ spec:
                 path: lindner.yaml
               - key: lindner.soul.md
                 path: lindner.soul.md
-        - name: router-token
-          secret:
-            secretName: hermes-secret
-            items:
-              - key: AGENT_SANDBOX_ROUTER_TOKEN
-                path: token
-        - name: egress-hmac
-          secret:
-            secretName: hermes-secret
-            items:
-              - key: EGRESS_HMAC_SECRET
-                path: EGRESS_HMAC_SECRET
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi

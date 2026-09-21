@@ -64,8 +64,8 @@ helm template matrix "$CHART" --values "$values" --namespace matrix \
   --api-versions networking.k8s.io/v1 \
   --api-versions monitoring.coreos.com/v1/ServiceMonitor > "$render"
 
-python3 - "$render" "$values" <<'PY'
-import json, sys, yaml
+python3 - "$render" "$values" "$(dirname "$CHART")" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" <<'PY'
+import glob, json, os, sys, yaml
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 values = yaml.safe_load(open(sys.argv[2])) or {}
 kinds = [(d.get('kind'), d.get('metadata', {}).get('name', '')) for d in docs]
@@ -142,7 +142,39 @@ got_haproxy = haproxy[0]['spec']['template']['spec']['containers'][0].get('resou
 if got_haproxy != want_haproxy:
     fail(f"haproxy resources {got_haproxy} != HelmRelease haproxy.resources {want_haproxy}")
 
-# 7. ingress CR count is the known 3 (inert orphans)
+# 7. every backendRef in the repo-authored Matrix routes resolves to a Service
+# the chart actually renders — the "guessed service name" failure mode the
+# brief calls out. Names and ports are compared against the same render.
+repo = sys.argv[4] if len(sys.argv) > 4 else None
+services = {}
+for d in docs:
+    if d.get('kind') == 'Service':
+        services[d['metadata']['name']] = {
+            (p_.get('name'), p_.get('port')) for p_ in d['spec'].get('ports', [])
+        }
+routed = 0
+if repo:
+    for f in sorted(glob.glob(os.path.join(repo, 'kubernetes/infrastructure/home/matrix/*.yaml'))):
+        try:
+            route_docs = [d for d in yaml.safe_load_all(open(f)) if d]
+        except Exception as exc:  # a parse error here is a real failure
+            fail(f"could not parse {f}: {exc}")
+        for d in route_docs:
+            if d.get('kind') != 'HTTPRoute':
+                continue
+            for rule in d['spec'].get('rules', []):
+                for b in rule.get('backendRefs') or []:
+                    routed += 1
+                    name, port = b.get('name'), b.get('port')
+                    if name not in services:
+                        fail(f"{os.path.basename(f)}: backendRef {name!r} is not a rendered Service")
+                    elif all(pp != port for _, pp in services[name]):
+                        fail(f"{os.path.basename(f)}: backendRef {name}:{port} has no matching "
+                             f"rendered service port {sorted(services[name])}")
+if routed == 0:
+    fail("no HTTPRoute backendRefs were checked (routes missing?)")
+
+# 8. ingress CR count is the known 3 (inert orphans)
 ing = sum(1 for d in docs if d.get('kind') == 'Ingress')
 if ing != 3:
     fail(f"expected 3 inert Ingress CRs, got {ing}")
@@ -151,5 +183,5 @@ print("PASS: matrix render invariants hold (0 admin/rtc/livekit/pg/hookshot; "
       "1 synapse StatefulSet + 1 MAS + 1 element-web + 1 haproxy; "
       "ingress hosts exactly {matrix,element,matrix-auth}.ngoldack.de; "
       "0 ServiceMonitors; element-web base_url=local; resources set; "
-      "3 inert Ingress CRs)")
+      f"{routed} route backendRefs all resolve; 3 inert Ingress CRs)")
 PY

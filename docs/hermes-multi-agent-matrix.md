@@ -97,7 +97,10 @@ What differs is the profile config, and that config is the security boundary:
 The deny-all baseline (`hermes-agents-default-deny`) selects
 `app.kubernetes.io/name: hermes-agents`, which is deliberately **not** the
 parent gateway's `hermes` label — so these pods do not inherit the parent's
-grants, do not join `svc/hermes`, and have no ingress at all. The allowlist
+grants and do not join `svc/hermes`. Their only inbound traffic is the kubelet's
+own probes, admitted from Cilium's reserved `health` identity (otherwise the
+containers never become Ready); there is no Service-backed ingress, no gateway
+route and no OIDC dashboard. The allowlist
 reopens exactly: cluster DNS, the sandbox Router `:8080`, adopted sandbox pods
 `:9090`, the Kubernetes API (SandboxClaim lifecycle), `agentgateway:80`,
 `langfuse:3000`, `matrix:8008`, `hindsight:8888`, `authentik:9000/9443`, and the
@@ -160,16 +163,18 @@ client dials.
 | --- | --- | --- |
 | `MATRIX_ALLOWED_USERS` | `@nicolas.matrix:matrix.ngoldack.de` | Only that account can trigger a turn |
 | `MATRIX_REQUIRE_MENTION` | `true` | In rooms, the bot only answers when mentioned |
-| `MATRIX_ALLOWED_ROOMS` | **not set** | Any room a bot is joined to can trigger it — see the gap note below |
-| `MATRIX_SESSION_SCOPE` / `MATRIX_AUTO_THREAD` | **not set** | Hermes defaults: `auto` scope with auto-created threads |
-| `MATRIX_IGNORE_USER_PATTERNS` | **not set** | Hermes defaults still ignore self-events, `_`-prefixed appservice users, duplicate event IDs, pre-startup replays, edit replacements, and `m.notice` |
+| `MATRIX_ALLOWED_ROOMS` | `optional: true` secret ref, **empty until the operator fills it** | Empty = any room a bot is joined to can trigger it; filling `MATRIX_ALLOWED_ROOMS` in `hermes-agents-secret` with the immutable room id restricts it — see the gap note below |
+| `MATRIX_SESSION_SCOPE` / `MATRIX_AUTO_THREAD` | `thread` / `true` | Each task or conversation is isolated in a Matrix thread instead of sharing one room timeline |
+| `MATRIX_IGNORE_USER_PATTERNS` | `^@dave:…,^@chad:…,^@lindner:…` | No agent can be triggered by another agent's (or a bridge ghost's) event |
 
-**Gap, stated rather than papered over:** `MATRIX_ALLOWED_ROOMS` is unset, so
-the room allowlist is not enforced. The practical exposure is bounded (the
-sender allowlist plus the mention requirement still gate every turn, and DMs
-bypass room filtering by design), but any room a bot has been invited to can
-reach it. Setting `MATRIX_ALLOWED_ROOMS` to the immutable room IDs (not
-aliases) is the next hardening step.
+**Gap, stated rather than papered over:** the manifests carry
+`MATRIX_ALLOWED_ROOMS` from an `optional: true` secret reference, but the
+shipped secret has no value for it yet (the room does not exist before the
+bootstrap run), so the room allowlist is not enforced today. The practical
+exposure is bounded (the sender allowlist plus the mention requirement still
+gate every turn, and DMs bypass room filtering by design), but any room a bot
+has been invited to can reach it. Filling that key with the immutable room id
+(not the alias) is the next hardening step.
 
 ### Bot-authored events
 
@@ -342,6 +347,32 @@ data. These are not separate databases.
 | `chad` | `nicolas-dev` | `HINDSIGHT_C_API_KEY` |
 | `lindner` | `nicolas-finance` | `HINDSIGHT_L_API_KEY` |
 | `orchestrator` | none | — (memory provider not enabled) |
+
+The **credential** half needs saying plainly: the deployed Hindsight exposes
+exactly one server-side tenant key (`HINDSIGHT_API_TENANT_API_KEY` in the
+`hindsight` namespace, injected into the API by `envFrom`), and the API's
+multi-tenancy comes from a custom `HINDSIGHT_API_TENANT_EXTENSION`. The three
+`HINDSIGHT_{D,C,L}_API_KEY` keys this deployment hands out are therefore
+**operator-supplied**: they must be set to that same server key unless the
+extension in use maps each key to its own tenant. Until that is proven, treat
+the guarantee as "one tenant, three banks selected by `HINDSIGHT_BANK_ID`" and
+verify it rather than assuming it:
+
+```bash
+# Retain in dave's bank, then show that lindner's credential cannot read it.
+kubectl -n hermes exec dave-0 -- sh -c \
+  'curl -fsS -X POST -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
+   -H "Content-Type: application/json" \
+   -d "{\"bank_id\":\"$HINDSIGHT_BANK_ID\",\"content\":\"smoke: bank isolation probe\"}" \
+   http://hindsight-api.hindsight.svc.cluster.local:8888/retain'
+kubectl -n hermes exec lindner-0 -- sh -c \
+  'curl -fsS -X POST -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
+   -H "Content-Type: application/json" \
+   -d "{\"bank_id\":\"nicolas-core\"}" \
+   http://hindsight-api.hindsight.svc.cluster.local:8888/recall'
+# MUST NOT return dave's probe. If it does, the banks are not isolated:
+# give each agent its own tenant key (extension-mapped) instead of one key.
+```
 
 Two rules follow from that:
 
@@ -811,8 +842,10 @@ These are stated so nothing here implies support that does not exist.
   `monitoring -> haproxy:8405` and `-> synapse-main:8080`, so the scrape objects
   are the missing piece, not the network path. Adding the CNPG pod scrape is the
   higher-value half because it is what the alerting rules key on.
-- **Room allowlist and E2EE enforcement.** `MATRIX_ALLOWED_ROOMS` and
-  `MATRIX_E2EE_MODE` are unset (see the Matrix sections above).
+- **Room allowlist and E2EE enforcement.** `MATRIX_E2EE_MODE` is `optional`
+  (encryption available, not required) and `MATRIX_ALLOWED_ROOMS` is carried
+  from the secret but still empty, so neither is enforcing anything yet — see
+  the Matrix sections above.
 
 ## Known limitations
 
@@ -835,6 +868,12 @@ These are stated so nothing here implies support that does not exist.
 - **The board has no backup path** of its own (see Backup and restore).
 - **The `matrix` namespace has no metrics scrape**, so its CNPG cluster is
   outside the data-protection alerting.
+- **Hindsight isolation is bank-deep, not tenant-deep, until proven.** The
+  deployment ships three per-agent keys but the server publishes one tenant key
+  and a custom tenant extension; the smoke test above is what decides whether
+  the three keys give real tenant separation or all three agents share one
+  tenant and rely on `HINDSIGHT_BANK_ID`. Document the measured result before
+  claiming isolation.
 - **The agents' Matrix identity is a long-lived access token per bot**, not an
   OAuth refresh cycle: MAS issues them as compatibility tokens and the rotation
   runbook above is the only lifecycle they have.

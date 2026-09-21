@@ -1,0 +1,19 @@
+# matrix default-deny baseline — same semantics as the hindsight pilot
+# (../hindsight/cilium-default-deny.yaml). Three app workloads (Synapse, MAS,
+# Element Web) + the CNPG cluster. cilium-allowlist.yaml is the only thing
+# that reopens traffic.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-default-deny
+  namespace: matrix
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in matrix. The
+    per-workload allowlists in cilium-allowlist.yaml are the only exceptions.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

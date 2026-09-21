@@ -14,6 +14,8 @@ runbook and the drill log; keep the measured table current with every drill.
 | CNPG `immich-database` | 2 instances, sync quorum | Barman Cloud plugin → S3 | `truenas-fast-nfs-immich-database` 6h/14d | 30d |
 | CNPG `langfuse-database` | 1 instance | Barman Cloud plugin → S3 | `truenas-fast-nfs-langfuse-database` 6h/14d | 30d |
 | CNPG `hindsight-database` | 1 instance | Barman Cloud plugin → S3 | `truenas-fast-nfs-hindsight-database` 6h/14d | 30d |
+| CNPG `matrix-database` (Synapse + MAS DBs) | 1 instance | Barman Cloud plugin → S3 (`matrix/` prefix) | `truenas-fast-nfs-matrix-database` 6h/14d | 30d |
+| Synapse media repository (`matrix-synapse-media` PVC) | single PVC | TrueNAS snapshots | `truenas-fast-nfs-matrix-media` 6h/14d | 14d |
 | Langfuse ClickHouse + keeper | single-node stores | TrueNAS snapshots (classes exist) | classes `truenas-fast-nfs-langfuse-{clickhouse,keeper}` 6h/14d | 14d |
 | Langfuse SeaweedFS (S3 binaries) | allInOne store | TrueNAS snapshots (class exists) | class `truenas-fast-nfs-langfuse-seaweedfs` daily/1mo | 1mo |
 | Immich originals | TrueNAS pool `tank` | TrueNAS Periodic Snapshot Task | `truenas-tank-nfs-immich-library` daily/1mo | 1mo |

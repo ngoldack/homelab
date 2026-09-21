@@ -1,0 +1,245 @@
+# Matrix routes on the EDGE Gateway. Three hosts:
+#
+#   matrix.ngoldack.de       → synapse:8008        (client/federation API,
+#                            with the MAS-routed login/refresh/logout paths)
+#   element.ngoldack.de      → element-web:80      (Element Web chat UI)
+#   matrix-auth.ngoldack.de  → MAS:8080            (MAS login/OIDC entry)
+#
+# EDGE-ONLY on purpose: all three are internet-reachable, which is the repo
+# pattern for public apps (hermes, librechat, headlamp, grafana). A hostname
+# attached to BOTH Gateways would get two external-dns writers — instance #1
+# runs --gateway-name=public --label-filter=dns.ngoldack.de/publish=lan and
+# instance #2 runs --gateway-name=edge with no filter — and they would fight
+# over the same A record. There is therefore no `public`/LAN mirror of this
+# file (the former httproute.yaml was deleted for exactly that reason).
+#
+# Element Web is at element.ngoldack.de, NOT the chat host: that hostname
+# belongs to LibreChat (librechat/httproute-edge.yaml + its authentik
+# provider), and two HTTPRoutes cannot share a hostname on one listener.
+#
+# Path precedence on matrix.ngoldack.de is critical: the /_matrix/client/*
+# login|refresh|logout prefixes go to MAS; the broad /_matrix and /_synapse
+# prefixes fall through to Synapse. HTTPRoutes use first-match semantics, so
+# the MAS-targeted paths are listed BEFORE the /_matrix wildcard.
+#
+# The /_matrix + /_synapse backend Service is `matrix-synapse`, which selects
+# the HAPROXY pods (app.kubernetes.io/instance: matrix-haproxy) — haproxy is
+# the ESS L7 shim, and the Cilium allowlist covers those pods
+# (cilium-allowlist.yaml, matrix-haproxy-allowlist).
+#
+# TIMEOUTS: every rule carries `timeouts: {request: "0s", backendRequest:
+# "0s"}`. Matrix clients long-poll /sync for up to ~30s (and up to 180s on
+# the server side per the chart's haproxy config) and media uploads stream
+# tens of megabytes; an inherited proxy timeout would cut both mid-flight
+# with a 504. "0s" is Cilium's documented value for DISABLING the timeout
+# (Cilium honours HTTPRoute timeouts.request / timeouts.backendRequest,
+# including the literal "0s" to disable), so the request lifetime is bounded
+# by Synapse and the client, not by the data plane.
+#
+# All three hosts are deliberately NOT behind the Authentik outpost:
+# matrix.ngoldack.de serves bots + federation + the client API (must be open
+# to arbitrary Matrix clients), matrix-auth.ngoldack.de is MAS's OIDC entry
+# (Authentik redirects BACK to here), and element.ngoldack.de embeds the
+# login flow (Matrix's own auth via MAS), so the Authentik SSO layer for the
+# human operator happens INSIDE the stack: MAS is configured (R2) with
+# Authentik as the upstream OIDC provider, and the operator signs in to
+# Element Web via the "Sign in with Authentik" button.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: matrix-element-web-edge
+  namespace: matrix
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - element.ngoldack.de
+  rules:
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      backendRefs:
+        - name: matrix-element-web
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: matrix-synapse-edge
+  namespace: matrix
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - matrix.ngoldack.de
+  rules:
+    # MAS authentication entry (all /_matrix/client/{api/v1,r0,v3,unstable}
+    # login|refresh|logout prefixes) — listed BEFORE the /_matrix wildcard.
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/api/v1/login
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/api/v1/refresh
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/api/v1/logout
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/r0/login
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/r0/refresh
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/r0/logout
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/v3/login
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/v3/refresh
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/v3/logout
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/unstable/login
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/unstable/refresh
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix/client/unstable/logout
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080
+    # Everything else hits Synapse (client API, room sync, media uploads).
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_matrix
+      backendRefs:
+        - name: matrix-synapse
+          port: 8008
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      matches:
+        - path:
+            type: PathPrefix
+            value: /_synapse
+      backendRefs:
+        - name: matrix-synapse
+          port: 8008
+---
+# matrix-auth.ngoldack.de → MAS:8080. Serves MAS's own OIDC upstream entry
+# (login page + the upstream callback that Authentik redirects back to, R2).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: matrix-mas-edge
+  namespace: matrix
+spec:
+  parentRefs:
+    - name: edge
+      namespace: network
+      sectionName: https-apex
+  hostnames:
+    - matrix-auth.ngoldack.de
+  rules:
+    - timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      backendRefs:
+        - name: matrix-matrix-authentication-service
+          port: 8080

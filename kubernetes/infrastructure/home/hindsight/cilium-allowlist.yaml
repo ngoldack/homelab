@@ -44,6 +44,15 @@ spec:
         - ports:
             - port: "8888"
               protocol: TCP
+    # The Hermes agent gateways (hermes ns: dave/chad/lindner) retain/recall
+    # per-agent memory (tenant-scoped banks). Same-port grant as monitoring.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

@@ -1,4 +1,4 @@
-# The drill harness. One ConfigMap, one script, five CronJobs that differ only
+# The drill harness. One ConfigMap, one script, six CronJobs that differ only
 # in the database they point it at (cronjob-*.yaml) — so there is exactly one
 # copy of the drill logic to review and exactly one place a bug can live.
 #

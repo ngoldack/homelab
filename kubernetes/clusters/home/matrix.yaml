@@ -1,0 +1,38 @@
+# matrix — the self-hosted Matrix homeserver (ESS chart: Synapse + MAS +
+# Element Web) + its CNPG store. Applies after the substrate it depends on:
+# cnpg-operator (Cluster/Database CRDs), network (the edge Gateway its
+# HTTPRoutes attach to), cert-manager (TLS for the edge hostnames),
+# authentik (the MAS upstream OIDC provider in seed.yaml), and
+# infra-controllers (the root Kustomization that applies truenas-csi, whose
+# StorageClasses the matrix CNPG PVC + media claim use).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: matrix
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/matrix
+  prune: true
+  wait: false
+  timeout: 20m
+  retryInterval: 2m
+  dependsOn:
+    - name: cnpg-operator
+    - name: network
+    - name: cert-manager
+    - name: authentik
+    # truenas-csi StorageClasses (incl. the new matrix-database/media
+    # classes) are applied by the root infra-controllers Kustomization.
+    - name: infra-controllers
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

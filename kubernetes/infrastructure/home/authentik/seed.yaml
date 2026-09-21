@@ -264,6 +264,50 @@ data:
           meta_name: AI Gateway (M2M)
           meta_launch_url: https://llm.ngoldack.de/
           provider: !Find [authentik_providers_oauth2.oauth2provider, [name, aigateway-oidc]]
+      # ---------- matrix: MAS upstream OIDC (native federation) ----------
+      # The Matrix homeserver's authentication service (ESS chart) treats
+      # authentik as the upstream SSO provider: the human operator signs in
+      # to Element Web via Authentik, MAS imports identity. This is a
+      # CONFIDENTIAL client (MAS holds the secret and exchanges the code —
+      # unlike hermes-dashboard's public client). The secret arrives via
+      # !File from the seed-secrets-matrix volume (/secrets-matrix) and MUST
+      # match ../matrix/mas-authentik-config.sops.yaml's client_secret.
+      # redirect_uri mirrors MAS's upstream/callback/<id>; <id> is the ULID
+      # fixed in ../matrix/mas-authentik-config.sops.yaml. Explicit RSA signing key
+      # (same trap as headlamp/hermes-dashboard: without it JWKS is empty
+      # HS256). Provider declared before the app (ordering rule).
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        identifiers:
+          name: matrix-oidc
+        attrs:
+          client_id: matrix-oidc
+          client_type: confidential
+          client_secret: !File /secrets-matrix/client_secret
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
+          issuer_mode: per_provider
+          grant_types:
+            - authorization_code
+            - refresh_token
+          redirect_uris:
+            - matching_mode: strict
+              url: https://matrix-auth.ngoldack.de/upstream/callback/01HFRQFT5QFMJFGF01P7JAV2ME
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_profile]]
+            - !Find [authentik_providers_oauth2.scopemapping, [name, !Context sm_email]]
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: matrix
+        attrs:
+          name: matrix
+          meta_name: Matrix
+          meta_launch_url: https://element.ngoldack.de/
+          provider: !Find [authentik_providers_oauth2.oauth2provider, [name, matrix-oidc]]
       # ---------- media stack UIs behind the edge outpost (proxy path) ----------
       # Same two-way wiring as hindsight-ui/grafana: LAN route -> outpost -> app
       # UI. The provider MUST precede the app !Finding it. external_host is the

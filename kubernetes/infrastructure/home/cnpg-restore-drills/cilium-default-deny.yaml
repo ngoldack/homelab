@@ -4,7 +4,7 @@
 # no peer. The allowlists in cilium-allowlist.yaml are the only exceptions.
 #
 # The control namespace runs the drill driver (a Kubernetes-API client and
-# nothing else); the five *-drill namespaces run a recovered CNPG cluster that
+# nothing else); the six *-drill namespaces run a recovered CNPG cluster that
 # must reach exactly one external thing — the S3 endpoint its backups live on.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -94,6 +94,22 @@ metadata:
 spec:
   description: >-
     Deny-all ingress and egress for every endpoint in authentik-drill. The
+    allowlist in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-drill-default-deny
+  namespace: matrix-drill
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in matrix-drill. The
     allowlist in cilium-allowlist.yaml is the only exception.
   endpointSelector:
     matchLabels: {}

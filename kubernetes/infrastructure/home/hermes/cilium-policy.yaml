@@ -176,3 +176,15 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: authentik
+    # Matrix client API (R3 multi-agent): the dave/chad/lindner Hermes bots
+    # connect to the in-cluster Synapse for their Matrix messaging. Served by
+    # the matrix stack namespace on 8008 (client API). Both halves are
+    # required: the matching ingress rule lives in ../../matrix/
+    # cilium-allowlist.yaml (matrix-synapse-allowlist, fromEndpoints hermes).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: matrix
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP

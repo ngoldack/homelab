@@ -1,0 +1,73 @@
+# Matrix's Postgres, CloudNativePG like every other relational store here.
+#
+# ONE cluster, TWO databases: the ESS stack is two separate apps (Synapse and
+# the Matrix Authentication Service) that must not share a database (the
+# chart's own validation forbids it — see the postgres blocks in
+# helmrelease.yaml). Both live on this single instance with separate owners
+# and databases:
+#  - synapse                   (owner synapse)
+#  - matrix_authentication_service (owner matrix_authentication_service)
+#
+# The bootstrap secret (matrix-database-credentials, postgres-credentials
+# .sops.yaml) creates the `synapse` role + database at initdb; the second
+# role, matrix_authentication_service, is created declaratively AFTER
+# bootstrap via the CNPG managed-roles feature (declarative_role_management,
+# a 1.24+ operator feature — the pinned cloudnative-pg chart 0.29.0 carries a
+# 1.29 operator). Its password comes from its own basic-auth Secret
+# (matrix-authentication-service-role, same file). Both passwords also feed
+# the ESS chart's per-component `*.postgres.password.value` in
+# helmrelease.yaml so a drift between the two fails loudly at connect time
+# (see authentik/postgres.yaml for the identical reasoning).
+#
+# No pgvector/pg_trgm here (unlike hindsight): Synapse needs neither.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: matrix-database
+  namespace: matrix
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  bootstrap:
+    initdb:
+      database: synapse
+      owner: synapse
+      secret:
+        name: matrix-database-credentials
+  # The second app role (Matrix Authentication Service), created declaratively
+  # after bootstrap. Same shape as the initdb role: a low-privilege owner, no
+  # superuser, no memberships. Password from its own basic-auth Secret.
+  managed:
+    roles:
+      - name: matrix_authentication_service
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: matrix-authentication-service-role
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nfs-matrix-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  postgresql:
+    parameters:
+      # Force a WAL segment switch every 60s so archived WAL trails the
+      # primary by at most ~1 minute regardless of write volume (sync-op with
+      # hindsight — a quiet DB must not leave its newest WAL unarchived).
+      archive_timeout: "60"
+  # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
+  # (objectstore.yaml) owns destination/retention; this reference enables
+  # archiving.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: matrix-backup-store

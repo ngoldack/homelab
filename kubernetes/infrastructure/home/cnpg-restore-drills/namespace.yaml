@@ -4,7 +4,7 @@
 # ConfigMap and one ServiceAccount per database live here. The drill driver pod
 # runs here and does nothing but call the Kubernetes API.
 #
-# The five *-drill namespaces hold the ephemeral recovered CNPG Cluster, its
+# The six *-drill namespaces hold the ephemeral recovered CNPG Cluster, its
 # recovery job and its PVC — and nothing else, ever. Each run creates those
 # objects at the start and deletes them again on exit (see the drill contract
 # in README.md), so an empty drill namespace is the normal steady state and a
@@ -71,5 +71,15 @@ metadata:
   labels:
     app.kubernetes.io/name: cnpg-restore-drills
     app.kubernetes.io/instance: authentik
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: matrix-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: matrix
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

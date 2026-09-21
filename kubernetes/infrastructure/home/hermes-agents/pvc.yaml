@@ -1,0 +1,19 @@
+# The agents' shared data volume. ONE ReadWriteMany volume rather than a PVC per
+# pod, because the Kanban board and the profile directories must be visible to
+# more than one pod: the orchestrator spawns each task's worker as a local
+# subprocess and resolves that worker's home as <root>/profiles/<assignee>, and
+# every messaging agent creates its cards on the same board the orchestrator
+# dispatches from. NFS gives RWX on this class; the pods are additionally
+# co-located on one node (podAffinity in the StatefulSets) and SQLite runs in
+# `journal_mode: delete` so no WAL crosses the NFS client.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-agents-data
+  namespace: hermes
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: truenas-fast-nfs
+  resources:
+    requests:
+      storage: 10Gi

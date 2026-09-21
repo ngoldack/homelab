@@ -20,7 +20,7 @@
 # privilege and it is deliberate here; it is confined to a namespace whose
 # only pods are drill-created.
 #
-# Pattern is identical for all five databases; only the names change.
+# Pattern is identical for all six databases; only the names change.
 ---
 # immich
 apiVersion: rbac.authorization.k8s.io/v1
@@ -415,4 +415,83 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: cnpg-restore-drill-authentik
+    namespace: cnpg-restore-drills
+---
+# matrix
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: matrix
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["matrix-backup-s3-credentials"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill-source-credentials
+  namespace: matrix
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill-source-credentials
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-matrix
+    namespace: cnpg-restore-drills
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-restore-drill
+  namespace: matrix-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-restore-drill
+  namespace: matrix-drill
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-restore-drill-matrix
     namespace: cnpg-restore-drills

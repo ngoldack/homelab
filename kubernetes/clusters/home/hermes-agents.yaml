@@ -1,0 +1,37 @@
+# hermes-agents — the multi-agent expansion of the Hermes namespace
+# (orchestrator Kanban dispatcher + dave/chad/lindner Matrix agents). Applies
+# only AFTER the substrates it depends on: hermes (the namespace, ServiceAccount
+# `hermes`, stream-relay, and hermes-secret the agents share), matrix (the
+# homeserver the bots connect to), hindsight (per-agent memory banks), the
+# sandbox stack (the agent_sandbox terminal backend), and network + cert-manager.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: hermes-agents
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/hermes-agents
+  prune: true
+  wait: true
+  timeout: 20m
+  retryInterval: 2m
+  dependsOn:
+    - name: hermes
+    - name: hermes-sandbox
+    - name: agent-sandbox
+    - name: matrix
+    - name: hindsight
+    - name: network
+    - name: cert-manager
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

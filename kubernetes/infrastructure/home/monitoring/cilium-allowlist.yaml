@@ -72,6 +72,27 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # Grafana's NATIVE OIDC login (auth.generic_oauth -> /login/generic_oauth,
+    # NOT the edge outpost): auth_url/token_url/api_url are the edge hostnames
+    # (https://authentik.ngoldack.de/...), so the token and userinfo calls
+    # traverse the Gateway and Cilium checks THIS pod's egress against the
+    # route's BACKEND — the portal-bridge pod in the authentik namespace. The
+    # `world:443` rule above does NOT cover that (the backend is an in-cluster
+    # pod), and without this rule the edge answers 403 "Access denied" and the
+    # login dies after the callback with:
+    #   [auth.oauth.token.exchange] failed to exchange code to token:
+    #   oauth2: cannot fetch token: 403 Forbidden / Response: Access denied
+    #
+    # This rule was deleted in error by ace5820 ("drop the unreachable tetragon
+    # endpoint"), which removed it as dead config while cleaning up a VIP
+    # allowance. Verified with a probe pod carrying grafana's own labels:
+    # 403 Access denied without it, a real authentik response with it. The
+    # authentik side's ingress half (../authentik/cilium-allowlist.yaml
+    # admits fromEndpoints namespace=monitoring) was never removed, so this
+    # one rule is the whole gap.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
     # Its datasources live in this same namespace: vmsingle for metrics
     # (query), vlsingle for logs, alertmanager for the alert UI.
     - toEndpoints:

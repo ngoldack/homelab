@@ -8,6 +8,11 @@
 #   MAS           app.kubernetes.io/name=matrix-authentication-service
 #   element-web   app.kubernetes.io/name=element-web
 #   database      cnpg.io/cluster=matrix-database
+#   matrix-tools  app.kubernetes.io/component=matrix-tools  ← the chart's Job
+#                 pods (init Secrets, deployment markers); they talk to the
+#                 kube-apiserver and to nothing else
+#   check-config  k8s.element.io/synapse-instance  ← the Synapse config-check
+#                 Job: DNS + the database, no API access
 #
 # Cross-namespace edges this file establishes (mirror when peers migrate):
 #   edge/ingress -> haproxy:8008, MAS:8080, element-web:80   (HTTPRoutes)
@@ -15,6 +20,11 @@
 #   monitoring   -> haproxy:8405   (haproxy metrics), synapse-main:8080
 #   authentik    -> MAS:8080       (upstream OIDC — MAS calls authentik OUT, R2)
 #   cnpg-system  -> database       (operator + barman plugin)
+#   matrix-tools -> kube-apiserver (creates the marker ConfigMap / init
+#                   Secrets; WITHOUT this the chart's pre-install Job times out
+#                   dialling 172.21.0.1:443 and the whole release never gets
+#                   past it — observed live 2026-09-21)
+#   check-config -> database:5432  (validates the rendered Synapse config)
 #   world        -> synapse-main:443 (URL previews / remote media fetch);
 #                   federation itself is OFF (federation_domain_whitelist: []
 #                   in the HelmRelease), so no world→8008 edge is opened.
@@ -365,4 +375,83 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+---
+# The chart's Job pods (matrix-tools): the pre-install deployment marker
+# creates/updates a ConfigMap in this namespace, and the init-secrets Job
+# creates the stack's Secrets. Both go through the Kubernetes API, so they need
+# egress to the apiserver — the ClusterIP path (172.21.0.1) as well as the
+# `kube-apiserver` entity, the same entity-vs-CIDR pair the other namespaces
+# carry (a CIDR-only rule loses the entity path and vice versa).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-tools-allowlist
+  namespace: matrix
+spec:
+  description: >-
+    Egress for the chart's one-shot Job pods: DNS and the Kubernetes API only.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: matrix-tools
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.1/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
+# The Synapse config-check Job validates the rendered homeserver.yaml against
+# the database before the StatefulSet rolls. DNS + the database, nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-synapse-check-config-allowlist
+  namespace: matrix
+spec:
+  description: >-
+    Egress for the Synapse config-check Job: DNS and its CNPG database.
+  endpointSelector:
+    matchLabels:
+      k8s.element.io/synapse-instance: matrix-synapse-check-config
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: matrix-database
+      toPorts:
+        - ports:
+            - port: "5432"
               protocol: TCP

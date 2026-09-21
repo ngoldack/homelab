@@ -170,16 +170,23 @@ spec:
       # chains while keeping the home CPU pool schedulable (the 3-worker setup
       # saturated talos-3bi, stalling API/worker rollouts at 98% cpu requests).
       # Chart default is 2.
-      # SINGLE WORKER (2026-09-20): the DB connection ceiling forced it. Each
-      # worker keeps a live pooled conn set (observed worker-0 holding 22 of
-      # the cluster's 100 max_connections, worker-1 11) and the claimed-retain
-      # fan-out runs dozens of parallel 10-25min LLM calls (synthetic 429
-      # eviction -> OpenRouter fallback), each holding its DB conn for the
-      # call duration. 2 workers reliably blew past the 97 usable connections
-      # -> "TooManyConnectionsError: sorry, too many clients already" storms
-      # in every worker poll loop. 1 worker halves the pool AND the LLM
-      # concurrency; throughput returns when the model provider does.
-      replicaCount: 2
+      # SCALED TO 3 (2026-09-21). The connection ceiling that pinned this to 1
+      # is gone: the app now connects through the PgBouncer pooler
+      # (pooler.yaml), which caps server-side connections at
+      # default_pool_size x instances (40 x 2 = 80) no matter how many client
+      # connections the workers open, so adding replicas no longer risks the
+      # "TooManyConnectionsError" storms that forced replicaCount 1. Historical
+      # context kept for the reasoning: each worker keeps a live pooled conn
+      # set (worker-0 held 22 of the 100 then-available connections, worker-1
+      # 11) and the claimed-retain fan-out runs dozens of parallel 10-25min LLM
+      # calls, each holding its DB conn for the call duration.
+      # 3 (not more) because podAntiAffinity only spreads across the two home
+      # nodes and the per-pod claim width below is the real memory driver.
+      # CAVEAT: the drain is currently provider-gated (measured ~12% HTTP 429
+      # from the OpenRouter leg with zero traffic on the synthetic leg), so
+      # extra replicas add concurrency, not necessarily throughput, until the
+      # model provider has headroom.
+      replicaCount: 3
       # Memory raised three times on 2026-09-18. Evidence, not estimation —
       # live VmRSS of a booting worker, sampled every 2s:
       #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)
@@ -204,7 +211,12 @@ spec:
           memory: 1Gi
         limits:
           cpu: 1000m
-          memory: 9Gi
+          # 9Gi -> 12Gi (2026-09-21), paired with MAX_SLOTS 4 -> 6 below. The
+          # claim path is the memory driver and its width scales with MAX_SLOTS;
+          # a live worker was measured at 4.87 GiB RSS with slots=4, so a 50%
+          # wider claim width needs the headroom (nodes have it: talos-919-w9u
+          # 38% memory, talos-3bi 47%).
+          memory: 12Gi
       # Probes widened from the chart default (3x10s) to 12x10s. The
       # 2026-09-18 kill events read "Liveness probe failed: /health/live:
       # context deadline exceeded" — the request TIMED OUT rather than the
@@ -277,10 +289,13 @@ spec:
         # Retain/claim bounds. The claim query selects `task_payload` per
         # slot and each claimed retain folds up to 16 peers, also fetching
         # `task_payload` — no byte bound at claim time (see the memory note
-        # on the worker resources above). MAX_SLOTS=4 narrows the cycle's
-        # claim width; RETAIN_MEMORY_BUDGET_MB=96 bounds extraction state
+        # on the worker resources above). MAX_SLOTS=4 -> 6 (2026-09-21) with
+        # the limit raised 9Gi -> 12Gi to match the wider cycle; it is still
+        # deliberately below the chart default of 10 because producers submit
+        # ~20MB retains and nothing bounds bytes at claim time.
+        # RETAIN_MEMORY_BUDGET_MB=96 bounds extraction state
         # (memory_budget.py), which is a separate pool.
-        HINDSIGHT_API_WORKER_MAX_SLOTS: "4"
+        HINDSIGHT_API_WORKER_MAX_SLOTS: "6"
         HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
         # RETAIN_BATCH_TOKENS stays at the 10k default on purpose: it keeps
         # each extraction prompt far inside gpt-oss-120b's context window. The

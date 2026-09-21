@@ -1,0 +1,69 @@
+# PgBouncer pooler in front of the CNPG primary — the connection-scaling
+# unblock for bulk ingest (2026-09-21).
+#
+# Why it exists: without a pooler each app process opens its OWN pool straight
+# at `hindsight-database-rw`. The shipped default is
+# HINDSIGHT_API_DB_POOL_MAX_SIZE=100 *per pool* (plus a separate read pool),
+# and a live worker was observed holding ~22 of the cluster's connections; two
+# workers reliably blew past the 200 max_connections and triggered
+# "TooManyConnectionsError" storms in every poll loop. That connection ceiling
+# — not CPU or memory — is what pinned `worker.replicaCount: 1`. With the
+# pooler in front, the number of connections that actually reach Postgres is
+# bounded by `default_pool_size` no matter how many client connections the app
+# opens, so worker replicas can scale without touching `max_connections`.
+#
+# poolMode: session — deliberately NOT transaction. Hindsight sets SESSION-scope
+# GUCs on each connection (statement_timeout, pg_trgm.similarity_threshold and
+# the vector ANN tuning knobs), and asyncpg issues `RESET ALL` when a connection
+# is released to its pool. Connected directly that is harmless; behind a
+# transaction pooler the `SET`s would be spread across whichever server
+# connection a transaction happened to land on. The app's own source documents
+# exactly this hazard and compensates with
+# HINDSIGHT_API_DB_SESSION_SETUP_ON_ACQUIRE (default true), which re-applies the
+# session state on every acquire — a contract that session pooling preserves and
+# transaction pooling would break. Session mode still caps server connections
+# via `default_pool_size`, which is the win we need here.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: hindsight-pooler-rw
+  namespace: hindsight
+spec:
+  cluster:
+    name: hindsight-database
+  # rw: the primary service. The app both reads and writes (recall + retain);
+  # there is no separate read-only service in this single-instance cluster, so
+  # the app's read pool points at this same host.
+  type: rw
+  # 2 for HA across the two home nodes. PgBouncer is stateless, so the Service
+  # load-balances clients over both pods.
+  instances: 2
+  pgbouncer:
+    poolMode: session
+    parameters:
+      # Client-side ceiling per pooler pod. The app's asyncpg pools can open up
+      # to 100 connections each (api + 2 workers = 300 worst case), so allow
+      # generous client fan-in and let the server-side pool cap what lands on
+      # Postgres. PgBouncer queues excess clients rather than refusing them.
+      max_client_conn: "500"
+      # Server-side cap PER (user, database), per pooler pod: 2 x 40 = 80
+      # against max_connections=200, leaving room for the CNPG operator, the
+      # barman plugin, the metrics exporter and the 3 superuser-reserved slots.
+      default_pool_size: "40"
+      # A little spillover headroom for bursts without raising the steady cap.
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "3"
+      # Recycle server connections so a client that goes away cannot pin one
+      # indefinitely; long LLM calls are held by the app's own conn, not this.
+      server_idle_timeout: "60"
+      server_lifetime: "3600"
+      # Fail fast instead of queueing a request forever when the pool is
+      # saturated (the app already has its own acquire timeout and retry).
+      query_wait_timeout: "30"
+  template:
+    spec:
+      # Same site pinning as every other hindsight workload.
+      nodeSelector:
+        topology.homelab/site: home
+      # Required by the Pooler pod-template schema; empty = operator defaults.
+      containers: []

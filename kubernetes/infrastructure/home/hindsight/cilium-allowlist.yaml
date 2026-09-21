@@ -2,12 +2,13 @@
 # baseline. Selectors are live pod labels: the three app components share
 # app.kubernetes.io/name=hindsight and are told apart by
 # app.kubernetes.io/component (api | control-plane | worker); the database
-# pod carries cnpg.io/cluster=hindsight-database.
+# pod carries cnpg.io/cluster=hindsight-database and the PgBouncer pooler pods
+# carry cnpg.io/poolerName=hindsight-pooler-rw.
 #
 # Cross-namespace edges this file establishes (mirror these when the peer
 # namespace is migrated):
-#   monitoring -> api:8888, worker:8889, database:9187   (scrapes)
-#   authentik  -> control-plane:3000                     (proxy outpost)
+#   monitoring -> api:8888, worker:8889, database:9187, pooler:9127   (scrapes)
+#   authentik  -> control-plane:3000                                  (outpost)
 #   world      -> api/worker:443 (OpenRouter), database:443 (S3)
 ---
 # The API. Published on the LAN Gateway (reserved `ingress` identity) and
@@ -54,27 +55,30 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+    # Database access goes through the PgBouncer pooler (pooler.yaml), not
+    # straight to the CNPG primary — this is the ingest path's DB edge.
     - toEndpoints:
         - matchLabels:
-            cnpg.io/cluster: hindsight-database
+            k8s:io.kubernetes.pod.namespace: hindsight
+            cnpg.io/poolerName: hindsight-pooler-rw
       toPorts:
         - ports:
             - port: "5432"
               protocol: TCP
-    # LLM calls go straight to OpenRouter (world), not through an in-cluster
-    # gateway — see the provider config in ../hindsight/helmrelease.yaml.
-    - toEntities:
-        - world
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
+    # LLM calls go through the in-cluster agentgateway chain (see the provider
+    # config in helmrelease.yaml).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
       toPorts:
         - ports:
             - {port: "80", protocol: TCP}
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # The control-plane UI. Reachable only through the authentik proxy outpost
 # (seed.yaml: hindsight-ui-proxy). The outpost is configured with the app's
@@ -173,9 +177,11 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+    # Same as the api: DB access goes through the pooler.
     - toEndpoints:
         - matchLabels:
-            cnpg.io/cluster: hindsight-database
+            k8s:io.kubernetes.pod.namespace: hindsight
+            cnpg.io/poolerName: hindsight-pooler-rw
       toPorts:
         - ports:
             - port: "5432"
@@ -193,7 +199,7 @@ spec:
             - port: "443"
               protocol: TCP
 ---
-# The CNPG instance(s). Ingress: the api/worker pods on 5432, the operator and
+# The CNPG instance(s). Ingress: the PgBouncer pooler on 5432, the operator and
 # barman plugin from cnpg-system (instance manager 8000), and the monitoring
 # scrape of the CNPG exporter. Egress: DNS, the Kubernetes API (entity + the
 # control-plane VIP — k8sServiceHost=127.0.0.1 means the VIP is not covered by
@@ -208,14 +214,17 @@ spec:
     matchLabels:
       cnpg.io/cluster: hindsight-database
   ingress:
+    # The pooler holds the steady-state server connections now.
     - fromEndpoints:
         - matchLabels:
-            app.kubernetes.io/instance: hindsight
-            app.kubernetes.io/name: hindsight
+            k8s:io.kubernetes.pod.namespace: hindsight
+            cnpg.io/poolerName: hindsight-pooler-rw
       toPorts:
         - ports:
             - port: "5432"
               protocol: TCP
+    # The CNPG operator/instance-manager and the barman plugin connect straight
+    # to the instance, not through PgBouncer.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: cnpg-system
@@ -278,4 +287,51 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+---
+# The PgBouncer pooler pods (pooler.yaml). Ingress: the api/worker on 5432 and
+# vmagent on the PgBouncer metrics port 9127. Egress: DNS + the CNPG primary on
+# 5432 (the pooler holds the real server-side connections).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hindsight-pooler-allowlist
+  namespace: hindsight
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/poolerName: hindsight-pooler-rw
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: hindsight
+            app.kubernetes.io/name: hindsight
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9127"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
+      toPorts:
+        - ports:
+            - port: "5432"
               protocol: TCP

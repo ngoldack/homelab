@@ -133,6 +133,17 @@ spec:
             # quicker failover.
             - name: UPSTREAM_HEADER_TIMEOUT
               value: 60s
+            # ON while Synthetic's 429 behaviour is still being mapped: every
+            # upstream error is dumped in full — status line, header set with
+            # Retry-After surfaced explicitly, and a capped body sample — which
+            # is the only way to tell its three flavours apart from a real
+            # answer rather than from theory. The credential headers
+            # (Authorization, Cookie, Set-Cookie, X-Api-Key) are omitted rather
+            # than truncated, the body sample is capped, and the sample is
+            # re-attached so the client's response is byte-identical with this
+            # on or off. Set to "false" once the flavours are mapped.
+            - name: DEBUG_ERRORS
+              value: "true"
           livenessProbe:
             httpGet:
               path: /healthz

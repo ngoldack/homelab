@@ -16,8 +16,11 @@ func resp429(body, retryAfter string) *http.Response {
 	}
 	return &http.Response{
 		StatusCode: http.StatusTooManyRequests,
-		Header:     h,
-		Body:       io.NopCloser(strings.NewReader(body)),
+		// A real client sets this; hand-built responses do not, and the debug
+		// dump reports it, so the fixture carries it like the real thing.
+		Status: "429 Too Many Requests",
+		Header: h,
+		Body:   io.NopCloser(strings.NewReader(body)),
 	}
 }
 

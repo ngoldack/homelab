@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -119,7 +121,10 @@ func NewProxy(cfg Config) *Proxy {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("msg=synthetic-proxy event=upstream_error upstream=%s err=%q", p.upHost, err.Error())
+			// No response exists to dump, so report what WOULD have been called:
+			// this is the shape of a connect/DNS/TLS failure.
+			log.Printf("msg=synthetic-proxy event=upstream_error upstream=%s method=%s path=%s err=%q",
+				p.upHost, r.Method, r.URL.Path, err.Error())
 			writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
 		},
 	}
@@ -218,6 +223,75 @@ func verdictForReason(reason string) Verdict {
 	return VerdictRateLimited
 }
 
+// sensitiveHeaders are dropped from the debug dump rather than printed in any
+// form: Authorization IS the credential this proxy exists to keep out of logs,
+// and a dump is exactly where it would otherwise leak.
+var sensitiveHeaders = map[string]bool{
+	"Authorization":       true,
+	"Cookie":              true,
+	"Set-Cookie":          true,
+	"X-Api-Key":           true,
+	"Proxy-Authorization": true,
+}
+
+// debugBodyBytes bounds the body sample in the dump. Much larger than the
+// verdict-relevant head needs to be, because the point is to SEE the payload.
+const debugBodyBytes = 8 << 10
+
+// truncateBytes renders a body sample as a string, capped, so one pathological
+// error body cannot flood the log.
+func truncateBytes(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "...(truncated)"
+}
+
+// logErrorDetail reports what an upstream error actually looked like — the one
+// thing no metric can show. On a 429 the interesting facts are the status line,
+// whether Retry-After is present and what it says, and the body wording, since
+// those are precisely what distinguishes Synthetic's three flavours. When a new
+// flavour appears, this dump is what says so.
+//
+// Gated by DEBUG_ERRORS (verbose). The body sample is capped and re-attached by
+// peekBody, so the client's response is byte-identical with the dump on or off,
+// and the credential headers are omitted entirely.
+func (p *Proxy) logErrorDetail(info *reqInfo, resp *http.Response, reason, action string) {
+	if !p.cfg.DebugErrors || resp.StatusCode < 400 {
+		return
+	}
+	sample := peekBody(resp, debugBodyBytes)
+
+	hdrs := make([]string, 0, len(resp.Header))
+	redacted := make([]string, 0, 1)
+	for k, v := range resp.Header {
+		if sensitiveHeaders[http.CanonicalHeaderKey(k)] {
+			redacted = append(redacted, k)
+			continue
+		}
+		hdrs = append(hdrs, k+"="+strings.Join(v, ";"))
+	}
+	sort.Strings(hdrs)
+	sort.Strings(redacted)
+
+	if reason == "" {
+		reason = "-"
+	}
+	if action == "" {
+		action = "-"
+	}
+	// A real http.Response always carries Status, but synthesise it if not: an
+	// empty status in a diagnostic dump is worse than useless.
+	status := resp.Status
+	if status == "" {
+		status = fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	log.Printf("msg=synthetic-proxy event=upstream_error_detail kh=%s status=%q reason=%s action=%s retry_after=%q redacted_headers=%v header_count=%d headers={%s} body_bytes=%d body=%q",
+		shortHash(keyHash(info)), status, reason, action,
+		resp.Header.Get("Retry-After"), redacted, len(resp.Header),
+		strings.Join(hdrs, " "), len(sample), truncateBytes(sample, 700))
+}
+
 // holdOffFor picks how long a verdict keeps its key off. Two different clocks
 // are wanted, and conflating them is expensive in both directions:
 //
@@ -248,6 +322,7 @@ func (p *Proxy) applyFailoverRule(info *reqInfo, resp *http.Response) {
 	switch {
 	case resp.StatusCode >= 500:
 		verdict = VerdictUnhealthy
+		p.logErrorDetail(info, resp, "", "hold_off")
 	case resp.StatusCode == http.StatusTooManyRequests:
 		reason, failover := classify429(resp)
 		p.metrics.Inc429(reason)
@@ -256,12 +331,20 @@ func (p *Proxy) applyFailoverRule(info *reqInfo, resp *http.Response) {
 			// nothing, so the chain does not fail over and does not evict.
 			log.Printf("msg=synthetic-proxy event=upstream_429 kh=%s reason=%s action=pass_through",
 				shortHash(keyHash(info)), reason)
+			p.logErrorDetail(info, resp, reason, "pass_through")
 			return
 		}
 		log.Printf("msg=synthetic-proxy event=upstream_429 kh=%s reason=%s action=hold_off",
 			shortHash(keyHash(info)), reason)
+		// Dump BEFORE the rewrite below, so the dump is Synthetic's answer and
+		// not the 503 this proxy is about to substitute for it.
+		p.logErrorDetail(info, resp, reason, "hold_off")
 		verdict = verdictForReason(reason)
 	default:
+		// Any other error status passes through, but is still worth dumping
+		// when debugging: a 400/401/403 here means our own request shape is
+		// wrong, which no 429 handling would reveal.
+		p.logErrorDetail(info, resp, "", "pass_through")
 		return
 	}
 

@@ -62,6 +62,12 @@ type Config struct {
 	UpstreamHeaderTimeout time.Duration
 	// StoreCap bounds the per-key state map.
 	StoreCap int
+	// DebugErrors dumps the full shape of every upstream error response: status
+	// line, header set (Retry-After surfaced explicitly) and a bounded body
+	// sample. The credential headers are dropped rather than truncated. Verbose,
+	// so off by default; it is the tool for deciding whether a new 429 flavour
+	// needs its own branch.
+	DebugErrors bool
 }
 
 // LoadConfig resolves Config from the environment, applying defaults and
@@ -120,6 +126,10 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("UPSTREAM_HEADER_TIMEOUT must be > 0, got %s", c.UpstreamHeaderTimeout)
 	}
 
+	if c.DebugErrors, err = envBool("DEBUG_ERRORS", false); err != nil {
+		return Config{}, err
+	}
+
 	if c.StoreCap, err = envInt("STATE_CAP", 1024); err != nil {
 		return Config{}, err
 	}
@@ -149,6 +159,21 @@ func envInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+// envBool parses a boolean env value ("true"/"1"/"yes"), falling back to def.
+// An unparseable value is an error, like every other knob: a typo must not
+// silently leave a debug switch off (or on).
+func envBool(key string, def bool) (bool, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return b, nil
 }
 
 // envDur parses a time.Duration env value ("10m", "90s"), falling back to def.

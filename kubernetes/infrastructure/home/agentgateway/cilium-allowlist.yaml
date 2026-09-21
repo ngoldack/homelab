@@ -111,6 +111,22 @@ spec:
         - ports:
             - {port: "443", protocol: TCP}
             - {port: "6443", protocol: TCP}
+    # The Synthetic leg's egress: vpn-egress runs the WireGuard pool and its
+    # pods expose gluetun's HTTP CONNECT proxy on :8888. synthetic-proxy sends
+    # its upstream requests through HTTPS_PROXY (the pool's ClusterIP Service),
+    # so this namespace needs egress only to that namespace on that port —
+    # the VPN pods do the internet-facing part.
+    #
+    # This rule is the egress half of a two-sided pair: vpn-egress'
+    # cilium-allowlist.yaml admits this namespace on 8888. Cilium needs BOTH;
+    # with one missing the flow is dropped silently and the symptom looks like
+    # a broken VPN rather than a policy gap.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: vpn-egress
+      toPorts:
+        - ports:
+            - {port: "8888", protocol: TCP}
     # Upstream model providers (OpenRouter etc.) and OTLP export.
     - toEntities:
         - world

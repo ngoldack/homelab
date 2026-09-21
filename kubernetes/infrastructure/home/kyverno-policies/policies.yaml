@@ -46,7 +46,7 @@
 #   kyverno, monitoring, network, cert-manager, cnpg-system,
 #   clickhouse-operator, seaweedfs-operator, valkey-operator-system,
 #   truenas-csi, nvidia-device-plugin, buildkit, agent-sandbox-system,
-#   hermes-sandbox, media, tetragon, crowdsec
+#   hermes-sandbox, media, vpn-egress, tetragon, crowdsec
 ---
 # Explicit image tags (or digests) only. Two rules so the report distinguishes
 # "no tag at all" (implicit :latest) from "literally :latest" — the same shape
@@ -106,6 +106,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -143,6 +144,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -210,6 +212,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -277,6 +280,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -347,6 +351,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -734,6 +739,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -776,6 +782,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -888,6 +895,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -931,6 +939,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -1051,6 +1060,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -1164,6 +1174,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -1272,6 +1283,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       validate:
@@ -1544,6 +1556,7 @@ spec:
                 - agent-sandbox-system
                 - hermes-sandbox
                 - media
+                - vpn-egress
                 - tetragon
                 - crowdsec
       context:

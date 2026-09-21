@@ -1,0 +1,27 @@
+# THE LOAD BALANCER. This Service is the whole load-balancing story: Cilium's
+# ClusterIP implementation picks a (by default) random endpoint per connection
+# and — the property that matters — only ever among endpoints the readiness
+# probe has marked Ready. A tunnel whose healthcheck fails therefore drops out
+# of the pool on its own, and the other four keep serving. That is why there is
+# no HAProxy, no Envoy hop and no Go router in front of these pods.
+#
+# Rotation granularity follows from this: because the consumer
+# (synthetic-proxy) disables keep-alives, each request is a new connection and
+# therefore a new random ready tunnel. If it reused connections, this Service
+# would pin the whole process to one VPN for its lifetime.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vpn-egress
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vpn-egress
+  ports:
+    - name: http-proxy
+      port: 8888
+      targetPort: 8888
+      protocol: TCP

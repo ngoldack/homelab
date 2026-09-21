@@ -42,6 +42,12 @@ resources:
   # LLM AI gateway (agentgateway.dev control plane). CRD-before-CR split.
   - agentgateway-crds.yaml
   - agentgateway.yaml
+  # VPN egress pool: five ProtonVPN WireGuard tunnels behind one ClusterIP
+  # Service that load-balances across whichever tunnels report Ready. Raw
+  # manifests, no CRDs, and deliberately NO dependsOn edge from the LLM lane:
+  # a dead VPN must never hold up another lane's reconciliation. The consumer
+  # (synthetic-proxy) is pointed at the Service by its own env instead.
+  - vpn-egress.yaml
   # Paperless-ngx document management (app-template chart on CNPG + valkey +
   # TrueNAS storage); app-template entry, no monitoring-crds dependency.
   - paperless.yaml

@@ -1,0 +1,558 @@
+# The five ProtonVPN egress tunnels — one Deployment per config, replicas: 1.
+#
+# WHY one Deployment per VPN instead of one pod holding five `wg` interfaces
+# behind an nftables/`ip rule` rotator: five Deployments fail independently (a
+# revoked key or a moved endpoint removes exactly one exit from the Service
+# pool), they need no in-repo image, and a single-pod rotator is a single point
+# of failure for the whole egress path while being no better for a client that
+# reuses connections.
+#
+# THE SHARED PIECES, once, so the five documents below stay comparable:
+#
+#   gluetun, pinned by digest. It is the maintained WireGuard client container
+#   (kernel or userspace WireGuard, kill-switch, internal DoT resolver) and it
+#   ships an HTTP CONNECT proxy, which is the piece that makes a tunnel usable
+#   by an HTTP client behind a Service.
+#
+#   WIREGUARD_IMPLEMENTATION=kernelspace, explicitly. The `wireguard` module is
+#   built into the Talos kernel on every home node (verified: /sys/module/
+#   wireguard on all three), so no /dev/net/tun, no generic-device-plugin and no
+#   hostPath are needed. Setting it explicitly means a node without the module
+#   fails loudly instead of silently falling back to userspace and then needing
+#   the device it does not have.
+#
+#   The IPv6 half of each Proton config (Address 2a07:... and AllowedIPs ::/0)
+#   is dropped on purpose: there is then no v6 path into or out of these pods to
+#   reason about.
+#
+#   HTTPPROXY=on must be spelled out — gluetun's upstream default is OFF. The
+#   proxy's own default listen address is :8888.
+#
+#   The two FIREWALL_* knobs are the kill-switch exceptions: FIREWALL_INPUT_PORTS
+#   admits the proxy port on eth0 (the Service's connections arrive there), and
+#   FIREWALL_OUTBOUND_SUBNETS keeps cluster traffic on eth0 instead of letting it
+#   disappear into the tunnel. Cluster traffic is otherwise unaffected.
+#
+#   BLOCK_MALICIOUS=off is a deliberate deviation from the upstream default. On,
+#   it downloads public DNSBL blocklists through the tunnel at every start; this
+#   pod resolves exactly one hostname, so the fetch is a startup dependency with
+#   no upside here. Reversible with one env var.
+#
+#   PUBLICIP_ENABLED stays at its upstream default (on), which is what makes
+#   gluetun write its observed exit IP to /tmp/gluetun/ip — the cheapest way to
+#   verify which tunnel a pod actually came up on.
+#
+# THE STATE DIRECTORY MOUNT IS LOAD-BEARING, not tidiness. gluetun creates
+# /tmp/gluetun with `MkdirAll(dir, 0644)`: a directory with no execute bit.
+# Normally root papers over that with CAP_DAC_OVERRIDE, but these pods drop ALL
+# capabilities and add back only NET_ADMIN (verified live: CapEff=0x1000), so the
+# write to /tmp/gluetun/ip fails EACCES and `healthcheck` exits 1. The readiness
+# probe is exec `/gluetun-entrypoint healthcheck`, so that single bug leaves
+# every pod permanently NotReady — i.e. the Service would have no endpoints and
+# the whole pool would be dark. Mounting the state dir gives gluetun a real
+# traversable directory instead of trading the bug for a capability. Measured on
+# 2026-09-21: without the mount, healthcheck exit 1 and the pods never become
+# Ready; with it, exit 0 and /tmp/gluetun/ip holds the exit IP.
+#
+# One log line is expected and harmless per pod: gluetun's ICMP health check
+# needs CAP_NET_RAW, which is also dropped, so it logs "not permitted: you can
+# try adding NET_RAW ... permanently falling back to plain DNS over UDP checks".
+# The fallback works and the healthcheck is green; adding NET_RAW for it would
+# be a privilege increase for a check that already has a working substitute.
+#
+# WHY EACH DEPLOYMENT CARRIES A PER-SITE app.kubernetes.io/instance LABEL: the
+# Service and the spread constraint must select all five pods, so
+# app.kubernetes.io/name: vpn-egress has to be shared. Sharing it as each
+# Deployment's *selector* as well makes every selector-based command ambiguous —
+# `kubectl logs deploy/vpn-egress-pl` picks any pod matching that selector, so it
+# silently shows a different site's tunnel. Observed while verifying this lane:
+# five "different" exit-IP reads were five reads of the same Belgian pod, which
+# looks exactly like a broken rotation. The per-site selector removes that trap,
+# and it also stops a deleted Deployment's orphaned pod from being adopted by a
+# sibling's ReplicaSet.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-egress-pl
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+    app.kubernetes.io/instance: vpn-egress-pl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vpn-egress
+      app.kubernetes.io/instance: vpn-egress-pl
+  strategy:
+    # Repo convention (maxSurge 0): no resource spike on rollout. It also means
+    # the old tunnel is gone before the new one starts, so two instances of the
+    # same Proton config never race for the same session.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vpn-egress
+        app.kubernetes.io/instance: vpn-egress-pl
+    spec:
+      serviceAccountName: vpn-egress
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      # Soft spread across nodes: with five pods on three nodes a skew of 1 is
+      # satisfiable, but ScheduleAnyway means a node that is full can never park
+      # an exit in Pending.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vpn-egress
+      containers:
+        - name: gluetun
+          image: ghcr.io/qdm12/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+          ports:
+            - name: http-proxy
+              containerPort: 8888
+          env:
+            - {name: VPN_SERVICE_PROVIDER, value: custom}
+            - {name: VPN_TYPE, value: wireguard}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-egress-wireguard
+                  key: pl
+            - {name: WIREGUARD_ADDRESSES, value: "10.2.0.2/32"}
+            - {name: WIREGUARD_ALLOWED_IPS, value: "0.0.0.0/0"}
+            - {name: WIREGUARD_PUBLIC_KEY, value: "/Ce+DOB9gzY8TFSqRwu0vwKW2+blWftPnrLesBW92T8="}
+            - {name: WIREGUARD_ENDPOINT_IP, value: "79.127.186.251"}
+            - {name: WIREGUARD_ENDPOINT_PORT, value: "51820"}
+            - {name: WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL, value: "25s"}
+            - {name: WIREGUARD_IMPLEMENTATION, value: kernelspace}
+            - {name: HTTPPROXY, value: "on"}
+            - {name: HTTPPROXY_LISTENING_ADDRESS, value: ":8888"}
+            # One line per CONNECT, naming the peer and the target host. That log
+            # line is how the egress is actually observed: it is the difference
+            # between "the request worked" and "the request left through Proton".
+            - {name: HTTPPROXY_LOG, value: "on"}
+            - {name: FIREWALL_INPUT_PORTS, value: "8888"}
+            - {name: FIREWALL_OUTBOUND_SUBNETS, value: "172.20.0.0/16,172.21.0.0/16"}
+            - {name: BLOCK_MALICIOUS, value: "off"}
+            - {name: LOG_LEVEL, value: info}
+          # exec, not an HTTP probe: the health server listens on 127.0.0.1:9999
+          # inside the pod, so a kubelet HTTP probe would need that port opened
+          # through the kill-switch for nothing. This is the same command the
+          # image's own HEALTHCHECK uses.
+          readinessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            # Deliberately generous: the probe must not flap. A false negative
+            # here removes a working exit from the pool (harmless), but a
+            # twitchy liveness would restart-loop the tunnel (harmful).
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN"]
+              drop: ["ALL"]
+          volumeMounts:
+            - name: gluetun-state
+              mountPath: /tmp/gluetun
+      volumes:
+        - name: gluetun-state
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-egress-be
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+    app.kubernetes.io/instance: vpn-egress-be
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vpn-egress
+      app.kubernetes.io/instance: vpn-egress-be
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vpn-egress
+        app.kubernetes.io/instance: vpn-egress-be
+    spec:
+      serviceAccountName: vpn-egress
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vpn-egress
+      containers:
+        - name: gluetun
+          image: ghcr.io/qdm12/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+          ports:
+            - name: http-proxy
+              containerPort: 8888
+          env:
+            - {name: VPN_SERVICE_PROVIDER, value: custom}
+            - {name: VPN_TYPE, value: wireguard}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-egress-wireguard
+                  key: be
+            - {name: WIREGUARD_ADDRESSES, value: "10.2.0.2/32"}
+            - {name: WIREGUARD_ALLOWED_IPS, value: "0.0.0.0/0"}
+            - {name: WIREGUARD_PUBLIC_KEY, value: "WVoDDXmBy6pDq+r9HB+f+Ki7TP8jv/aeo5HTOdKlt3c="}
+            - {name: WIREGUARD_ENDPOINT_IP, value: "79.127.164.95"}
+            - {name: WIREGUARD_ENDPOINT_PORT, value: "51820"}
+            - {name: WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL, value: "25s"}
+            - {name: WIREGUARD_IMPLEMENTATION, value: kernelspace}
+            - {name: HTTPPROXY, value: "on"}
+            - {name: HTTPPROXY_LISTENING_ADDRESS, value: ":8888"}
+            - {name: HTTPPROXY_LOG, value: "on"}
+            - {name: FIREWALL_INPUT_PORTS, value: "8888"}
+            - {name: FIREWALL_OUTBOUND_SUBNETS, value: "172.20.0.0/16,172.21.0.0/16"}
+            - {name: BLOCK_MALICIOUS, value: "off"}
+            - {name: LOG_LEVEL, value: info}
+          readinessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN"]
+              drop: ["ALL"]
+          volumeMounts:
+            - name: gluetun-state
+              mountPath: /tmp/gluetun
+      volumes:
+        - name: gluetun-state
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-egress-nl
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+    app.kubernetes.io/instance: vpn-egress-nl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vpn-egress
+      app.kubernetes.io/instance: vpn-egress-nl
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vpn-egress
+        app.kubernetes.io/instance: vpn-egress-nl
+    spec:
+      serviceAccountName: vpn-egress
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vpn-egress
+      containers:
+        - name: gluetun
+          image: ghcr.io/qdm12/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+          ports:
+            - name: http-proxy
+              containerPort: 8888
+          env:
+            - {name: VPN_SERVICE_PROVIDER, value: custom}
+            - {name: VPN_TYPE, value: wireguard}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-egress-wireguard
+                  key: nl
+            - {name: WIREGUARD_ADDRESSES, value: "10.2.0.2/32"}
+            - {name: WIREGUARD_ALLOWED_IPS, value: "0.0.0.0/0"}
+            - {name: WIREGUARD_PUBLIC_KEY, value: "127jo9F8kpNz/SQfhY2o5I8HB7X0VLMJVSaMGGuJowQ="}
+            - {name: WIREGUARD_ENDPOINT_IP, value: "62.112.9.164"}
+            - {name: WIREGUARD_ENDPOINT_PORT, value: "51820"}
+            - {name: WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL, value: "25s"}
+            - {name: WIREGUARD_IMPLEMENTATION, value: kernelspace}
+            - {name: HTTPPROXY, value: "on"}
+            - {name: HTTPPROXY_LISTENING_ADDRESS, value: ":8888"}
+            - {name: HTTPPROXY_LOG, value: "on"}
+            - {name: FIREWALL_INPUT_PORTS, value: "8888"}
+            - {name: FIREWALL_OUTBOUND_SUBNETS, value: "172.20.0.0/16,172.21.0.0/16"}
+            - {name: BLOCK_MALICIOUS, value: "off"}
+            - {name: LOG_LEVEL, value: info}
+          readinessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN"]
+              drop: ["ALL"]
+          volumeMounts:
+            - name: gluetun-state
+              mountPath: /tmp/gluetun
+      volumes:
+        - name: gluetun-state
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-egress-de-fra
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+    app.kubernetes.io/instance: vpn-egress-de-fra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vpn-egress
+      app.kubernetes.io/instance: vpn-egress-de-fra
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vpn-egress
+        app.kubernetes.io/instance: vpn-egress-de-fra
+    spec:
+      serviceAccountName: vpn-egress
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vpn-egress
+      containers:
+        - name: gluetun
+          image: ghcr.io/qdm12/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+          ports:
+            - name: http-proxy
+              containerPort: 8888
+          env:
+            - {name: VPN_SERVICE_PROVIDER, value: custom}
+            - {name: VPN_TYPE, value: wireguard}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-egress-wireguard
+                  key: de-fra
+            - {name: WIREGUARD_ADDRESSES, value: "10.2.0.2/32"}
+            - {name: WIREGUARD_ALLOWED_IPS, value: "0.0.0.0/0"}
+            - {name: WIREGUARD_PUBLIC_KEY, value: "XcWEb0DMaFBex2HD2DVUStifh6wBZe9ELo2N/KLlMHc="}
+            - {name: WIREGUARD_ENDPOINT_IP, value: "194.126.177.13"}
+            - {name: WIREGUARD_ENDPOINT_PORT, value: "51820"}
+            - {name: WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL, value: "25s"}
+            - {name: WIREGUARD_IMPLEMENTATION, value: kernelspace}
+            - {name: HTTPPROXY, value: "on"}
+            - {name: HTTPPROXY_LISTENING_ADDRESS, value: ":8888"}
+            - {name: HTTPPROXY_LOG, value: "on"}
+            - {name: FIREWALL_INPUT_PORTS, value: "8888"}
+            - {name: FIREWALL_OUTBOUND_SUBNETS, value: "172.20.0.0/16,172.21.0.0/16"}
+            - {name: BLOCK_MALICIOUS, value: "off"}
+            - {name: LOG_LEVEL, value: info}
+          readinessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN"]
+              drop: ["ALL"]
+          volumeMounts:
+            - name: gluetun-state
+              mountPath: /tmp/gluetun
+      volumes:
+        - name: gluetun-state
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-egress-de-ber
+  namespace: vpn-egress
+  labels:
+    app.kubernetes.io/name: vpn-egress
+    app.kubernetes.io/instance: vpn-egress-de-ber
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vpn-egress
+      app.kubernetes.io/instance: vpn-egress-de-ber
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vpn-egress
+        app.kubernetes.io/instance: vpn-egress-de-ber
+    spec:
+      serviceAccountName: vpn-egress
+      automountServiceAccountToken: false
+      nodeSelector:
+        topology.homelab/site: home
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vpn-egress
+      containers:
+        - name: gluetun
+          image: ghcr.io/qdm12/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+          ports:
+            - name: http-proxy
+              containerPort: 8888
+          env:
+            - {name: VPN_SERVICE_PROVIDER, value: custom}
+            - {name: VPN_TYPE, value: wireguard}
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vpn-egress-wireguard
+                  key: de-ber
+            - {name: WIREGUARD_ADDRESSES, value: "10.2.0.2/32"}
+            - {name: WIREGUARD_ALLOWED_IPS, value: "0.0.0.0/0"}
+            - {name: WIREGUARD_PUBLIC_KEY, value: "9xUSjs4KYUv0ySbhrYjwN/49TpHfmIcI/2KdGkOEGz0="}
+            - {name: WIREGUARD_ENDPOINT_IP, value: "89.36.76.130"}
+            - {name: WIREGUARD_ENDPOINT_PORT, value: "51820"}
+            - {name: WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL, value: "25s"}
+            - {name: WIREGUARD_IMPLEMENTATION, value: kernelspace}
+            - {name: HTTPPROXY, value: "on"}
+            - {name: HTTPPROXY_LISTENING_ADDRESS, value: ":8888"}
+            - {name: HTTPPROXY_LOG, value: "on"}
+            - {name: FIREWALL_INPUT_PORTS, value: "8888"}
+            - {name: FIREWALL_OUTBOUND_SUBNETS, value: "172.20.0.0/16,172.21.0.0/16"}
+            - {name: BLOCK_MALICIOUS, value: "off"}
+            - {name: LOG_LEVEL, value: info}
+          readinessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/gluetun-entrypoint", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_ADMIN"]
+              drop: ["ALL"]
+          volumeMounts:
+            - name: gluetun-state
+              mountPath: /tmp/gluetun
+      volumes:
+        - name: gluetun-state
+          emptyDir: {}

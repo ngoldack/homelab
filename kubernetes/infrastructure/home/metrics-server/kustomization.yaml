@@ -1,0 +1,11 @@
+# One control namespace, five files: the namespace, the HelmRelease (chart
+# 3.14.0, image 0.9.0), the default-deny floor + allowlist pair required by
+# the repo's zero-trust convention, and this kustomization. The HelmRepository
+# lives in the shared ../sources.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
+  - helmrelease.yaml

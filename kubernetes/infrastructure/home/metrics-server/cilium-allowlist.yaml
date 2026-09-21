@@ -1,0 +1,91 @@
+# metrics-server allowlist — the only traffic that may cross default-deny.
+#
+# Two flows, each with its justification:
+#
+#   1. INBOUND — the Kubernetes API server routes /apis/metrics.k8s.io/* to
+#      this release's APIService (apiService.create: true). Clients
+#      (Headlamp, autoscalers) never reach metrics-server directly; they call
+#      the apiserver, which proxies to metrics-server:443. So ingress is
+#      scopeable to the apiserver entity (+ control-plane VIP + the in-cluster
+#      Service CIDR address the apiserver actually targets, the same three
+#      addressing forms every API-client CNP in this repo uses).
+#   2. OUTBOUND — metrics-server reads per-node container resource stats from
+#      each kubelet via the node-status port. Traffic to kubelets is the
+#      apiserver's proxy path; metrics-server resolves nodes through the API
+#      and talks to the kubelet endpoints the same way node-exporter does in
+#      ../monitoring/. DNS resolves those node names and the API server.
+#
+# Health probes from kubelet (the `health` entity) are admitted inbound.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: metrics-server-allowlist
+  namespace: metrics-server
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-server
+  ingress:
+    # 1. The API server proxying metrics.k8s.io to this APIService.
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "10250", protocol: TCP}
+    - fromCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "10250", protocol: TCP}
+    - fromCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "10250", protocol: TCP}
+    - fromEntities:
+        - health
+  egress:
+    # 2. Resolve + reach the kubelet/node paths via the apiserver proxy.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    - toCIDRSet:
+        - cidr: 172.21.0.0/16
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "6443", protocol: TCP}
+    # Kubelet monolith: metrics-server scrapes each node's kubelet directly on
+    # node-IP:10250 (--kubelet-preferred-address-types=InternalIP,...). The
+    # `cluster` entity covers the node/remote-node identities, exactly as the
+    # monitoring scrape stack uses it for the same kubelet:10250 reads. Without
+    # this rule metrics-server starts Ready but /apis/metrics.k8s.io returns an
+    # EMPTY list (default-deny drops the kubelet scrape) — blank CPU column
+    # despite a green pod.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "10250", protocol: TCP}

@@ -1,0 +1,66 @@
+# metrics-server: the Kubernetes Metrics API provider, giving Headlamp (and
+# anything else that reads metrics.k8s.io) the standardized per-pod resource
+# usage it displays in the node/pod usage columns.
+#
+# Serves: v1beta1.metrics.k8s.io — the apiserver proxies /apis/metrics.k8s.io/*
+# to this release's APIService (the chart's apiService.create: true). Headlamp
+# already reaches the apiserver (its existing egress), so no Headlamp-side
+# change is needed for the native columns to light up.
+#
+# Why a dedicated namespace rather than kube-system (the chart's default): the
+# cluster's zero-trust convention is one namespace per workload with its own
+# default-deny + allowlist pair; kube-system is flux-owned and must not carry
+# app workloads. namespaceOverride pins the chart to this namespace.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: metrics-server
+  namespace: flux-system
+spec:
+  interval: 1h
+  dependsOn:
+    - name: cert-manager
+  chart:
+    spec:
+      chart: metrics-server
+      version: "3.14.0"
+      sourceRef:
+        kind: HelmRepository
+        name: metrics-server
+      interval: 1h
+  targetNamespace: metrics-server
+  values:
+    # The chart's default is kube-system; we declare our own namespace.
+    namespaceOverride: metrics-server
+    rbac:
+      create: true
+    # The API service is what the apiserver routes /apis/metrics.k8s.io/* to.
+    apiService:
+      create: true
+      # Default true in the chart; keeping it explicit: this cluster's kubelets
+      # use the standard Talos serving certs without a pinned metrics-server CA,
+      # so TLS verification is skipped by design (the same default the chart
+      # ships). For a production path with a dedicated CA, set caBundle instead.
+      insecureSkipTLSVerify: true
+    # Default metric cadence; the 15s resolution is fine for interactive
+    # dashboards and costs one small read through the node-status port per
+    # node per interval.
+    defaultArgs:
+      - --cert-dir=/tmp
+      - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+      - --kubelet-use-node-status-port
+      - --metric-resolution=15s
+    # Skip kubelet TLS verification: on Talos the kubelet serving cert is
+    # signed by the Talos CA, which metrics-server does not trust by default —
+    # without this the scrapes fail with x509 and metrics.k8s.io returns an
+    # empty list despite a Ready pod (the exact blank-CPU-column symptom).
+    # `apiService.insecureSkipTLSVerify` above only covers the
+    # apiserver->metrics-server hop, NOT metrics-server->kubelet. This is the
+    # homelab-standard flag for a kubelet CA not in the consumer's trust store.
+    args:
+      - --kubelet-insecure-tls
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+    priorityClassName: system-cluster-critical

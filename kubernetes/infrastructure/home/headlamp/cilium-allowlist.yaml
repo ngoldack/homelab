@@ -78,6 +78,20 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: authentik
+    # "Show Prometheus metrics" graphs: the bundled Prometheus plugin's
+    # metrics queries reach VictoriaMetrics (vlsingle) on its Prometheus
+    # query port. Point the plugin at the vlsingle Service in the monitoring
+    # namespace (Settings > Plugins > Prometheus: enable metrics, disable
+    # auto-detect, service address
+    # monitoring/vlsingle-monitoring-victoria-metrics-k8s-stack:9428) — the
+    # same integration the VictoriaMetrics Headlamp guide documents.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: vlsingle
+      toPorts:
+        - ports:
+            - {port: "9428", protocol: TCP}
     - toEntities:
         - world
       toPorts:

@@ -32,6 +32,7 @@ COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/state.go ./
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/quota.go ./
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/health.go ./
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/http.go ./
+COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/metrics.go ./
 # The entrypoint: package main importing the root package by module path.
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/cmd/synthetic-proxy/main.go ./cmd/synthetic-proxy/main.go
 

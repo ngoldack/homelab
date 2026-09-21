@@ -454,3 +454,31 @@ spec:
     # namespace-wide allowlist in ../llmkube/cilium-allowlist.yaml already
     # admits monitoring into llmkube-system on :8080.
     - port: http
+---
+# ---- synthetic-proxy: the per-key quota/health gate in front of
+# api.synthetic.new (../agentgateway/synthetic-proxy.yaml). It serves its
+# Prometheus exposition on the SAME listener as the proxy, so the scrape
+# targets the Service's "http" port (8080) at /metrics — without the explicit
+# mux route the catch-all "/" would forward /metrics upstream to Synthetic.
+#
+# No Cilium change accompanies this object: ../monitoring/cilium-allowlist.yaml
+# already carries 8080 in the scrapers' exporter port set, and the agentgateway
+# allowlist admits the monitoring namespace into that namespace on every port.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: synthetic-proxy
+  namespace: agentgateway
+spec:
+  namespaceSelector:
+    matchNames: [agentgateway]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synthetic-proxy
+  endpoints:
+    # Port NAME, not number: service-scrape discovery keeps targets on
+    # __meta_kubernetes_endpoint_port_name, so the numeric form discovers
+    # nothing (the qwen3-27b / cert-manager / zot lesson).
+    - port: http
+      path: /metrics
+      interval: 30s

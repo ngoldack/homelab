@@ -56,11 +56,21 @@ spec:
             - port: "53"
               protocol: TCP
     # Database access goes through the PgBouncer pooler (pooler.yaml), not
-    # straight to the CNPG primary — this is the ingest path's DB edge.
+    # straight to the CNPG primary — this is the ingest path's DB edge. The
+    # direct edge is kept alongside it: the DSN is a Helm value, so a rollout
+    # (or a rollback of one) has pods pointing at `hindsight-database-rw`
+    # while the new revision points at the pooler, and both must be reachable.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: hindsight
             cnpg.io/poolerName: hindsight-pooler-rw
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
       toPorts:
         - ports:
             - port: "5432"
@@ -177,11 +187,19 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Same as the api: DB access goes through the pooler.
+    # Same as the api: DB access goes through the pooler, with the direct edge
+    # kept for the rollout/rollback window (see the api's egress note).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: hindsight
             cnpg.io/poolerName: hindsight-pooler-rw
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: hindsight-database
       toPorts:
         - ports:
             - port: "5432"
@@ -214,7 +232,21 @@ spec:
     matchLabels:
       cnpg.io/cluster: hindsight-database
   ingress:
-    # The pooler holds the steady-state server connections now.
+    # The app pods, kept ALONGSIDE the pooler edge below. This is not dead
+    # weight: the app's DSN is a Helm value, so during a release rollout (or a
+    # rollback of one) old and new pods coexist and a rollback points them back
+    # at `hindsight-database-rw`. Removing this edge while the pooler edge was
+    # added firewalled those pods from the database and rolled the worker into
+    # CrashLoopBackOff, which stalled and then failed the Helm upgrade.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/instance: hindsight
+            app.kubernetes.io/name: hindsight
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # The PgBouncer pooler holds the steady-state server connections.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: hindsight

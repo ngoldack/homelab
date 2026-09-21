@@ -77,10 +77,10 @@ spec:
       containers:
         - name: synthetic-proxy
           # Pinned by manifest digest (Docker-Content-Digest of
-          # registry.ngoldack.de/synthetic-proxy:0.1.0-6f6d8c8, built from this
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-9093220, built from this
           # revision's sources through buildkitd:1234). Re-pin after every
           # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
-          image: registry.ngoldack.de/synthetic-proxy@sha256:bff476281a67f393c76d378622b8215493cc5e404273aaf6dd79d55bddd55726
+          image: registry.ngoldack.de/synthetic-proxy@sha256:a98ed58c78666bf04f33e87633411f594973e6d51f2f5b6fe4529a6d066f5fc4
           ports:
             - name: http
               containerPort: 8080

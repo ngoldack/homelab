@@ -15,7 +15,8 @@
 #                 Job: DNS + the database, no API access
 #
 # Cross-namespace edges this file establishes (mirror when peers migrate):
-#   edge/ingress -> haproxy:8008, MAS:8080, element-web:80   (HTTPRoutes)
+#   edge/ingress -> haproxy:8008, MAS:8080, element-web:8080 (HTTPRoutes; the
+#                   policies name the POD port, not the Service port)
 #   hermes       -> haproxy:8008   (the three bots call the client API)
 #   monitoring   -> haproxy:8405   (haproxy metrics), synapse-main:8080
 #   authentik    -> MAS:8080       (upstream OIDC — MAS calls authentik OUT, R2)
@@ -46,12 +47,16 @@ spec:
     matchLabels:
       app.kubernetes.io/name: element-web
   ingress:
+    # NOTE the port: Cilium policies match the POD port, and this Service maps
+    # 80 -> targetPort "element" = 8080, so the rule must name 8080. Naming 80
+    # here silently drops every gateway request (edge answers 503) while the pod
+    # itself looks healthy — the failure mode this rule was written with.
     - fromEntities:
         - ingress
         - health
       toPorts:
         - ports:
-            - port: "80"
+            - port: "8080"
               protocol: TCP
   egress:
     - toEndpoints:

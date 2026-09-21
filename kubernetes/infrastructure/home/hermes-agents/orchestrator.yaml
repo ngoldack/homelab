@@ -15,6 +15,12 @@ spec:
       app.kubernetes.io/instance: orchestrator
   template:
     metadata:
+      # Rolls the pod when the profile configs change: the seed initContainer
+      # only re-copies config.yaml/SOUL.md when `config-rev` differs from the
+      # marker on the volume, so the annotation is what makes a ConfigMap edit
+      # take effect. Same mechanism as ../hermes/statefulset.yaml.
+      annotations:
+        hermes.ngoldack.de/config-rev: "2"
       labels:
         app.kubernetes.io/name: hermes-agents
         app.kubernetes.io/instance: orchestrator

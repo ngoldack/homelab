@@ -46,7 +46,24 @@ spec:
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: hermes-agents
-  ingress: []
+  # Ingress: only the kubelet's own probes. Cilium polices probe traffic as the
+  # reserved `health` identity, and every agent container probes itself with a
+  # tcpSocket/exec on its API port — without this rule the pods never become
+  # Ready. Same shape as ../hermes/cilium-policy.yaml. Nothing else may reach
+  # an agent pod: no Service, no gateway route, no OIDC dashboard.
+  ingress:
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "8642"
+              protocol: TCP
+            - port: "8662"
+              protocol: TCP
+            - port: "8682"
+              protocol: TCP
+            - port: "8702"
+              protocol: TCP
   egress:
     # Cluster DNS.
     - toEndpoints:

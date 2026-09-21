@@ -103,8 +103,11 @@ data:
         - agent_sandbox
         - platforms/matrix
         - platforms/whatsapp
-        - memory/hindsight
         - observability/langfuse
+    # The external memory provider is selected by `memory.provider` below
+    # (Hermes loads plugins.memory.load_memory_provider from that key); it is
+    # NOT a plugins.enabled entry. The bank id and the bearer key arrive per
+    # profile from the pod env / the profile's .env.
     memory:
       memory_enabled: true
       user_profile_enabled: true
@@ -184,8 +187,11 @@ data:
       enabled:
         - agent_sandbox
         - platforms/matrix
-        - memory/hindsight
         - observability/langfuse
+    # The external memory provider is selected by `memory.provider` below
+    # (Hermes loads plugins.memory.load_memory_provider from that key); it is
+    # NOT a plugins.enabled entry. The bank id and the bearer key arrive per
+    # profile from the pod env / the profile's .env.
     memory:
       memory_enabled: true
       user_profile_enabled: true
@@ -240,8 +246,11 @@ data:
     plugins:
       enabled:
         - platforms/matrix
-        - memory/hindsight
         - observability/langfuse
+    # The external memory provider is selected by `memory.provider` below
+    # (Hermes loads plugins.memory.load_memory_provider from that key); it is
+    # NOT a plugins.enabled entry. The bank id and the bearer key arrive per
+    # profile from the pod env / the profile's .env.
     memory:
       memory_enabled: true
       user_profile_enabled: true

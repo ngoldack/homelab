@@ -97,7 +97,15 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+          # Prefer the manifest-export line buildkit prints. The naive last-digest
+          # scan is only a fallback - a build that exports a registry cache writes
+          # the CACHE manifest last, and pinning that yields a pod that cannot start.
+          DIGEST=$(grep -oE ''exporting manifest sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1 | grep -oE ''sha256:[a-f0-9]{64}'');
+          [ -n "$DIGEST" ] || DIGEST=$(grep -oE ''pushing manifest for [^ ]+@sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1 | grep -oE ''sha256:[a-f0-9]{64}'');
+          if [ -z "$DIGEST" ]; then
+            echo "WARN - no manifest line in the build log, falling back to the last digest";
+            DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+          fi;
 
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
 

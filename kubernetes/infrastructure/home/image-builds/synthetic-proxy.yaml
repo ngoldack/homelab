@@ -1,0 +1,96 @@
+# Build + push the synthetic-proxy image — the Go reverse proxy that fronts
+# api.synthetic.new for the agentgateway data plane (sources:
+# image-builds/synthetic-proxy/go/, entrypoint cmd/synthetic-proxy).
+#
+# BUILD SHAPE — identical to hermes-egress-authorizer.yaml and
+# llama-kv-broker.yaml: the context is THIS REPO at the pinned commit and the
+# Dockerfile is fetched from that tree by repo-relative path:
+# `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
+# and the Dockerfile's COPY sources are repo-root-relative.
+#
+# CONTEXT SHA — 298cebf is the commit whose tree carries the Go sources
+# (image-builds/synthetic-proxy/go/, incl. go.mod + cmd/synthetic-proxy) and the
+# Dockerfile, including the CodeQL-driven fix that removed the ResponseWriter
+# wrapper. Rebuilt from it so the deployed digest matches the merged source. The context SHA, the --output tag and the Job name
+# suffix travel together (Jobs are immutable): to rebuild, bump all three.
+#
+# WHY NO cosign/trivy pipeline (unlike hermes-egress-authorizer.yaml): that
+# pipeline exists to satisfy the hermes egress supply-chain lane. This proxy is
+# an internal, cluster-only component with no equivalent signing policy, so the
+# Job stays minimal — buildctl build+push, then print the digest to pin in
+# agentgateway/synthetic-proxy.yaml.
+#
+# DIGEST SOURCE — the pin is read from the image's own
+# `pushing manifest for <tag>@sha256:…` line, NOT the last sha256 in the log:
+# that last one is the cache-export manifest, which is a DIFFERENT digest (the
+# s1 build printed the wrong one, hence the s2 suffix).
+#
+# WHY no Zot repository pre-create: BuildKit/Zot create the repository on the
+# first push, so this Job only builds and pushes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-synthetic-proxy-s3
+  namespace: buildkit
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 2700
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        topology.homelab/site: home
+      containers:
+      - name: buildctl
+        image: moby/buildkit:v0.31.0
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - 'set -euo pipefail &&
+
+          echo "== buildctl build+push ==" &&
+
+          set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
+          ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#298cebf12fa95cca03b6cd37a20f67dd99d1b240''
+          ''--opt=filename=kubernetes/infrastructure/home/image-builds/synthetic-proxy/Dockerfile''
+          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-298cebf,push=true''
+          ''--export-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache,mode=max''
+          ''--import-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache''
+          ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
+
+          cat /tmp/build.log;
+
+          test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
+
+          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-298cebf;
+          DIGEST=$(grep -oE "pushing manifest for $IMAGE@sha256:[a-f0-9]{64}" /tmp/build.log | grep -oE ''sha256:[a-f0-9]{64}'' | tail -1);
+
+          test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+
+          echo "DIGEST=$DIGEST";
+
+          echo "PIN: registry.ngoldack.de/synthetic-proxy@$DIGEST"
+
+          '
+        env:
+        - name: DOCKER_CONFIG
+          value: /docker
+        volumeMounts:
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+        - name: docker
+          mountPath: /docker
+          readOnly: true
+      volumes:
+      - name: certs
+        secret:
+          secretName: buildctl-client-tls
+      - name: docker
+        secret:
+          secretName: registry-credentials
+          items:
+          - key: .dockerconfigjson
+            path: config.json

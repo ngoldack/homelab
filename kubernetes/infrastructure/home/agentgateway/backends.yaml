@@ -90,15 +90,13 @@ spec:
       - providers:
           - name: synthetic
             openai: {}
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             policies:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
 
 ---
 # Per-tier Synthetic paths. Each of these is one of chat-chain's priority
@@ -118,8 +116,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-small
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: syn:small:text
@@ -127,8 +125,6 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -140,8 +136,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-large
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: syn:large:text
@@ -149,8 +145,6 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -162,8 +156,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-hf-deepseek
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: hf:deepseek-ai/DeepSeek-V4.1-Flash
@@ -171,8 +165,6 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -184,8 +176,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-hf-openai-gpt-oss-120b
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: hf:openai/gpt-oss-120b
@@ -193,5 +185,3 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new

@@ -23,8 +23,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-small
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: syn:small:text
@@ -32,12 +32,10 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
       - providers:
           - name: synthetic-large
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: syn:large:text
@@ -45,12 +43,10 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
       - providers:
           - name: synthetic-hf-deepseek
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: hf:deepseek-ai/DeepSeek-V4.1-Flash
@@ -58,8 +54,6 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
       - providers:
           - name: openrouter-flash
             host: openrouter.ai

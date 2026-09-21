@@ -48,6 +48,7 @@ resources:
   - agent-chains.yaml
   - policy-agent-chains-health.yaml
   - httproute-key.yaml
+  - synthetic-proxy.yaml
   - policy-apikey.yaml
   - httproute-key-edge.yaml
   - policy-retry-edge.yaml

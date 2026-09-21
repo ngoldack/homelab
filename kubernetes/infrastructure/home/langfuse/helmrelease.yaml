@@ -219,9 +219,21 @@ spec:
       # all-in-one-pvc.yaml reads those keys) — NOT s3.dataStorage, which no
       # template consumes (the earlier dataStorage block was silently ignored,
       # so the PVC rendered with storageClass "" and never bound, leaving the
-      # s3 pod Pending on "persistentvolumeclaim not found"). truenas-fast-nfs
-      # + a modest size (the chart default is 50Gi — overkill for a homelab).
+      # s3 pod Pending on "persistentvolumeclaim not found"). truenas-fast-nfs.
+      #
+      # 50Gi, NOT the 10Gi this started at: the volume server runs with
+      # `-volume.max=0` (auto) and `-master.volumeSizeLimitMB=1000`, i.e. it
+      # sizes itself to the PVC — auto-max = free space / 1 GiB — and the
+      # langfuse collection's capacity is therefore bounded by this PVC.
+      # At 10Gi that ceiling arrived on 2026-09-19: all seven langfuse volumes
+      # reached the 1 GiB limit, the server hit Max=14/Free=0 and could not
+      # allocate another, every S3 PUT returned 500 ("No writable volumes"),
+      # langfuse-web could no longer persist the OTLP JSON (crash-looping on
+      # exit 134) and the agentgateway OTel collector started timing out —
+      # LLM traces stopped, with no error anywhere on the agentgateway side.
+      # The ZFS pool compresses these JSON payloads heavily (7.35 GiB logical
+      # cost ~1.4 GiB allocated), so the quota is headroom, not real footprint.
       allInOne:
         data:
-          size: 10Gi
+          size: 50Gi
           storageClass: truenas-fast-nfs

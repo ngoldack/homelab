@@ -13,9 +13,14 @@ type Verdict int
 const (
 	// VerdictHealthy: quota remains and Synthetic is reachable -> forward.
 	VerdictHealthy Verdict = iota
-	// VerdictQuotaExhausted: positive evidence the key is rate-limited or out
-	// of quota -> answer 429 so the gateway evicts Synthetic and fails over.
+	// VerdictQuotaExhausted: positive evidence the key is out of quota ->
+	// answer 429 with the subscription-limits body.
 	VerdictQuotaExhausted
+	// VerdictRateLimited: Synthetic itself answered a rate-limit 429 (one with
+	// no Retry-After) -> hold this key off locally and answer 429, so Synthetic
+	// is not poked again while it recovers. This is the verdict that lets the
+	// gateway's own eviction be short.
+	VerdictRateLimited
 	// VerdictUnhealthy: Synthetic is unreachable -> answer 503 (also evicts).
 	VerdictUnhealthy
 )
@@ -26,6 +31,8 @@ func (v Verdict) String() string {
 		return "healthy"
 	case VerdictQuotaExhausted:
 		return "quota_exhausted"
+	case VerdictRateLimited:
+		return "rate_limited"
 	case VerdictUnhealthy:
 		return "unhealthy"
 	default:
@@ -63,7 +70,7 @@ func HashAuth(header string) string {
 }
 
 // Store is a concurrency-safe, bounded, hash-keyed state map. The handler and
-// the background poller both touch it, so every method locks.
+// the readiness path both touch it, so every method locks.
 type Store struct {
 	mu   sync.Mutex
 	cap  int
@@ -105,7 +112,7 @@ func (s *Store) Delete(kh string) {
 	delete(s.data, kh)
 }
 
-// Keys returns a snapshot of the currently tracked key hashes (for the poller).
+// Keys returns a snapshot of the currently tracked key hashes.
 func (s *Store) Keys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

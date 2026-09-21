@@ -81,6 +81,12 @@ func NewProxy(cfg Config) *Proxy {
 		MaxIdleConnsPerHost: 16,
 		IdleConnTimeout:     90 * time.Second,
 		ForceAttemptHTTP2:   true,
+		// Time-to-FIRST-BYTE only. Without this, an upstream that accepts the
+		// connection and then never answers hangs the request forever: the
+		// gateway would hold a retry slot with no status code to retry on, and
+		// the client would wait indefinitely. It does not bound the body, so a
+		// long SSE completion still streams for as long as it needs.
+		ResponseHeaderTimeout: cfg.UpstreamHeaderTimeout,
 	}
 
 	p := &Proxy{

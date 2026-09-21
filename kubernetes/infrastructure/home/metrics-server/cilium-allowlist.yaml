@@ -5,10 +5,15 @@
 #   1. INBOUND — the Kubernetes API server routes /apis/metrics.k8s.io/* to
 #      this release's APIService (apiService.create: true). Clients
 #      (Headlamp, autoscalers) never reach metrics-server directly; they call
-#      the apiserver, which proxies to metrics-server:443. So ingress is
-#      scopeable to the apiserver entity (+ control-plane VIP + the in-cluster
-#      Service CIDR address the apiserver actually targets, the same three
-#      addressing forms every API-client CNP in this repo uses).
+#      the apiserver, which proxies to metrics-server:443. On Talos the
+#      apiserver is a hostNetwork static pod, so that aggregation connection
+#      arrives with the host/remote-node identity — NOT the `kube-apiserver`
+#      entity, which Cilium only assigns once it resolves the apiserver as a
+#      Service endpoint. Verified live (2026-09-21): every aggregation attempt
+#      was logged as `drop (Policy denied) identity remote-node->… :10250 tcp
+#      SYN`, which held the APIService at FailedDiscoveryCheck while the pod
+#      itself was Ready and scraping normally. The entity + control-plane VIP +
+#      Service-CIDR forms below stay for this repo's other API-client clients.
 #   2. OUTBOUND — metrics-server reads per-node container resource stats from
 #      each kubelet via the node-status port. Traffic to kubelets is the
 #      apiserver's proxy path; metrics-server resolves nodes through the API
@@ -29,6 +34,17 @@ spec:
     # 1. The API server proxying metrics.k8s.io to this APIService.
     - fromEntities:
         - kube-apiserver
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+            - {port: "10250", protocol: TCP}
+    # The apiserver's REAL path (see the header note): a hostNetwork static pod
+    # whose traffic carries the host/remote-node identity — exactly the pair the
+    # registry, authentik and operator namespaces allow for node-originated
+    # traffic. The `kube-apiserver` entity above never matches on Talos.
+    - fromEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}

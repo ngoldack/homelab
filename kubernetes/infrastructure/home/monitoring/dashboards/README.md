@@ -64,10 +64,16 @@ Sources, all pinned:
                         there: synthetic_proxy_probes_total does not exist
                         until the reachability probe runs (it fires only when
                         the quota endpoint call fails), so that panel is
-                        empty in steady state by design; and the
-                        verdict="quota_exhausted"/"rate_limited" and code="429"
-                        series appear only once the proxy has seen such an
-                        answer, so they can be absent rather than zero.
+                        empty in steady state by design. The
+                        synthetic_proxy_upstream_429_total family (panel
+                        "Upstream 429s by reason") separates Synthetic's three
+                        429 conditions -- quota_exhausted, rate_limited (the
+                        generic state that only clears after a long no-poke
+                        window) and parallel_limit (per-model concurrency,
+                        passed through rather than failed over) -- and each
+                        reason series appears only once that flavour has
+                        occurred, so an absent line means "never happened"
+                        rather than zero.
   survivability.json    hand-authored (no official dashboard), uid
                         homelab-survivability, schemaVersion 39 — the cluster
                         survivability set: backup ages (talos-backup etcd

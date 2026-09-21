@@ -66,6 +66,19 @@ func TestClassify429(t *testing.T) {
 			wantReason: reasonRateLimited, wantFailover: true,
 		},
 		{
+			name: "the concurrency 429 with NO Retry-After (measured live)",
+			// The exact body the live proxy captured from Synthetic on
+			// 2026-09-21, with no Retry-After. This is the case that parked
+			// hindsight's queue for an hour at a time.
+			body:       `{"error":"Too many concurrent requests"}`,
+			wantReason: reasonParallelLimit, wantFailover: false,
+		},
+		{
+			name:       "concurrency wording, case-insensitive",
+			body:       `{"error":"Too Many Concurrent Requests"}`,
+			wantReason: reasonParallelLimit, wantFailover: false,
+		},
+		{
 			name:       "Retry-After outranks the body",
 			body:       `{"error":"You've exceeded your subscription rate limits"}`,
 			retryAfter: "5",

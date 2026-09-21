@@ -159,9 +159,10 @@ const (
 	// a long window with NO new request (the one that stayed 429 for 8h+ while
 	// it kept being poked). Fails over.
 	reasonRateLimited = "rate_limited"
-	// reasonParallelLimit: per-model concurrency ("max 4 parallel requests per
-	// model"). Transient — it clears as in-flight calls finish — and the ONLY
-	// flavour that carries Retry-After, so it must NOT fail over.
+	// reasonParallelLimit: per-model concurrency. Transient — it clears as
+	// in-flight calls finish — so it must NOT fail over. Identified by
+	// Retry-After when present, and by the body when not (measured: the
+	// concurrency 429 can arrive with no Retry-After at all).
 	reasonParallelLimit = "parallel_limit"
 )
 
@@ -190,24 +191,49 @@ func peekBody(resp *http.Response, n int) []byte {
 	return prefix
 }
 
+// concurrencyMarkers are the wordings Synthetic uses for its per-model
+// concurrency limit. Lower-cased, matched against a lower-cased body prefix.
+//
+// WHY this list exists rather than trusting the header: the limit was believed
+// to be identifiable by Retry-After (the only flavour that sends one). Measured
+// live 2026-09-21 with DEBUG_ERRORS, that is wrong — the concurrency 429 arrives
+// with NO Retry-After and this body:
+//
+//	{"error":"Too many concurrent requests"}
+//
+// which the header-only rule therefore read as the generic rate limit. The cost
+// was not theoretical: hindsight's fan-out (~59 concurrent calls) hit the
+// concurrency limit, the proxy held the key off for the full failover window on
+// a condition that clears as in-flight calls finish, and the queue sat on the
+// fallback leg for an hour at a time.
+var concurrencyMarkers = [][]byte{
+	[]byte("too many concurrent requests"),
+	[]byte("max 4 parallel requests per model"),
+}
+
 // classify429 names which of the three flavours this 429 is, and whether it is
 // fail-over-worthy.
 //
-// parallel_limit is identified by the Retry-After header alone: operator-
-// verified that it is the only flavour that sends one. The other two are
-// separated by their bodies (Synthetic's own wording), which is why this is the
-// only place the proxy reads a body — and peekBody puts the prefix back, so a
-// passed-through parallel_limit reaches the client byte-identical.
+// Two discriminators, because neither alone suffices: the concurrency flavour
+// may carry Retry-After (operator-verified) OR may not (measured), so the body
+// has to be able to recognise it too. That is why this is the only place the
+// proxy reads a body — and peekBody puts the prefix back, so a passed-through
+// concurrency 429 reaches the client byte-identical.
 //
-// The default for an unrecognised failover-worthy 429 is rate_limited, i.e.
-// anything that is not positively the quota text still fails over. Being wrong
-// in that direction costs one failover; the other direction serves a 429 to the
-// client.
+// The default for an unrecognised 429 is rate_limited, i.e. it still fails over.
+// Being wrong in that direction costs one failover; the other direction serves a
+// 429 to the client.
 func classify429(resp *http.Response) (reason string, failover bool) {
 	if resp.Header.Get("Retry-After") != "" {
 		return reasonParallelLimit, false
 	}
 	prefix := peekBody(resp, bodyPeekBytes)
+	lower := bytes.ToLower(prefix)
+	for _, marker := range concurrencyMarkers {
+		if bytes.Contains(lower, marker) {
+			return reasonParallelLimit, false
+		}
+	}
 	if bytes.Contains(prefix, []byte("exceeded your subscription rate limits")) {
 		return reasonQuotaExhausted, true
 	}

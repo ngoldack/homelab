@@ -8,9 +8,27 @@
 # `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
 # and the Dockerfile's COPY sources are repo-root-relative.
 #
-# CONTEXT SHA — 1bfd1c0 carries the failover-rule migration (applyFailoverRule,
-# VerdictRateLimited) on top of the metrics work. The context SHA, the --output tag and the Job name
+# CONTEXT SHA — 7ccb99f carries DisableKeepAlives (one egress per request through
+# the vpn-egress pool) on top of the failover-rule migration (applyFailoverRule,
+# VerdictRateLimited). The context SHA, the --output tag and the Job name
 # suffix travel together (Jobs are immutable): to rebuild, bump all three.
+#
+# WHY THE CONTEXT SHA — NOT "was this edit only a comment?" — IS WHAT KEEPS THE
+# PIN REPRODUCIBLE: Go embeds a build ID derived from the source content, so even
+# a comment-only edit yields a different binary. Measured 2026-09-21: two builds
+# of the same program differing only in a comment hash differently, with
+# `-trimpath -ldflags="-s -w"` applied. A pinned digest therefore only
+# reproduces from the exact revision recorded here, which is why a docs-only
+# source change still moves this SHA (the commit `76f9ae6` reasoning — "the
+# compiled binary is unchanged" — is not sound).
+#
+# WHY s11 AND NOT s9: the suffix only has to be unique among the Jobs that
+# actually exist in the cluster, because a Job spec is immutable and Flux fails
+# the whole Kustomization on a colliding name. Two newer suffixes are already
+# taken there by an in-flight branch (s9 and s10, both built from
+# feat/proxy-debug-error-logs and applied by hand), so this change steps past
+# them rather than colliding. If that branch lands its own rebuild, it will need
+# the same treatment in reverse.
 #
 # WHY NO cosign/trivy pipeline (unlike hermes-egress-authorizer.yaml): that
 # pipeline exists to satisfy the hermes egress supply-chain lane. This proxy is
@@ -28,7 +46,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-synthetic-proxy-s8
+  name: build-synthetic-proxy-s11
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -51,9 +69,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#545e57657bba83098d1a9af5e773e88a8ef8614f''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#7ccb99f2a1a75e43368b9423b731a1d37a8aadd0''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/synthetic-proxy/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-545e576,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/synthetic-proxy:0.1.0-7ccb99f,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/synthetic-proxy:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -62,7 +80,7 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-545e576;
+          IMAGE=registry.ngoldack.de/synthetic-proxy:0.1.0-7ccb99f;
           DIGEST=$(grep -oE "pushing manifest for $IMAGE@sha256:[a-f0-9]{64}" /tmp/build.log | grep -oE ''sha256:[a-f0-9]{64}'' | tail -1);
 
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };

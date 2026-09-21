@@ -20,8 +20,8 @@ spec:
     groups:
       - providers:
           - name: synthetic-gpt-oss
-            host: api.synthetic.new
-            port: 443
+            host: synthetic-proxy.agentgateway.svc.cluster.local
+            port: 8080
             path: /v1/chat/completions
             openai:
               model: hf:openai/gpt-oss-120b
@@ -29,8 +29,6 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-              tls:
-                sni: api.synthetic.new
       - providers:
           - name: openrouter-gpt-oss
             host: openrouter.ai

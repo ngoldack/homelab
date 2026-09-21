@@ -28,7 +28,14 @@ spec:
       secret:
         name: hindsight-database-credentials
   storage:
-    size: 10Gi
+    # 10Gi -> 40Gi (2026-09-21) headroom for the 300-repo bulk ingest. The
+    # logical DB was already 14 GB (trace/audit churn that the new retention
+    # window + tracing-off cut back), and the ingest adds documents, facts,
+    # links and vectors in the thousands-to-tens-of-thousands. allowVolume-
+    # Expansion=true on truenas-fast-nfs-hindsight-database, so this resizes
+    # in place; ZFS compression (measured 43% of nominal for this dataset)
+    # gives further headroom on top.
+    size: 40Gi
     storageClass: truenas-fast-nfs-hindsight-database
   resources:
     requests:
@@ -37,9 +44,22 @@ spec:
       # schedulable and leaves headroom for the vector build without starving
       # other home workloads (requests are what the scheduler guarantees).
       cpu: 500m
-      memory: 512Mi
-    limits:
+      # 512Mi -> 2Gi (2026-09-21). Two reasons: CNPG derives shared_buffers from
+      # the memory REQUEST when no explicit value is set (25% of it — which is
+      # exactly why shared_buffers was sitting at the 128 MB default), and its
+      # admission webhook rejects a request smaller than an explicit
+      # `shared_buffers` ("Memory request is lower than PostgreSQL
+      # shared_buffers value"), so the 2 GB below requires a 2Gi request.
+      # Scheduling cost is one reserved gigabyte on a home node at ~39% memory.
       memory: 2Gi
+    limits:
+      # 2Gi -> 6Gi (2026-09-21): shared_buffers is raised to 2 GB below and that
+      # memory is resident in the postmaster, so a 2Gi cap would OOM on the new
+      # setting. 6Gi covers 2 GB shared_buffers + work_mem/maintenance_work_mem
+      # + the pooler-capped connection set, and is a ceiling rather than a
+      # reservation (the pod was measured at ~0.4 GiB RSS; the home node is at
+      # ~39% memory).
+      memory: 6Gi
   postgresql:
     parameters:
       # Force a WAL segment switch every 60s so archived WAL trails the
@@ -55,6 +75,42 @@ spec:
       # memory limit's headroom for this workload (idle conns are ~1-2MB
       # each, plus shared_buffers).
       max_connections: "200"
+      # ---- bulk-ingest tuning (2026-09-21) -------------------------------
+      # Measured baseline for this volume: NFS uncached reads 229 MB/s, 4 KiB
+      # SYNC writes ~9.5 ms each, PG cache hit 95.3% on the 128 MB default
+      # shared_buffers. The 300-repo deepen writes documents/facts/links/
+      # vectors continuously, so give the postmaster real cache and make
+      # checkpoints cheaper:
+      # * 128 MB (CNPG default off the 512Mi request) -> 2 GB: the working set
+      #   is far past what 128 MB holds, so every random read was a 0.7 ms NFS
+      #   round trip. Explicit value overrides CNPG's derivation.
+      shared_buffers: "2GB"
+      # Planner hint only; ~2 GB shared_buffers + the NFS client's page cache.
+      effective_cache_size: "6GB"
+      # 1 GB -> 4 GB with a longer checkpoint interval: fewer checkpoints means
+      # fewer full-page writes (full_page_writes=on) pushed over NFS, at the
+      # cost of a longer crash-recovery replay. 4 GB of WAL is still a short
+      # replay on this hardware.
+      max_wal_size: "4GB"
+      min_wal_size: "1GB"
+      checkpoint_timeout: "15min"
+      # pgvector HNSW index builds and autovacuum sorts are the memory-hungry
+      # ingest operations; the 64 MB default forces them to spill.
+      maintenance_work_mem: "512MB"
+      # 4 MB -> 16 MB. Kept modest on purpose: the pooler caps server
+      # connections at 40/pod, but work_mem is per sort/hash node, so this
+      # stays well inside the 6Gi limit.
+      work_mem: "16MB"
+      # LZ4 WAL compression: the archive is shipped to Hetzner S3 and the WAL
+      # itself is written over NFS, so trading a little CPU for fewer bytes is
+      # the right direction here (full-page writes make WAL the bulk of it).
+      wal_compression: "lz4"
+      # Deliberately NOT changed: synchronous_commit stays the default `on`.
+      # Turning it off would shave the ~9.5 ms/commit fsync, but this pipeline
+      # is LLM-latency-bound (multi-second calls per retain), so the win is
+      # marginal — while a crash would lose the last commits and a multi-
+      # transaction retain could then be re-processed and duplicate facts.
+      # Flip this one line only if commit latency ever becomes the bottleneck.
   # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
   # (objectstore.yaml) owns destination/retention; this reference enables
   # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-

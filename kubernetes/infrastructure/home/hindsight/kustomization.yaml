@@ -7,6 +7,7 @@ resources:
   - postgres-credentials.sops.yaml
   - hindsight-backup-s3-credentials.sops.yaml
   - postgres.yaml
+  - pooler.yaml
   - database.yaml
   - objectstore.yaml
   - scheduled-backup.yaml

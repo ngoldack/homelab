@@ -28,3 +28,18 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/component: worker
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: hindsight-pooler
+  namespace: hindsight
+spec:
+  endpoints:
+    # PgBouncer exporter on 9127 (cnpg_pgbouncer_* : pools, lists, stats).
+    # This is the surface that tells us whether the pooler is the new
+    # bottleneck (cl_waiting / maxwait climbing) or the server pool is idle.
+    - port: pgbouncer
+  selector:
+    matchLabels:
+      cnpg.io/poolerName: hindsight-pooler-rw

@@ -23,17 +23,21 @@ spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
       # Co-locate the four agent pods on one node: the Kanban board is a single
-      # SQLite file on the shared volume (with `database.journal_mode: delete`,
-      # the NFS-safe mode) and every writer — the dispatcher and the workers it
-      # spawns — must be on the same NFS client. Cross-node SQLite writers are
-      # exactly what this avoids.
+      # SQLite file on the shared volume and keeping every writer (the dispatcher
+      # and the workers it spawns) on one NFS client is what keeps SQLite happy.
+      # PREFERRED, not required: a required rule with a self-matching label
+      # selector deadlocks the first pod (nothing is running yet, so nothing can
+      # schedule). Best-effort co-location is enough because the profiles run
+      # SQLite in `database.journal_mode: delete`, the NFS-safe mode.
       affinity:
         podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  app.kubernetes.io/name: hermes-agents
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: hermes-agents
       securityContext:
         runAsNonRoot: true
         runAsUser: 10000
@@ -247,17 +251,18 @@ spec:
               mountPath: /opt/relay
               readOnly: true
       initContainers:
-        # Profile seeder. Three things land in $HERMES_HOME (= the profile dir):
-        #   config.yaml + SOUL.md  — revision-aware (config-rev), the profile's
+        # Profile seeder. For ALL FOUR profiles it writes, under
+        # /opt/data/profiles/<name>/:
+        #   config.yaml + SOUL.md  — revision-aware (config-rev): the profile's
         #                            config and its identity file (Hermes loads
         #                            $HERMES_HOME/SOUL.md as identity slot #1).
-        #   .env                   — rewritten whenever it changes, so a process
-        #                            started under THIS profile (including a
-        #                            Kanban worker spawned by the orchestrator in
-        #                            another pod) gets the profile's LLM key,
-        #                            sandbox plumbing and memory bank/tenant key.
-        #                            Messaging credentials deliberately stay out of
-        #                            it: only the owning pod's env carries them.
+        #   .env                   — rewritten whenever it changes: the headless
+        #                            worker env (LLM key, sandbox plumbing,
+        #                            memory bank + tenant key). Messaging
+        #                            credentials deliberately stay out of it; only
+        #                            the owning pod's env carries those.
+        # All four exist everywhere because a Kanban worker may be spawned by the
+        # orchestrator on any pod and resolves its home as <root>/profiles/<assignee>.
         - name: seed-profile
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
           command: ["/bin/sh", "-c"]
@@ -308,16 +313,24 @@ spec:
               ROUTER_URL='http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080'
               umask 077
               mkdir -p /opt/data/kanban
-              # 1. the profile this pod runs
-              dir=/opt/data/profiles/chad
-              mkdir -p "$dir"
-              rev="$HERMES_CONFIG_REV"
-              if [ "$(cat "$dir/.config-rev" 2>/dev/null || true)" != "$rev" ]; then
-                [ -f "$dir/config.yaml" ] && cp "$dir/config.yaml" "$dir/config.yaml.bak"
-                cp /opt/boot/config.yaml "$dir/config.yaml"
-                cp /opt/boot/SOUL.md "$dir/SOUL.md"
-                printf '%s\n' "$rev" > "$dir/.config-rev"
-              fi
+              # 1. every profile's config.yaml + SOUL.md, on EVERY pod: the
+              #    orchestrator spawns each task's worker locally and the worker
+              #    resolves its config from <root>/profiles/<assignee>, so all
+              #    four profiles must exist wherever a worker can be started.
+              seed_profile() {
+                p="$1"; d="/opt/data/profiles/$p"; mkdir -p "$d"
+                rev="$HERMES_CONFIG_REV"
+                if [ "$(cat "$d/.config-rev" 2>/dev/null || true)" != "$rev" ]; then
+                  [ -f "$d/config.yaml" ] && cp "$d/config.yaml" "$d/config.yaml.bak"
+                  cp "/opt/boot/$p.yaml" "$d/config.yaml"
+                  cp "/opt/boot/$p.soul.md" "$d/SOUL.md"
+                  printf '%s\n' "$rev" > "$d/.config-rev"
+                fi
+              }
+              seed_profile orchestrator
+              seed_profile dave
+              seed_profile chad
+              seed_profile lindner
               write_env() {
                 p="$1"; bank="$2"; hkey="$3"; sandbox="$4"
                 d="/opt/data/profiles/$p"; mkdir -p "$d"
@@ -379,10 +392,22 @@ spec:
           configMap:
             name: hermes-agents-config
             items:
+              - key: orchestrator.yaml
+                path: orchestrator.yaml
+              - key: orchestrator.soul.md
+                path: orchestrator.soul.md
+              - key: dave.yaml
+                path: dave.yaml
+              - key: dave.soul.md
+                path: dave.soul.md
               - key: chad.yaml
-                path: config.yaml
+                path: chad.yaml
               - key: chad.soul.md
-                path: SOUL.md
+                path: chad.soul.md
+              - key: lindner.yaml
+                path: lindner.yaml
+              - key: lindner.soul.md
+                path: lindner.soul.md
         - name: router-token
           secret:
             secretName: hermes-secret

@@ -67,6 +67,10 @@ resources:
   - agent-sandbox.yaml
   - hermes-sandbox.yaml
   - hermes.yaml
+  # Multi-agent Hermes expansion (the Kanban orchestrator + dave/chad/lindner
+  # Matrix agents): shares the hermes namespace, ServiceAccount and hermes
+  # secret; depends on hermes + matrix + hindsight + the sandbox stack.
+  - hermes-agents.yaml
   # Hermes egress guard: Envoy forward proxy + authorizer + reaper mediating
   # sandbox internet access (CRD-free raw manifests; depends on the sandbox
   # namespace it polices and the Kyverno policies enforcing quarantine).

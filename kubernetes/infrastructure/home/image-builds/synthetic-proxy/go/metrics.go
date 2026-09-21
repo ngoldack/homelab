@@ -28,6 +28,7 @@ type Metrics struct {
 	responses map[string]uint64 // upstream status code -> count
 	quota     map[string]uint64 // quota-check result -> count
 	probes    map[string]uint64 // probe result -> count
+	r429      map[string]uint64 // upstream 429 reason -> count
 	durSum    float64
 	durCount  uint64
 	durBucket []uint64 // aligned with durationBuckets
@@ -45,6 +46,7 @@ func NewMetrics(upstream string) *Metrics {
 		responses: map[string]uint64{},
 		quota:     map[string]uint64{},
 		probes:    map[string]uint64{},
+		r429:      map[string]uint64{},
 		durBucket: make([]uint64, len(durationBuckets)),
 	}
 }
@@ -77,6 +79,16 @@ func (m *Metrics) IncProbe(result string) {
 	m.mu.Unlock()
 }
 
+// Inc429 counts one upstream 429 by its reason: quota_exhausted,
+// rate_limited or parallel_limit. These are three different conditions with
+// three different correct responses, so they must never be collapsed into one
+// counter.
+func (m *Metrics) Inc429(reason string) {
+	m.mu.Lock()
+	m.r429[reason]++
+	m.mu.Unlock()
+}
+
 // ObserveDuration records one request's wall time into the histogram.
 func (m *Metrics) ObserveDuration(seconds float64) {
 	m.mu.Lock()
@@ -100,6 +112,7 @@ func (m *Metrics) Write(w io.Writer, keysTracked int) {
 	responses := cloneCounts(m.responses)
 	quota := cloneCounts(m.quota)
 	probes := cloneCounts(m.probes)
+	r429 := cloneCounts(m.r429)
 	durSum := m.durSum
 	durCount := m.durCount
 	buckets := append([]uint64(nil), m.durBucket...)
@@ -128,6 +141,10 @@ func (m *Metrics) Write(w io.Writer, keysTracked int) {
 	fmt.Fprintf(w, "# HELP synthetic_proxy_probes_total Calls to the upstream reachability probe, by result.\n")
 	fmt.Fprintf(w, "# TYPE synthetic_proxy_probes_total counter\n")
 	writeLabeled(w, "synthetic_proxy_probes_total", "result", probes)
+
+	fmt.Fprintf(w, "# HELP synthetic_proxy_upstream_429_total Upstream 429 responses by reason. quota_exhausted = the subscription allowance is spent; rate_limited = the generic state that only clears after a long no-poke window; parallel_limit = per-model concurrency (transient, passed through rather than failed over).\n")
+	fmt.Fprintf(w, "# TYPE synthetic_proxy_upstream_429_total counter\n")
+	writeLabeled(w, "synthetic_proxy_upstream_429_total", "reason", r429)
 
 	fmt.Fprintf(w, "# HELP synthetic_proxy_request_duration_seconds Request wall time, including the forwarded (possibly streaming) response.\n")
 	fmt.Fprintf(w, "# TYPE synthetic_proxy_request_duration_seconds histogram\n")

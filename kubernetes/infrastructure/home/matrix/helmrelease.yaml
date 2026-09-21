@@ -1,0 +1,235 @@
+# Matrix (ESS) — the self-hosted Matrix homeserver via the Element Server
+# Suite Community (matrix-stack) chart 26.9.2. Runs Synapse (homeserver) +
+# Matrix Authentication Service (MAS, OIDC to Authentik) + Element Web (chat
+# UI), all on the in-cluster CNPG operator for Postgres and the edge Gateway
+# for routing — NOT the chart's bundled Postgres / bundled Ingress.
+#
+# Design decisions (each verified against the 26.9.2 values.yaml + templates):
+#  - ONE chart, three components: Synapse + MAS + Element Web. Element Admin,
+#    Matrix RTC (LiveKit/TURN), the bundled Postgres, and Hookshot are all
+#    hard-disabled via enabled: false — this deployment needs none of them and
+#    the chart's defaults enable Admin/RTC/bundled-PG.
+#  - The chart CANNOT stop rendering `kind: Ingress` CRs (one per enabled
+#    component that sets ingress.host; there is no ingress.enabled key). This
+#    cluster routes via Gateway API HTTPRoute + the edge Gateway, so those
+#    Ingress CRs are inert orphans — left unrouted (no controller claims
+#    them, default-deny drops traffic) while httproutes-edge.yaml provides
+#    the real routing. This is the documented pragmatic fit, not a fork.
+#    TLS/ingress details live in the HTTPRoutes, not here.
+#  - Routing is EDGE-ONLY (httproutes-edge.yaml on the `edge` Gateway): all
+#    three hosts are internet-reachable, which is the repo pattern for public
+#    apps (hermes, librechat, headlamp). Attaching a host to BOTH the
+#    `public` and `edge` Gateways would give it two external-dns writers
+#    (instance #1 filters on dns.ngoldack.de/publish=lan, instance #2 has no
+#    filter) and they would fight over the same A record.
+#  - ServiceMonitors are OFF for every enabled component (synapse, haproxy,
+#    matrixAuthenticationService): the chart renders prometheus-operator
+#    ServiceMonitors (monitoring.coreos.com/v1) when the CRD is present, and
+#    this cluster does NOT install it — the monitoring stack is
+#    VictoriaMetrics, whose operator uses its own VMServiceScrape kind (the
+#    same situation as immich/helmrelease.yaml). The chart happens to gate the
+#    render on Capabilities.APIVersions.Has, so on a cluster without the CRD
+#    it would emit nothing anyway; setting enabled: false explicitly is what
+#    keeps that true on ANY cluster (a future prometheus-operator install
+#    must not silently start shipping ServiceMonitors nobody scrapes) and
+#    keeps the intent visible in git. Verify with
+#    hack/validate-matrix-render.sh, which advertises the CRD on purpose.
+#  - Postgres: external, 2 separate CNPG databases on ONE cluster — `synapse`
+#    and `matrix_authentication_service` (chart validation forbids sharing a
+#    DB). Each component's postgres block points at its own CNPG role/db and
+#    its password comes from the SAME CNPG basic-auth Secret the Cluster CR
+#    provisions (matrix-database-credentials / matrix-authentication-service
+#    -role, key "password"), so there is no second copy of the password and
+#    no drift (the ESQ chart's check-credential accepts secret+secretKey).
+#  - MAS upstream OIDC (Authentik) is injected as SECRET-BACKED additional
+#    config (matrixAuthenticationService.additional.<k>.configSecret +
+#    configSecretKey) — the mas-config.yaml fragment with the upstream
+#    provider lives in a Secret, not in helm values (R2).
+#  - Public registration is DISABLED (synapse.additional config) — the only
+#    accounts are the operator's (seat at Element Web) and the three Hermes
+#    bots, provisioned via MAS admin/registration-shared-secret.
+#
+# serverName is PERMANENT (cannot change after first sync): matrix.ngoldack.de.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: matrix
+  namespace: flux-system
+spec:
+  interval: 1h
+  # ESS pulls several large images (Synapse, Element Web) on first sync; a
+  # tight budget here caused boot races in hindsight — 20m covers it.
+  timeout: 20m
+  chart:
+    spec:
+      chart: matrix-stack
+      version: "26.9.2"
+      sourceRef:
+        kind: HelmRepository
+        name: ess-helm
+        namespace: flux-system
+      interval: 1h
+  targetNamespace: matrix
+  releaseName: matrix
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      # ESS generates a batch of initSecrets on first install; a failed
+      # upgrade must not leave helm state stuck on a stale revision (same
+      # rationale as hindsight/helmrelease.yaml).
+      remediateLastFailure: true
+      retries: 3
+  values:
+    # The permanent server name — embedded in user/room IDs; cannot change.
+    serverName: matrix.ngoldack.de
+    # Element Admin, Matrix RTC, bundled Postgres, Hookshot: all OFF.
+    elementAdmin:
+      enabled: false
+    matrixRTC:
+      enabled: false
+    hookshot:
+      enabled: false
+    postgres:
+      enabled: false
+    # Well-known delegation: would serve the JSON delegation at
+    # matrix.ngoldack.de so federation resolves. Disabled — federation is OFF
+    # here (see the synapse.additional fragment below) and the repo's
+    # external-dns owns the .well-known records for this apex. Inert-ingress
+    # comments above apply to the remaining enabled components.
+    wellKnownDelegation:
+      enabled: false
+    synapse:
+      # Public hostname for the client API (and, if federation is ever turned
+      # back on, the server-to-server endpoint).
+      ingress:
+        host: matrix.ngoldack.de
+      # External Postgres (CNPG), per-component so Synapse never shares a DB
+      # with MAS. Password from the CNPG basic-auth Secret.
+      # ServiceMonitor OFF — CRD absent (see the header note).
+      serviceMonitors:
+        enabled: false
+      postgres:
+        host: matrix-database-rw
+        port: 5432
+        database: synapse
+        user: synapse
+        sslMode: disable
+        password:
+          secret: matrix-database-credentials
+          secretKey: password
+      # Media store on the fast NFS class (5Gi). maxUploadSize is a deliberate
+      # bound at 50M: the chart default is 100M, every upload is buffered
+      # whole (through the gateway, where httproutes-edge.yaml disables the
+      # proxy timeouts, and into the chart's tmp volume), and this homeserver
+      # serves one operator plus three bots — 50M is far above real Matrix
+      # media (avatars, screenshots, small clips) while keeping one upload's
+      # footprint and the 5Gi PVC headroom sane.
+      media:
+        maxUploadSize: 50M
+        storage:
+          size: 5Gi
+          storageClassName: truenas-fast-nfs-matrix-media
+      # Hardened hard-coded synapse security context is the chart default;
+      # the only extras: no public registration, and federation OFF.
+      additional:
+        0-disable-public-registration:
+          config: |
+            enable_registration: false
+        # Federation OFF. `federation_domain_whitelist: []` is the documented
+        # switch in Synapse v1.161.0 (an empty whitelist admits no remote
+        # server, so both inbound and outbound server-to-server traffic is
+        # refused at the application layer). No .well-known delegation is
+        # published either (wellKnownDelegation.enabled=false above), so
+        # nothing advertises this homeserver to the federation graph.
+        # Re-enabling means a non-empty whitelist here AND the wkd fragment.
+        1-disable-federation:
+          config: |
+            federation_domain_whitelist: []
+      # resources (lightweight): 100m/256Mi req, 1Gi limit.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+    # HAPROXY — the ESS "matrix-stack-ingress" proxy, and NOT optional: the
+    # HTTPRoutes' /_matrix + /_synapse backends are the `matrix-synapse`
+    # Service, which selects the haproxy pods (app.kubernetes.io/instance:
+    # matrix-haproxy). haproxy forwards to the synapse-main headless Service
+    # over SRV discovery, health-checking /health on :8080.
+    haproxy:
+      serviceMonitors:
+        enabled: false
+      # resources: 10m/32Mi req, 128Mi limit — haproxy is a thin L7 shim in
+      # front of a single-worker Synapse. The chart default (100m/100Mi req,
+      # 200Mi limit) is sized for a much larger federation front door.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
+    matrixAuthenticationService:
+      ingress:
+        host: matrix-auth.ngoldack.de
+      # External Postgres (CNPG), per-component so MAS never shares a DB
+      # with Synapse. Password from its own CNPG basic-auth Secret.
+      # ServiceMonitor OFF — CRD absent (see the header note).
+      serviceMonitors:
+        enabled: false
+      postgres:
+        host: matrix-database-rw
+        port: 5432
+        database: matrix_authentication_service
+        user: matrix_authentication_service
+        sslMode: disable
+        password:
+          secret: matrix-authentication-service-role
+          secretKey: password
+      # Upstream OIDC (Authentik) injected as secret-backed additional MAS
+      # config — R2 (see docs/hermes-multi-agent-matrix.md). The Secret
+      # matrix-mas-additional-config holds the fragment served at
+      # configSecretKey mas-config-upstream.yaml.
+      additional:
+        0-upstream-oidc:
+          configSecret: matrix-mas-additional-config
+          configSecretKey: mas-config-upstream.yaml
+      # resources: 50m/64Mi req, 256Mi limit (the chart default is 350Mi
+      # limit — trimmed for the fixed budget; MAS is small).
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 1
+          memory: 256Mi
+    elementWeb:
+      # Element Web static site served at element.ngoldack.de — NOT the
+      # "chat" host: that one belongs to LibreChat
+      # (librechat/httproute-edge.yaml + its authentik provider), two
+      # HTTPRoutes cannot share a hostname on the same listener, and a name
+      # needs exactly one owner. The chart auto-builds the homeserver config
+      # (config.json) from serverName + synapse.ingress.host, so no additional
+      # config is needed here: base_url resolves to https://matrix.ngoldack.de
+      # (the LOCAL server), never the matrix.org default.
+      ingress:
+        host: element.ngoldack.de
+      # resources: 10m/32Mi req, 128Mi limit (static webapp).
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 500m
+          memory: 128Mi
+      # nodeSelector — home site only (TrueNAS StorageClass reachable only
+      # from the home nodes; the dataserver is not routable from Hetzner).
+      nodeSelector:
+        topology.homelab/site: home
+    # No clusterDomain override: the in-cluster Services are reached via the
+    # repo's HTTPRoutes, which resolve the {{ releaseName }}-<component>
+    # service names directly.

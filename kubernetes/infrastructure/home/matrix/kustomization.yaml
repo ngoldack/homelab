@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
+  - postgres-credentials.sops.yaml
+  - matrix-backup-s3-credentials.sops.yaml
+  - postgres.yaml
+  - database.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
+  - sources.yaml
+  - helmrelease.yaml
+  # httproute.yaml (LAN twin) retired with the split-horizon design: all three
+  # Matrix hosts are edge-only now (see the note at the top of
+  # httproutes-edge.yaml), so one external-dns instance owns each name.
+  - httproutes-edge.yaml
+  # R2: the MAS upstream-OIDC additional-config Secret, mounted by the
+  # HelmRelease (matrixAuthenticationService.additional.0-upstream-oidc).
+  - mas-authentik-config.sops.yaml

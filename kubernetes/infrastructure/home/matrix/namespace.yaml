@@ -1,0 +1,22 @@
+# matrix — the self-hosted Matrix homeserver namespace (Synapse + Matrix
+# Authentication Service + Element Web), the messaging substrate for the
+# multi-agent Hermes deployment (dave/chad/lindner) and the human operator.
+#
+# PSA restricted is the floor: Synapse stores E2EE room keys and the bot
+# access tokens that the Hermes agents authenticate with, so only hardened
+# pods may run here. The ESS chart ships hardened defaults (runAsNonRoot,
+# drop-all caps, read-only rootfs); the namespace label mirrors the other
+# edge-served namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: matrix
+  labels:
+    # The edge Gateway's https-apex listener only attaches HTTPRoutes from
+    # namespaces carrying this label (same as hermes/namespace.yaml). Element
+    # Web (https://element.ngoldack.de), Synapse (https://matrix.ngoldack.de)
+    # and the MAS OIDC callback host are all served through the edge.
+    gateway.ngoldack.de/edge-ingress: "true"
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -13,6 +13,7 @@ resources:
   - oidc-headlamp.sops.yaml
   - oidc-aigateway.sops.yaml
   - oidc-librechat.sops.yaml
+  - oidc-matrix.sops.yaml
   - cluster-oidc-rbac.yaml
   - paperless-oidc.sops.yaml
   - seed.yaml

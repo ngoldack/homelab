@@ -95,6 +95,12 @@ spec:
         - name: seed-secrets-librechat
           secret:
             secretName: authentik-oidc-librechat
+        # Matrix MAS upstream OIDC client secret, read via !File
+        # /secrets-matrix/client_secret in the same seed (the MAS provider).
+        # Its own path, like the others.
+        - name: seed-secrets-matrix
+          secret:
+            secretName: authentik-oidc-matrix
       volumeMounts:
         - name: seed-secrets
           mountPath: /secrets
@@ -113,6 +119,9 @@ spec:
           readOnly: true
         - name: seed-secrets-librechat
           mountPath: /secrets-librechat
+          readOnly: true
+        - name: seed-secrets-matrix
+          mountPath: /secrets-matrix
           readOnly: true
     server:
       # 2 replicas, HOME ONLY. The 2026-09-18 edge straddle (one replica

@@ -1,0 +1,368 @@
+# matrix allowlists — the only traffic that may cross the default-deny
+# baseline. Selectors are the live pod labels the ESS chart 26.9.2 applies
+# (verified by rendering the chart with these values):
+#   haproxy       app.kubernetes.io/name=haproxy,
+#                 app.kubernetes.io/instance=matrix-haproxy  ← the gateway's
+#                 backend: the `matrix-synapse` Service selects THESE pods
+#   synapse-main  app.kubernetes.io/name=synapse-main, component=matrix-server
+#   MAS           app.kubernetes.io/name=matrix-authentication-service
+#   element-web   app.kubernetes.io/name=element-web
+#   database      cnpg.io/cluster=matrix-database
+#
+# Cross-namespace edges this file establishes (mirror when peers migrate):
+#   edge/ingress -> haproxy:8008, MAS:8080, element-web:80   (HTTPRoutes)
+#   hermes       -> haproxy:8008   (the three bots call the client API)
+#   monitoring   -> haproxy:8405   (haproxy metrics), synapse-main:8080
+#   authentik    -> MAS:8080       (upstream OIDC — MAS calls authentik OUT, R2)
+#   cnpg-system  -> database       (operator + barman plugin)
+#   world        -> synapse-main:443 (URL previews / remote media fetch);
+#                   federation itself is OFF (federation_domain_whitelist: []
+#                   in the HelmRelease), so no world→8008 edge is opened.
+#
+# Synapse runs WITHOUT Redis here: the chart renders no valkey when
+# redisOrValkey is unset (verified in the 26.9.2 render — single-worker
+# default needs none). If workers/redis are later enabled, add a
+# synapse->valkey grant.
+---
+# Element Web — static site on :80, reachable only through the gateway; it
+# talks to Synapse's client API outbound.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-element-web-allowlist
+  namespace: matrix
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: element-web
+  ingress:
+    - fromEntities:
+        - ingress
+        - health
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: synapse-main
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+---
+# HAPROXY — the ESS L7 shim (app.kubernetes.io/name=haproxy). It is what the
+# HTTPRoutes actually reach: the `matrix-synapse` Service (port 8008) selects
+# app.kubernetes.io/instance: matrix-haproxy, NOT the synapse-main pods, so
+# without this policy the gateway hop is dropped under default-deny. 8008 is
+# the synapse frontend, 8009 the JSON "Blocked" blackhole frontend. Egress:
+# DNS (SRV discovery via `resolvers kubedns`), the synapse-main headless
+# Service on 8008, and 8080 for the rendered config's health check
+# (`http-check connect port 8080` / GET /health).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-haproxy-allowlist
+  namespace: matrix
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: haproxy
+  ingress:
+    - fromEntities:
+        - ingress
+        - health
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+            - port: "8009"
+              protocol: TCP
+            # haproxy-metrics :8405 and synapse-ready :8406 are the
+            # liveness/readiness and startup probe targets.
+            - port: "8405"
+              protocol: TCP
+            - port: "8406"
+              protocol: TCP
+    # The Hermes bots' client-API path (see hermes/cilium-policy.yaml, whose
+    # egress rule points at the matrix namespace on 8008).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    # Metrics scrape (haproxy-metrics :8405), the haproxy counterpart of the
+    # monitoring→synapse-health rule below.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8405"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: synapse-main
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+            # Health-check port used by the rendered haproxy config.
+            - port: "8080"
+---
+# Synapse — the homeserver. The gateway does NOT proxy here: the HTTPRoutes'
+# backend Service (`matrix-synapse`) selects the haproxy pods, and haproxy
+# forwards on to this pod's headless Service. Ingress: the in-namespace peers
+# (MAS's synapse handshake + haproxy) on 8008, plus the ingress/health entities
+# — kept deliberately broad so a direct route can be added without a policy
+# change. Egress: DNS, the CNPG DB, remote media / URL previews (world:443).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-synapse-allowlist
+  namespace: matrix
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: synapse-main
+  ingress:
+    - fromEntities:
+        - ingress
+        - health
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+            # synapse-health :8080 is used by the chart's probes; keep it
+            # reachable by health-checkers.
+            - port: "8080"
+              protocol: TCP
+    # In-namespace peers: MAS's synapse handshake (matrix/mas config endpoint
+    # http://matrix-synapse-main.matrix.svc.cluster.local:8008) and haproxy —
+    # both its forwarding on 8008 and the rendered config's active health check
+    # (`http-check connect port 8080`, GET /health).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: matrix
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: matrix-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Outbound to the world: URL previews + remote media fetch on 443. No
+    # 8008 here — federation is OFF (federation_domain_whitelist: [] in the
+    # HelmRelease), so Synapse never dials a remote homeserver's federation
+    # port; adding it back is part of re-enabling federation.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Matrix Authentication Service — ingress on :8080 (edge gateway for the
+# login/OIDC/callback paths). Egress: its own CNPG DB, plus the upstream
+# Authentik OIDC (discovery/token/JWKS — R2 wiring).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-mas-allowlist
+  namespace: matrix
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: matrix-authentication-service
+  ingress:
+    - fromEntities:
+        - ingress
+        - health
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: matrix-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Upstream OIDC to Authentik (the issuer is an edge URL — the calls
+    # traverse the Gateway and arrive as the portal-bridge in the authentik
+    # namespace; both halves required — see hermes/cilium-policy.yaml).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
+    # The MAS→Synapse handshake for user lookup (mas → synapse client API).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: synapse-main
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+---
+# The CNPG instance(s). Ingress: synapse/mas on 5432, the operator and barman
+# plugin from cnpg-system (instance manager 8000), and the monitoring scrape.
+# Egress: DNS, the Kubernetes API, S3 for backups + WAL archiving, siblings.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-database-allowlist
+  namespace: matrix
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: matrix-database
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: matrix
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: matrix-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: matrix-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.1/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # Hetzner Object Storage (backups + WAL archiving via barman).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

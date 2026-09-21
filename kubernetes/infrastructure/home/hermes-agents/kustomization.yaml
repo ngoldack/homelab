@@ -1,0 +1,19 @@
+# hermes-agents — the multi-agent expansion of the Hermes namespace. Reuses
+# the existing hermes namespace, ServiceAccount (hermes), stream-relay ConfigMap
+# and hermes-secret (shared creds); adds the shared data volume, the per-profile
+# ConfigMap, the per-agent secret, the four agent StatefulSets, and the agents'
+# own Cilium policy.
+#
+# NO namespace.yaml / rbac.yaml / stream-relay.yaml here — they exist in
+# ../hermes/. NO separate sources (the image comes from the in-cluster registry).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - pvc.yaml
+  - configmap.yaml
+  - secret.sops.yaml
+  - cilium-policy.yaml
+  - orchestrator.yaml
+  - dave.yaml
+  - chad.yaml
+  - lindner.yaml

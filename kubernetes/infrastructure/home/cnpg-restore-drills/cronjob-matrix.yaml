@@ -1,0 +1,130 @@
+# Restore drill for matrix's Postgres (matrix/matrix-database).
+#
+# Invariant: `schema_version` >= 1 (MIN_LEDGER_ROWS), i.e. the restore carries
+# a schema Synapse has actually bootstrapped and versioned. `schema_version` is
+# Synapse's schema-version table (storage/schema/common/schema_version.sql): a
+# one-row table whose `version` column is the schema version the database is
+# at, written by `prepare_database` on both fresh init and every upgrade. It
+# lives in the `common` schema set, so it is present on every physical database
+# Synapse uses. Its sibling `applied_schema_deltas` records one row per applied
+# delta; `schema_version` is the single authoritative row, which is why the
+# drill asserts on it.
+#
+# Database: `synapse`. matrix-database holds TWO databases (Synapse and the
+# Matrix Authentication Service, postgres.yaml: one CNPG cluster, two apps,
+# separate owners because the ESS chart forbids sharing a DB). The drill
+# covers the primary one; MAS's schema would be a second parameterisation, not
+# a second invariant on this one.
+#
+# Domain metric, deliberately NOT asserted: `room_memberships` is reported and
+# `DOMAIN_MIN_ROWS=0`, because this is a fresh homeserver — there is no
+# predictable floor to assert yet and a ">= 1" rule would fail on a
+# legitimately empty (just-bootstrapped) deployment while proving nothing.
+# Bump DOMAIN_MIN_ROWS to 1 once rooms and members actually exist; the
+# reported `cnpg_restore_drill_rows{app="matrix",table="room_memberships"}`
+# sample is what says when that is true.
+#
+# Storage class is the NFS drill class because matrix's database runs on the
+# NFS class upstream (truenas-fast-nfs-matrix-database), so the drill exercises
+# the same substrate.
+#
+# Cadence: monthly, 05:30 UTC on the 1st (see cronjob-immich.yaml for the
+# staggered-slot rationale).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-restore-drill-matrix
+  namespace: cnpg-restore-drills
+  labels:
+    app.kubernetes.io/name: cnpg-restore-drills
+    app.kubernetes.io/instance: matrix
+spec:
+  schedule: "30 5 1 * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 5400
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-restore-drills
+            app.kubernetes.io/instance: matrix
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-restore-drill-matrix
+          automountServiceAccountToken: true
+          nodeSelector:
+            topology.homelab/site: home
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drill
+              # Pinned: alpine/k8s:1.36.4 (see cronjob-immich.yaml).
+              image: alpine/k8s@sha256:358ddfc2d6ff3f00dd461dbd79aaa6d6738709f225b8da0945bb63bd4dbc304e
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/drill.sh"]
+              env:
+                - name: APP
+                  value: matrix
+                - name: SRC_NS
+                  value: matrix
+                - name: SRC_CLUSTER
+                  value: matrix-database
+                - name: DRILL_NS
+                  value: matrix-drill
+                - name: DRILL_CLUSTER
+                  value: matrix-drill-database
+                - name: PGDATABASE
+                  value: synapse
+                - name: RECOVERY_OWNER
+                  value: synapse
+                - name: LEDGER_TABLE
+                  value: schema_version
+                - name: DOMAIN_TABLE
+                  value: room_memberships
+                - name: DOMAIN_MIN_ROWS
+                  value: "0"
+                - name: STORAGE_CLASS
+                  value: truenas-fast-nfs-cnpg-restore-drills
+                - name: STORAGE_SIZE
+                  value: 10Gi
+                - name: WAIT_SECONDS
+                  value: "2700"
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: script
+              configMap:
+                name: cnpg-restore-drill-script
+                defaultMode: 0444
+            - name: tmp
+              emptyDir: {}

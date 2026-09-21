@@ -1,0 +1,177 @@
+# hermes-agents Cilium policies — default-deny plus two allowlists.
+#
+# The agent pods carry app.kubernetes.io/name=hermes-agents (NOT `hermes`), so
+# they are outside the parent ../hermes/cilium-policy.yaml allowlist and do not
+# join svc/hermes. They additionally carry
+# hermes.ngoldack.de/sandbox: "true"|"false":
+#
+#   * hermes-agents-allowlist            every agent: DNS, the LLM gateway, trace
+#                                        export, the Matrix client API, Hindsight,
+#                                        and the authentik JWT issuer.
+#   * hermes-agents-sandbox-allowlist    only the profiles that actually execute
+#                                        code (dave/chad/orchestrator): the sandbox
+#                                        router, gRPC exec into adopted sandboxes,
+#                                        the kube-apiserver (SandboxClaim only) and
+#                                        the lazy-dependency CIDRs.
+#
+# Lindner (sandbox: "false") therefore has NO route to a sandbox, to the API
+# server, or to package mirrors — its read-only posture is enforced by the
+# network, not only by its prompt.
+#
+# Ingress: NONE — the agents are reached through Matrix (their own client API
+# connections) and their own in-pod listener; no edge route, no OIDC dashboard.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-agents-default-deny
+  namespace: hermes
+spec:
+  description: >-
+    Deny-all baseline for the agent gateway pods. The allow docs below carve out
+    exactly the egress each profile needs; nothing is permitted inbound.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-agents
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-agents-allowlist
+  namespace: hermes
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-agents
+  ingress: []
+  egress:
+    # Cluster DNS.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # LLM — the agentgateway data plane (/v1/chain/* and the relay upstream).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    # Trace export — in-cluster Langfuse.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: langfuse
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # Matrix client API — the IN-CLUSTER Service (the bots never cross the edge
+    # Gateway). Paired ingress half in ../../matrix/cilium-allowlist.yaml.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: matrix
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    # Hindsight memory API (per-profile bank + tenant key).
+    # Paired ingress half in ../../hindsight/cilium-allowlist.yaml.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hindsight
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+    # The agentgateway JWT issuer lives in authentik; the pair is required
+    # (a CIDR-only rule yields the edge's 403 "Access denied").
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hermes-agents-sandbox-allowlist
+  namespace: hermes
+spec:
+  description: >-
+    Code-execution plumbing, only for the profiles that may execute (dave, chad,
+    orchestrator). Lindner carries hermes.ngoldack.de/sandbox="false" and never
+    matches this selector.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-agents
+      hermes.ngoldack.de/sandbox: "true"
+  ingress: []
+  egress:
+    # Sandbox Router (file transfer, v2 scoped tokens).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-sandbox-system
+            app.kubernetes.io/name: sandbox-router
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Direct gRPC exec into adopted sandboxes.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes-sandbox
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+    # Kubernetes API (SandboxClaim lifecycle only).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.1/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # PyPI / Fastly anycast + GitHub raw (lazy dependency installs, model
+    # catalogue), the same grants the parent hermes allowlist carries. The
+    # WhatsApp bridge's `npm install` (dave) also resolves through Fastly.
+    - toCIDRSet:
+        - cidr: 151.101.0.0/16
+        - cidr: 146.75.0.0/16
+        - cidr: 199.232.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 185.199.108.0/22
+        - cidr: 185.199.109.0/22
+        - cidr: 185.199.110.0/22
+        - cidr: 185.199.111.0/22
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

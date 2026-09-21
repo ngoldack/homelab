@@ -1,16 +1,16 @@
 # Automated CNPG restore drills
 
-Five CronJobs that, once a month, turn the latest Barman-cloud backup of each
+Six CronJobs that, once a month, turn the latest Barman-cloud backup of each
 CloudNativePG database back into a running PostgreSQL cluster, run an
 invariant query against the recovered data, publish the outcome as metrics and
 delete everything again. This is the automated half of the review's
 "unproven restores" gap: `docs/data-protection.md` holds two hand-run drills on
 record (langfuse PITR clone, authentik destructive restore) and
-`docs/service-catalog.md` marks the other three clusters' RTO `[unverified]` —
+`docs/service-catalog.md` marks the other clusters' RTO `[unverified]` —
 these drills replace that with a recurring, unattended measurement.
 
-The five databases are the full set of CNPG clusters in the repo: `immich`,
-`paperless`, `hindsight`, `langfuse`, `authentik`.
+The six databases are the full set of CNPG clusters in the repo: `immich`,
+`paperless`, `hindsight`, `langfuse`, `authentik`, `matrix`.
 
 ## The drill contract
 
@@ -58,9 +58,12 @@ Guarantees worth stating explicitly:
   `managed.services.disabledDefaultServices`. Nothing in the repo can reach it
   across namespaces (`cilium-allowlist.yaml` admits only kubelet probes,
   `cnpg-system` and the drill namespace's own pods).
-- **Storage-bounded**: drills are staggered 40 minutes apart and serialised per
-  database (`concurrencyPolicy: Forbid`), so at most one restored copy exists
-  at a time, sized like the source database (5–20 Gi).
+- **Storage-bounded**: drills start at distinct staggered minutes and are
+  serialised per database (`concurrencyPolicy: Forbid`), and each is sized like
+  its source database (5–20 Gi). Overlap between two *different* databases is
+  still possible if one run outlasts the gap to the next start (the recovery
+  budget is 45 minutes inside a 90-minute `activeDeadlineSeconds`), so the
+  bound is "at most one restored copy per database", not a global one.
 
 ## Per-database parameters and invariants
 
@@ -75,6 +78,7 @@ has something to compare against.
 | hindsight | `hindsight/hindsight-database` | `hindsight-drill/…` | `hindsight` | `alembic_version` ≥ 1 **and** `memory_units` ≥ 1 (40,021 live) | `memory_units` | nfs 10Gi |
 | langfuse | `langfuse/langfuse-database` | `langfuse-drill/…` | `langfuse` | `_prisma_migrations` ≥ 1 (438 live) **and** `projects` ≥ 1 (1 live) | `projects` | nvmeof 10Gi |
 | authentik | `authentik/authentik-database` | `authentik-drill/…` | `authentik` | `django_migrations` ≥ 1 (776 live) **and** `authentik_core_user` ≥ 1 (15 live) | `authentik_core_user` | nfs 5Gi |
+| matrix | `matrix/matrix-database` | `matrix-drill/…` | `synapse` | `schema_version` ≥ 1 | `room_memberships` (reported; floor 0) | nfs 10Gi |
 
 Justification, per database — the point is that the invariant must be true of a
 *correct* restore and false of a broken one:
@@ -108,6 +112,26 @@ Justification, per database — the point is that the invariant must be true of 
   invariant still targets the real database (`-d authentik`), since the socket
   query authenticates as `postgres` and does not depend on CNPG's default
   application database.
+- **matrix**: `schema_version` is Synapse's schema-version table (defined in
+  `storage/schema/common/schema_version.sql`): a one-row table whose `version`
+  column holds the schema version the database is at, written by
+  `prepare_database` on both fresh init and every upgrade, and part of the
+  `common` schema set so it exists on every physical database Synapse uses.
+  `>= 1` therefore means "Synapse bootstrapped and versioned this database" —
+  the closest thing Synapse has to a migration ledger. Its sibling
+  `applied_schema_deltas` (one row per delta) would work too, but
+  `schema_version` is the single authoritative row. The cluster is the first
+  in the repo holding two databases (`synapse` and
+  `matrix_authentication_service`, separate owners because the ESS chart
+  forbids sharing one), and the drill parameterises one database per CronJob
+  exactly as the other five do; MAS's schema is covered by the same backup, and
+  its own ledger would only be a second parameterisation, not a second
+  invariant. `room_memberships` is the natural domain table (rooms and their
+  members are why the homeserver exists) but its asserted floor is **0**: this
+  is a fresh deployment with no predictable row count yet, so `≥ 1` would fail
+  on a legitimately empty homeserver while proving nothing. The reported
+  `cnpg_restore_drill_rows{app="matrix",table="room_memberships"}` sample is
+  what says when a real floor is available — bump `DOMAIN_MIN_ROWS` then.
 
 ## Metrics
 
@@ -245,21 +269,22 @@ fails loudly on:
    recovery pod's log are the proof that `base/<server-name>/` was found under
    the discovered `destinationPath`.
 4. **`bootstrap.recovery` with `database`/`owner` set** (immich, paperless,
-   hindsight, langfuse) is accepted — only authentik's variant (both omitted)
-   has ever run. If CNPG rejects an owner that does not match the restored
-   data directory, the fix is to omit the fields for that app exactly as
-   authentik does.
+   hindsight, langfuse, matrix) is accepted — only authentik's variant (both
+   omitted) has ever run. If CNPG rejects an owner that does not match the
+   restored data directory, the fix is to omit the fields for that app exactly
+   as authentik does.
 5. **The `pods/exec` path works from the drill ServiceAccount** — the query
-   itself was proven by hand against all five live clusters on 2026-09-18, but
-   the RBAC is new, so a first run is the first time the role is exercised.
+   itself was proven by hand against five live clusters on 2026-09-18, but the
+   RBAC is new, so a first run is the first time the role is exercised.
 6. **The metric push reaches VictoriaMetrics** through the new
    `monitoring-vmsingle-restore-drill-import` policy (the endpoint needs no
    auth — vmagent writes to the same URL unauthenticated — but the vmsingle pod
    denies cross-namespace peers unless named).
 7. **Restore duration and storage headroom**, per database, on the home node
-   and NAS: the drill sizes its volume like the source (5–20 Gi) and only one
-   drill runs at a time, but a first run is what measures the wall clock and
-   the actual data size (`cnpg_restore_drill_database_size_bytes`).
+   and NAS: the drill sizes its volume like the source (5–20 Gi) and each
+   database is serialised with itself, but a first run is what measures the
+   wall clock and the actual data size
+   (`cnpg_restore_drill_database_size_bytes`).
 8. **immich's extension gap is benign**: the drill deliberately does not mount
    the `vchord` OCI extension image or preload `vchord.so`, so the vector index
    path is *not* exercised; the run must confirm the instance starts and the
@@ -292,7 +317,7 @@ fails loudly on:
 
 | file | purpose |
 | --- | --- |
-| `namespace.yaml` | control namespace + five `*-drill` namespaces |
+| `namespace.yaml` | control namespace + six `*-drill` namespaces |
 | `storageclass.yaml` | drill-only `reclaimPolicy: Delete` classes (nvmeof + nfs) |
 | `serviceaccounts.yaml`, `rbac.yaml` | one SA per database; two namespaces each |
 | `drill-config.yaml` | the harness (one script, `substitute: disabled`) |

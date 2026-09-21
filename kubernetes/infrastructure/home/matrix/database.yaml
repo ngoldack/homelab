@@ -1,0 +1,27 @@
+# The two Matrix databases as CNPG Database CRs (the immich/hindsight
+# pattern, applied twice on the same cluster). Synapse and the Matrix
+# Authentication Service must not share a database — each gets its own owner
+# and role so the ESS chart's per-component postgres blocks connect with the
+# least-privileged credential. No extensions enabled (Synapse needs none
+# beyond the standard postgres contrib that ships in the image).
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: matrix-synapse
+  namespace: matrix
+spec:
+  name: synapse
+  owner: synapse
+  cluster:
+    name: matrix-database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: matrix-authentication-service
+  namespace: matrix
+spec:
+  name: matrix_authentication_service
+  owner: matrix_authentication_service
+  cluster:
+    name: matrix-database

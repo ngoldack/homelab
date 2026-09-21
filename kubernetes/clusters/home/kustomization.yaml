@@ -37,6 +37,10 @@ resources:
   # Gateway its routes attach to.
   - valkey-operator.yaml
   - authentik.yaml
+  # Self-hosted Matrix homeserver (ESS: Synapse + MAS + Element Web) + its
+  # CNPG store. Depends on authentik (the MAS upstream OIDC provider), the
+  # cnpg operator, network (the HTTPRoutes' Gateway) and cert-manager.
+  - matrix.yaml
   # Hindsight agent memory: local LLM + CNPG/pgvector, LAN-only surface.
   - hindsight.yaml
   # LLM AI gateway (agentgateway.dev control plane). CRD-before-CR split.

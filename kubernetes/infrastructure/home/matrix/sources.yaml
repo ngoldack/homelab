@@ -1,0 +1,12 @@
+# The ESS (Element Server Suite Community) matrix-stack chart, published as
+# an OCI artifact next to the images (chart docs: helm push charts/matrix-stack
+# oci://ghcr.io/element-hq/ess-helm).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: ess-helm
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 1h
+  url: oci://ghcr.io/element-hq/ess-helm

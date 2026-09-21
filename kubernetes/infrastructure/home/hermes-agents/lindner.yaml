@@ -1,0 +1,346 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: lindner
+  namespace: hermes
+spec:
+  serviceName: lindner
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes-agents
+      app.kubernetes.io/instance: lindner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes-agents
+        app.kubernetes.io/instance: lindner
+        hermes.ngoldack.de/sandbox: "false"
+    spec:
+      serviceAccountName: hermes
+      terminationGracePeriodSeconds: 300
+      # Co-locate the four agent pods on one node: the Kanban board is a single
+      # SQLite file on the shared volume (with `database.journal_mode: delete`,
+      # the NFS-safe mode) and every writer — the dispatcher and the workers it
+      # spawns — must be on the same NFS client. Cross-node SQLite writers are
+      # exactly what this avoids.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: hermes-agents
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        fsGroup: 10000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lindner
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          env:
+            - name: HERMES_HOME
+              value: /opt/data/profiles/lindner
+            - name: HERMES_PROFILE
+              value: lindner
+            # The SINGLE shared board: the orchestrator dispatches from it and every
+            # messaging agent creates its cards on it. One file, one dispatcher.
+            - name: HERMES_KANBAN_DB
+              value: /opt/data/kanban/kanban.db
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: OPENAI_API_KEY
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: API_SERVER_KEY
+            - name: API_SERVER_PORT
+              value: "8682"
+            - name: API_SERVER_HOST
+              value: "0.0.0.0"
+            - name: HERMES_API_TIMEOUT
+              value: "600"
+            - name: HERMES_LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_PUBLIC_KEY
+            - name: HERMES_LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_SECRET_KEY
+            - name: HERMES_LANGFUSE_BASE_URL
+              value: http://langfuse-web.langfuse.svc.cluster.local:3000
+            - name: HERMES_LANGFUSE_CAPTURE
+              value: sanitized
+            - name: HERMES_LANGFUSE_MAX_CHARS
+              value: "12000"
+            # Hindsight memory (plugin client env: the server-side TENANT_* names are
+            # NOT client variables). Isolation = per-profile bank + per-profile bearer key.
+            - name: HINDSIGHT_MODE
+              value: local_external
+            - name: HINDSIGHT_API_URL
+              value: http://hindsight-api.hindsight.svc.cluster.local:8888
+            - name: HINDSIGHT_BANK_ID
+              value: nicolas-finance
+            - name: HINDSIGHT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: HINDSIGHT_L_API_KEY
+            # Matrix bot identity. The client base URL is the IN-CLUSTER Service:
+            # the bots never traverse the edge Gateway (the Cilium peer pair is
+            # ns-matrix:8008), while the permanent server_name still governs every
+            # user/room id. `matrix-synapse` fronts Synapse with the chart HAProxy,
+            # which routes the login paths to MAS, so password login works through it.
+            - name: MATRIX_HOMESERVER
+              value: http://matrix-synapse.matrix.svc.cluster.local:8008
+            - name: MATRIX_USER_ID
+              value: "@lindner:matrix.ngoldack.de"
+            - name: MATRIX_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: MATRIX_L_ACCESS_TOKEN
+            - name: MATRIX_DEVICE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: MATRIX_L_DEVICE_ID
+            - name: MATRIX_RECOVERY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: MATRIX_L_RECOVERY_KEY
+            - name: MATRIX_ALLOWED_USERS
+              value: "@nicolas.matrix:matrix.ngoldack.de"
+            # Empty (unset) = any room Nicolas is in; the sender allowlist and the
+            # mention requirement still bound who can trigger a turn. The operator
+            # sets this to the immutable agent-hq room id (see the runbook).
+            - name: MATRIX_ALLOWED_ROOMS
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: MATRIX_ALLOWED_ROOMS
+                  optional: true
+            - name: MATRIX_REQUIRE_MENTION
+              value: "true"
+            - name: MATRIX_AUTO_THREAD
+              value: "true"
+            - name: MATRIX_SESSION_SCOPE
+              value: thread
+            # Bot-loop guard: no agent ever reacts to another agent (or a bridge
+            # ghost). Deterministic, independent of mention gating.
+            - name: MATRIX_IGNORE_USER_PATTERNS
+              value: >-
+                ^@dave:matrix\.ngoldack\.de$,^@chad:matrix\.ngoldack\.de$,
+                ^@lindner:matrix\.ngoldack\.de$
+            # E2EE is available but NOT yet proven for these bots: promote to
+            # `required` only after the encrypted-room test in the runbook passes.
+            - name: MATRIX_E2EE_MODE
+              value: optional
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            tcpSocket:
+              port: 8682
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  curl -s -o /dev/null --max-time 3 http://127.0.0.1:8682/v1/models
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8682
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: router-token
+              mountPath: /opt/data/router-token
+              subPath: token
+              readOnly: true
+            - name: egress-hmac
+              mountPath: /opt/data/egress-hmac
+              subPath: EGRESS_HMAC_SECRET
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      initContainers:
+        # Profile seeder. Three things land in $HERMES_HOME (= the profile dir):
+        #   config.yaml + SOUL.md  — revision-aware (config-rev), the profile's
+        #                            config and its identity file (Hermes loads
+        #                            $HERMES_HOME/SOUL.md as identity slot #1).
+        #   .env                   — rewritten whenever it changes, so a process
+        #                            started under THIS profile (including a
+        #                            Kanban worker spawned by the orchestrator in
+        #                            another pod) gets the profile's LLM key,
+        #                            sandbox plumbing and memory bank/tenant key.
+        #                            Messaging credentials deliberately stay out of
+        #                            it: only the owning pod's env carries them.
+        - name: seed-profile
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a01713f9123fa784d76fb1974e1b6d246dc51c3b2e5009c718afe706838f
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: HERMES_CONFIG_REV
+              valueFrom:
+                configMapKeyRef:
+                  name: hermes-agents-config
+                  key: config-rev
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: OPENAI_API_KEY
+            - name: API_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: API_SERVER_KEY
+            - name: HERMES_LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_PUBLIC_KEY
+            - name: HERMES_LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_LANGFUSE_SECRET_KEY
+            - name: HINDSIGHT_D_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: HINDSIGHT_D_API_KEY
+            - name: HINDSIGHT_C_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: HINDSIGHT_C_API_KEY
+            - name: HINDSIGHT_L_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: HINDSIGHT_L_API_KEY
+          args:
+            - |
+              set -eu
+              ROUTER_URL='http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080'
+              umask 077
+              mkdir -p /opt/data/kanban
+              # 1. the profile this pod runs
+              dir=/opt/data/profiles/lindner
+              mkdir -p "$dir"
+              rev="$HERMES_CONFIG_REV"
+              if [ "$(cat "$dir/.config-rev" 2>/dev/null || true)" != "$rev" ]; then
+                [ -f "$dir/config.yaml" ] && cp "$dir/config.yaml" "$dir/config.yaml.bak"
+                cp /opt/boot/config.yaml "$dir/config.yaml"
+                cp /opt/boot/SOUL.md "$dir/SOUL.md"
+                printf '%s\n' "$rev" > "$dir/.config-rev"
+              fi
+              write_env() {
+                p="$1"; bank="$2"; hkey="$3"; sandbox="$4"
+                d="/opt/data/profiles/$p"; mkdir -p "$d"
+                {
+                  printf 'HERMES_PROFILE=%s\n' "$p"
+                  printf 'HERMES_KANBAN_DB=/opt/data/kanban/kanban.db\n'
+                  printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+                  printf 'API_SERVER_KEY=%s\n' "$API_SERVER_KEY"
+                  printf 'HERMES_API_TIMEOUT=600\n'
+                  printf 'HERMES_LANGFUSE_PUBLIC_KEY=%s\n' "$HERMES_LANGFUSE_PUBLIC_KEY"
+                  printf 'HERMES_LANGFUSE_SECRET_KEY=%s\n' "$HERMES_LANGFUSE_SECRET_KEY"
+                  printf 'HERMES_LANGFUSE_BASE_URL=http://langfuse-web.langfuse.svc.cluster.local:3000\n'
+                  printf 'HERMES_LANGFUSE_CAPTURE=sanitized\n'
+                  printf 'HERMES_LANGFUSE_MAX_CHARS=12000\n'
+                  printf 'HINDSIGHT_MODE=local_external\n'
+                  printf 'HINDSIGHT_API_URL=http://hindsight-api.hindsight.svc.cluster.local:8888\n'
+                  [ -n "$bank" ] && printf 'HINDSIGHT_BANK_ID=%s\n' "$bank"
+                  [ -n "$hkey" ] && printf 'HINDSIGHT_API_KEY=%s\n' "$hkey"
+                  if [ "$sandbox" = "true" ]; then
+                    printf 'AGENT_SANDBOX_ROUTER_URL=%s\n' "$ROUTER_URL"
+                    printf 'AGENT_SANDBOX_ROUTER_TOKEN_FILE=/opt/data/router-token\n'
+                    printf 'AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE=/opt/data/egress-hmac\n'
+                    printf 'AGENT_SANDBOX_GATEWAY_ID=%s\n' "$p"
+                    printf 'TERMINAL_ENV=agent_sandbox\n'
+                  fi
+                } > "$d/.env.new"
+                chmod 600 "$d/.env.new"
+                mv "$d/.env.new" "$d/.env"
+              }
+              # 2. every profile's headless env: the orchestrator spawns workers for
+              #    dave/chad/lindner on THIS pod, so those profile dirs and their
+              #    worker env must exist here too. No messaging credentials here.
+              write_env orchestrator "" "" false
+              write_env dave nicolas-core "$HINDSIGHT_D_API_KEY" true
+              write_env chad nicolas-dev "$HINDSIGHT_C_API_KEY" true
+              write_env lindner nicolas-finance "$HINDSIGHT_L_API_KEY" false
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: boot-config
+              mountPath: /opt/boot
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hermes-agents-data
+        - name: boot-config
+          configMap:
+            name: hermes-agents-config
+            items:
+              - key: lindner.yaml
+                path: config.yaml
+              - key: lindner.soul.md
+                path: SOUL.md
+        - name: router-token
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: AGENT_SANDBOX_ROUTER_TOKEN
+                path: token
+        - name: egress-hmac
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: EGRESS_HMAC_SECRET
+                path: EGRESS_HMAC_SECRET
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

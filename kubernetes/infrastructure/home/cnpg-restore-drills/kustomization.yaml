@@ -2,7 +2,7 @@
 #
 # Everything in this directory is wired in by ONE Flux Kustomization (see the
 # wiring note in README.md): the controls, the RBAC, the drill-only
-# StorageClasses, the Cilium policies and the five CronJobs. The resources are
+# StorageClasses, the Cilium policies and the six CronJobs. The resources are
 # cluster-agnostic — the drill script discovers each source cluster's backup
 # prefix at run time — so the only per-database difference is the environment
 # block in each cronjob-*.yaml.
@@ -27,10 +27,11 @@ resources:
   # single rule the result metrics need in the monitoring namespace.
   - cilium-default-deny.yaml
   - cilium-allowlist.yaml
-  # The drill harness itself (one script, five parameterisations) …
+  # The drill harness itself (one script, six parameterisations) …
   - drill-config.yaml
   - cronjob-immich.yaml
   - cronjob-paperless.yaml
   - cronjob-hindsight.yaml
   - cronjob-langfuse.yaml
   - cronjob-authentik.yaml
+  - cronjob-matrix.yaml

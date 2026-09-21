@@ -77,10 +77,10 @@ spec:
       containers:
         - name: synthetic-proxy
           # Pinned by manifest digest (Docker-Content-Digest of
-          # registry.ngoldack.de/synthetic-proxy:0.1.0-d2284df, built from this
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-545e576, built from this
           # revision's sources through buildkitd:1234). Re-pin after every
           # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
-          image: registry.ngoldack.de/synthetic-proxy@sha256:267313dec2db37fed31b1d0721cf1b2b139d2dabef4cb4ba5a9e9d8947d4d5ab
+          image: registry.ngoldack.de/synthetic-proxy@sha256:70adc920b7d1db35a337aed96d62e2901418bad9f21cc8d5f0e36b03769243e6
           ports:
             - name: http
               containerPort: 8080
@@ -103,18 +103,26 @@ spec:
             # never prodded (which is what kept the 429 state alive before).
             - name: QUOTA_POLL_SECONDS
               value: "300"
-            # How long a bad key is held off LOCALLY, without touching
-            # Synthetic. Deliberately SHORT (10m): the poke rate that justified
-            # the original 1h window no longer exists, because this proxy
-            # short-circuits from state — only ONE request per gateway eviction
-            # window (5m) reaches Synthetic, not the continuous agent traffic
-            # that kept a 429 alive for 8h+. At 1h, two transient upstream 429s
-            # (or a single blip) cost a full hour of OpenRouter; 10m bounds
-            # that while still leaving a real no-poke window, and it outlasts
-            # the gateway's 5m eviction so the proxy stays the authority
-            # instead of being re-probed every cycle.
+            # TWO clocks, because one number cannot serve both cases, and the
+            # difference is measured rather than theoretical.
+            #
+            # HOLD_OFF_FAILOVER (the failover flavours: a spent allowance, the
+            # generic rate-limit state). This is the LONG no-poke window the
+            # operator established: that state only clears after a long stretch
+            # with no new request, so re-probing early both wastes the attempt
+            # and holds the window open. Measured 2026-09-21 with a 10m value:
+            # the window lapsed at 10m02s and the very next burst was STILL
+            # 429, so the proxy burned 14059 refusals re-confirming a state it
+            # was itself keeping open. 1h is the recovery window, and the proxy
+            # is now the only component that pokes Synthetic, so honouring it
+            # here is what actually stops the endless 429s.
+            - name: HOLD_OFF_FAILOVER
+              value: 1h
+            # UNHEALTHY_AFTER (transient only: transport unreachability, a 5xx
+            # from Synthetic). Short, so a blip does not park the chain. The
+            # parallel-limit 429 is not held off at all — it is passed through.
             - name: UNHEALTHY_AFTER
-              value: 10m
+              value: 2m
             # Time-to-first-byte from Synthetic. Without it, a connection that
             # is accepted but never answered hangs the request indefinitely —
             # the gateway holds a retry slot with no status code to retry on,

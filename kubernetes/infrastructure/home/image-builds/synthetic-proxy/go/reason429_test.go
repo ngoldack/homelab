@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func resp429(body, retryAfter string) *http.Response {
@@ -177,4 +178,79 @@ func TestApplyFailoverRuleReports429Reasons(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHoldOffIsPerReason pins the two clocks. Conflating them is expensive in
+// both directions: too short for the generic rate limit re-opens the very
+// window it is waiting on (measured live: a 10m window lapsed at 10m02s and the
+// next burst was still 429), too long for a transient 5xx parks the chain for
+// an hour over a blip.
+func TestHoldOffIsPerReason(t *testing.T) {
+	const (
+		failoverFor = 45 * time.Minute
+		transient   = 90 * time.Second
+	)
+	mk := func() *Proxy {
+		return NewProxy(Config{
+			Upstream:              "https://api.synthetic.new:443",
+			QuotaPath:             "/v2/quotas",
+			HealthPath:            "/v1/models",
+			PollInterval:          time.Minute,
+			Bind:                  "127.0.0.1",
+			Port:                  8080,
+			UnhealthyFor:          transient,
+			HoldOffFailover:       failoverFor,
+			UpstreamHeaderTimeout: time.Second,
+			StoreCap:              8,
+		})
+	}
+	// drive one upstream answer and report how long the key ended up refused
+	refusalFor := func(t *testing.T, p *Proxy, code int, body string, retryAfter string) time.Duration {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, "https://api.synthetic.new/v1/chat/completions", nil)
+		info := &reqInfo{kh: "dddd4444"}
+		req = req.WithContext(context.WithValue(req.Context(), infoKey, info))
+		resp := resp429(body, retryAfter)
+		resp.StatusCode = code
+		resp.Request = req
+		before := time.Now()
+		p.applyFailoverRule(info, resp)
+		st, ok := p.store.Get("dddd4444")
+		if !ok {
+			return 0
+		}
+		return st.RefusedUntil.Sub(before)
+	}
+
+	t.Run("generic rate limit gets the long no-poke window", func(t *testing.T) {
+		p := mk()
+		got := refusalFor(t, p, http.StatusTooManyRequests, `{"error":"Too many requests, try again later"}`, "")
+		if got < failoverFor-time.Minute || got > failoverFor+time.Minute {
+			t.Errorf("hold-off = %s, want ~%s", got, failoverFor)
+		}
+	})
+
+	t.Run("quota exhaustion gets the long window too", func(t *testing.T) {
+		p := mk()
+		got := refusalFor(t, p, http.StatusTooManyRequests, `{"error":"exceeded your subscription rate limits"}`, "")
+		if got < failoverFor-time.Minute || got > failoverFor+time.Minute {
+			t.Errorf("hold-off = %s, want ~%s", got, failoverFor)
+		}
+	})
+
+	t.Run("a 5xx is transient and gets the short window", func(t *testing.T) {
+		p := mk()
+		got := refusalFor(t, p, http.StatusBadGateway, `{"error":"bad gateway"}`, "")
+		if got < transient-time.Second || got > transient+time.Second {
+			t.Errorf("hold-off = %s, want ~%s", got, transient)
+		}
+	})
+
+	t.Run("parallel limit is not held off at all", func(t *testing.T) {
+		p := mk()
+		got := refusalFor(t, p, http.StatusTooManyRequests, `{"error":"max 4 parallel requests per model"}`, "1")
+		if got != 0 {
+			t.Errorf("hold-off = %s, want none (parallel limit is transient)", got)
+		}
+	})
 }

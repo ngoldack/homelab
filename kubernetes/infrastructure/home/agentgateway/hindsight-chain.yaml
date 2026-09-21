@@ -45,11 +45,20 @@ spec:
                 # report 2026-09-20; the ~30$/M unknown endpoint vs the
                 # akashml bf16 price). `overrides` (not `defaults`) so the
                 # pin always wins even if a client sends its own `provider`.
+                # TWO cheap bf16 endpoints, both ~the same price (verified
+                # against OpenRouter's /endpoints for openai/gpt-oss-120b on
+                # 2026-09-21: akashml/bf16 0.03/0.17 per M, dekallm/bf16
+                # 0.03/0.18 per M -- the two cheapest of 24 endpoints, and the
+                # next cheapest bf16 is ~2x). Listing both lets OpenRouter use
+                # whichever is available without ever reaching for a Grok-family
+                # or fp4 endpoint; `allow_fallbacks: false` keeps it to these
+                # two. Add a third only if it is genuinely in this price band.
                 overrides:
                   - field: provider
                     value:
                       only:
                         - akashml/bf16
+                        - dekallm/bf16
                       allow_fallbacks: false
               auth:
                 secretRef:

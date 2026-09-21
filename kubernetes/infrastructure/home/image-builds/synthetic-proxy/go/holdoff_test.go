@@ -13,14 +13,16 @@ import (
 func newTestProxy(t *testing.T) *Proxy {
 	t.Helper()
 	return NewProxy(Config{
-		Upstream:     "https://api.synthetic.new:443",
-		QuotaPath:    "/v2/quotas",
-		HealthPath:   "/v1/models",
-		PollInterval: time.Minute,
-		Bind:         "127.0.0.1",
-		Port:         8080,
-		UnhealthyFor: time.Minute,
-		StoreCap:     8,
+		Upstream:              "https://api.synthetic.new:443",
+		QuotaPath:             "/v2/quotas",
+		HealthPath:            "/v1/models",
+		PollInterval:          time.Minute,
+		Bind:                  "127.0.0.1",
+		Port:                  8080,
+		UnhealthyFor:          time.Minute,
+		HoldOffFailover:       10 * time.Minute,
+		UpstreamHeaderTimeout: time.Second,
+		StoreCap:              8,
 	})
 }
 

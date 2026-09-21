@@ -21,6 +21,18 @@ const quotaExhaustedBody = `{"error":"You've exceeded your subscription rate lim
 // the CEL's response.code >= 500 clause).
 const unavailableBody = `{"error":"upstream unavailable"}`
 
+// statusKey carries a *statusHolder into the outbound request context so
+// ModifyResponse can record the upstream status for the access log WITHOUT
+// wrapping the ResponseWriter. (Wrapping the writer would put an
+// obviously-safe passthrough through a function CodeQL treats as an
+// untrusted-data sink; letting ReverseProxy write directly keeps the
+// sanctioned API as the only writer and the log accurate.)
+type ctxKey int
+
+const statusKey ctxKey = 0
+
+type statusHolder struct{ code int }
+
 // Proxy is the running reverse proxy plus its per-key state.
 type Proxy struct {
 	cfg    Config
@@ -75,6 +87,12 @@ func NewProxy(cfg Config) *Proxy {
 		Transport: transport,
 		// -1 flushes every write immediately; required for SSE token streaming.
 		FlushInterval: -1,
+		ModifyResponse: func(resp *http.Response) error {
+			if h, ok := resp.Request.Context().Value(statusKey).(*statusHolder); ok {
+				h.code = resp.StatusCode
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("msg=synthetic-proxy event=upstream_error upstream=%s err=%q", p.upHost, err.Error())
 			writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
@@ -100,26 +118,32 @@ func (p *Proxy) Handler() http.Handler {
 // handle logs the outcome of the per-key gate and transparent forward.
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	lw := &loggingWriter{ResponseWriter: w, r: r}
 
-	verdict := p.decide(r.Context(), r.Header.Get("Authorization"), lw)
+	holder := &statusHolder{code: http.StatusOK}
+	r = r.WithContext(context.WithValue(r.Context(), statusKey, holder))
 
+	auth := r.Header.Get("Authorization")
+	refusal, verdict := p.decide(r.Context(), auth, w, r)
+
+	status := refusal
+	if status == 0 {
+		status = holder.code
+	}
 	log.Printf("msg=synthetic-proxy kh=%s verdict=%s status=%d upstream=%s dur_ms=%d",
-		shortHash(HashAuth(r.Header.Get("Authorization"))), verdict, lw.statusOrDefault(),
-		p.upHost, time.Since(start).Milliseconds())
+		shortHash(HashAuth(auth)), verdict, status, p.upHost, time.Since(start).Milliseconds())
 }
 
-// decide applies the gate and, when allowed, forwards the request,
-// returning the verdict label for logging.
-func (p *Proxy) decide(ctx context.Context, auth string, lw *loggingWriter) string {
+// decide applies the gate and, when allowed, forwards the request. It returns
+// the refusal status (0 when the request was forwarded) and the verdict label.
+func (p *Proxy) decide(ctx context.Context, auth string, w http.ResponseWriter, r *http.Request) (int, string) {
 	now := time.Now()
 
 	// No credential on the request: nothing to key state on. Forward and let
 	// Synthetic (and the gateway's CEL) arbitrate — this is a misconfiguration
 	// upstream of this proxy, not a reason to deny here.
 	if auth == "" {
-		p.rp.ServeHTTP(lw, lw.r)
-		return "passthrough"
+		p.rp.ServeHTTP(w, r)
+		return 0, "passthrough"
 	}
 
 	kh := HashAuth(auth)
@@ -127,22 +151,22 @@ func (p *Proxy) decide(ctx context.Context, auth string, lw *loggingWriter) stri
 
 	// An in-force refusal short-circuits without touching Synthetic.
 	if seen && now.Before(st.RefusedUntil) {
-		writeJSON(lw, http.StatusTooManyRequests, quotaExhaustedBody)
-		return st.Verdict.String()
+		writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
+		return http.StatusTooManyRequests, st.Verdict.String()
 	}
 
 	// Reuse a recent verdict rather than re-querying on every request.
 	if seen && now.Sub(st.LastCheck) < p.cfg.PollInterval {
 		switch st.Verdict {
 		case VerdictQuotaExhausted:
-			writeJSON(lw, http.StatusTooManyRequests, quotaExhaustedBody)
-			return "quota_exhausted"
+			writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
+			return http.StatusTooManyRequests, "quota_exhausted"
 		case VerdictUnhealthy:
-			writeJSON(lw, http.StatusServiceUnavailable, unavailableBody)
-			return "unhealthy"
+			writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
+			return http.StatusServiceUnavailable, "unhealthy"
 		default:
-			p.rp.ServeHTTP(lw, lw.r)
-			return "healthy"
+			p.rp.ServeHTTP(w, r)
+			return 0, "healthy"
 		}
 	}
 
@@ -162,12 +186,12 @@ func (p *Proxy) decide(ctx context.Context, auth string, lw *loggingWriter) stri
 			nst.Verdict = VerdictQuotaExhausted
 			nst.RefusedUntil = now.Add(p.cfg.UnhealthyFor)
 			p.store.Set(kh, nst)
-			writeJSON(lw, http.StatusTooManyRequests, quotaExhaustedBody)
-			return "quota_exhausted"
+			writeJSON(w, http.StatusTooManyRequests, quotaExhaustedBody)
+			return http.StatusTooManyRequests, "quota_exhausted"
 		}
 		p.store.Set(kh, nst)
-		p.rp.ServeHTTP(lw, lw.r)
-		return "healthy"
+		p.rp.ServeHTTP(w, r)
+		return 0, "healthy"
 	}
 
 	// Quota endpoint indeterminate: only positive evidence of a DOWN upstream
@@ -178,13 +202,13 @@ func (p *Proxy) decide(ctx context.Context, auth string, lw *loggingWriter) stri
 			LastCheck:    now,
 			RefusedUntil: now.Add(p.cfg.UnhealthyFor),
 		})
-		writeJSON(lw, http.StatusServiceUnavailable, unavailableBody)
-		return "unhealthy"
+		writeJSON(w, http.StatusServiceUnavailable, unavailableBody)
+		return http.StatusServiceUnavailable, "unhealthy"
 	}
 
 	p.store.Set(kh, KeyState{Verdict: VerdictHealthy, LastCheck: now})
-	p.rp.ServeHTTP(lw, lw.r)
-	return "healthy"
+	p.rp.ServeHTTP(w, r)
+	return 0, "healthy"
 }
 
 // Serve runs the HTTP server until ctx is cancelled, then shuts it down.
@@ -228,43 +252,4 @@ func shortHash(h string) string {
 		return h[:8]
 	}
 	return h
-}
-
-// loggingWriter records the status code while transparently supporting the
-// flushing the SSE path needs.
-type loggingWriter struct {
-	http.ResponseWriter
-	r     *http.Request
-	code  int
-	wrote bool
-}
-
-func (l *loggingWriter) WriteHeader(code int) {
-	if !l.wrote {
-		l.code = code
-		l.wrote = true
-	}
-	l.ResponseWriter.WriteHeader(code)
-}
-
-func (l *loggingWriter) Write(b []byte) (int, error) {
-	if !l.wrote {
-		l.code = http.StatusOK
-		l.wrote = true
-	}
-	return l.ResponseWriter.Write(b)
-}
-
-// Flush implements http.Flusher so httputil.ReverseProxy can stream SSE.
-func (l *loggingWriter) Flush() {
-	if f, ok := l.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (l *loggingWriter) statusOrDefault() int {
-	if l.code == 0 {
-		return http.StatusOK
-	}
-	return l.code
 }

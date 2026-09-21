@@ -1,0 +1,78 @@
+# vpn-egress allowlist — the namespace-wide default-deny baseline
+# (cilium-default-deny.yaml) is closed; everything this pool actually needs is
+# named below. Note how little Cilium can see: the tunnel traffic itself is
+# opaque WireGuard, so the interesting policy surface is ingress to the proxy
+# port, not the remote destinations the tunnels carry.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vpn-egress-allowlist
+  namespace: vpn-egress
+spec:
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    # The namespace list below IS the access control for this egress pool. A
+    # future consumer adds its own namespace here — plus its own egress half
+    # against this namespace on port 8888 — and nothing else can reach the
+    # tunnels' proxy. Deliberately the only auth: gluetun's proxy is
+    # unauthenticated (a second shared credential replicated five times would
+    # add a failure mode that takes the whole egress leg down on any mismatch,
+    # for a control the CNI already provides).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+        - ports:
+            - {port: "8888", protocol: TCP}
+    # A no-op today (both probes are exec into the container), but it is the
+    # rule an HTTP probe would need the moment anyone converts one — harmless to
+    # carry now, and its absence would be a silent probe failure later.
+    - fromEntities:
+        - health
+    # Same-namespace traffic, both directions. Enumerating the cross-namespace
+    # edges above would otherwise restrict sibling traffic as a side effect, and
+    # "pods inside a namespace can always reach each other" is a standing
+    # cluster rule (that is what security-baseline/intra-namespace-allow.yaml
+    # exists for). It is carried inline here — the same way media and
+    # hermes-egress do it — rather than by adding this namespace to that file.
+    # Practical value below the principle: reaching the pool's own Service from
+    # inside the namespace is what makes one exit debuggable without opening
+    # anything else.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: vpn-egress
+  egress:
+    # Cluster DNS. gluetun resolves names through its own DoT resolver inside
+    # the tunnel, but the endpoint hostname/config path should never depend on
+    # that resolver working, so the cluster resolver stays reachable.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The ONLY traffic Cilium can see leaving these pods: the WireGuard outer
+    # transport, UDP/51820 to the five Proton endpoints. Everything the tunnels
+    # carry is inside WireGuard and invisible to the datapath — so there is no
+    # rule here for api.synthetic.new or any other remote, and none is possible.
+    # These five CIDRs must be updated in lockstep with the
+    # WIREGUARD_ENDPOINT_IP values in deployments.yaml if Proton ever moves an
+    # endpoint; a stale entry means that tunnel silently never handshakes.
+    - toCIDRSet:
+        - cidr: 79.127.186.251/32
+        - cidr: 79.127.164.95/32
+        - cidr: 62.112.9.164/32
+        - cidr: 194.126.177.13/32
+        - cidr: 89.36.76.130/32
+      toPorts:
+        - ports:
+            - {port: "51820", protocol: UDP}
+    # The egress half of the same-namespace rule above.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: vpn-egress

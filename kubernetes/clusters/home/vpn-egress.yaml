@@ -1,0 +1,48 @@
+# vpn-egress — five ProtonVPN WireGuard tunnels (one gluetun pod each) behind a
+# single ClusterIP Service that load-balances across whichever tunnels are
+# Ready. It is a reusable egress pool: a consumer points HTTPS_PROXY at
+# http://vpn-egress.vpn-egress.svc.cluster.local:8888 and each of its requests
+# leaves through a random healthy VPN exit. synthetic-proxy is the first
+# consumer, wired in a separate change.
+#
+# WHY NO dependsOn FROM THE LLM LANE, and why wait: false:
+#
+#   * A hard `dependsOn` edge the other way round (agentgateway -> vpn-egress)
+#     would let a broken VPN lane block the LLM lane's reconciliation entirely —
+#     the coupling D11 rejected. The consumer is pointed at the Service by its
+#     own env instead, and Phase 1 lands before that flip so there is no window
+#     in which a request can hit a Service with no ready endpoints.
+#
+#   * `wait: true` + healthChecks would make this Kustomization NotReady for as
+#     long as ANY single Proton endpoint is unreachable. That is not a local
+#     inconvenience: hack/flux-wait-kustomizations.sh gates the repo's
+#     post-merge workflow on every Kustomization's Ready condition, so one flaky
+#     VPN would fail every future merge in the repository. Readiness of the
+#     individual exits is expressed where it belongs — in the pods' readiness
+#     probes, which is also what keeps a dead exit out of the Service's endpoint
+#     list. Health signal comes from kube-state-metrics, which the monitoring
+#     stack already scrapes (no extra scrape object is possible: gluetun exposes
+#     no metrics endpoint).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: vpn-egress
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/vpn-egress
+  prune: true
+  wait: false
+  timeout: 15m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

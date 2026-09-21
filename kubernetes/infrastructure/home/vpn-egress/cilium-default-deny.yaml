@@ -1,0 +1,20 @@
+# vpn-egress default-deny baseline — same semantics as the media/paperless
+# namespaces (see ../media/cilium-default-deny.yaml). Cross-namespace traffic is
+# off by default; cilium-allowlist.yaml names the only exceptions. That matters
+# more here than elsewhere: an open egress pool would be an open (if slow) route
+# to the internet for any pod that wanted one.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vpn-egress-default-deny
+  namespace: vpn-egress
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in vpn-egress. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

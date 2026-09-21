@@ -69,7 +69,7 @@ justified and the date moves, or the excluded workloads are fixed and the
 
 ## Legend A — `platform-namespaces`
 
-The 21 namespaces every Pod-shape policy in this directory excludes, verbatim
+The 22 namespaces every Pod-shape policy in this directory excludes, verbatim
 from the `exclude` blocks (the same list, repeated per policy, so that a rule's
 scope is readable in one place):
 
@@ -77,7 +77,8 @@ scope is readable in one place):
 kube-system, kube-node-lease, kube-public, cilium-secrets, flux-system, kyverno,
 monitoring, network, cert-manager, cnpg-system, clickhouse-operator,
 seaweedfs-operator, valkey-operator-system, truenas-csi, nvidia-device-plugin,
-buildkit, agent-sandbox-system, hermes-sandbox, media, tetragon, crowdsec
+buildkit, agent-sandbox-system, hermes-sandbox, media, vpn-egress, tetragon,
+crowdsec
 ```
 
 Why the list exists at all: these planes legitimately need what the policies
@@ -93,10 +94,10 @@ full per-control reasoning is the header comment of each policy.
 | `disallow-latest-tag` | platform-namespaces (legend A) | platform | Platform planes ship image tags from upstream charts/operators (Cilium, Kyverno, CSI, device plugins); Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `restrict-host-namespaces` | platform-namespaces (legend A) | platform | CNI/CSI/device-plugin/monitoring planes need host namespaces by design; Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `disallow-host-path` | platform-namespaces (legend A) | platform | Monitoring, the image builder and the CNI/CSI/device-plugin planes mount host paths by design; Flux/Kyverno must write the policy objects. | 2027-03-18 |
-| `disallow-privileged-containers` | platform-namespaces (legend A) | platform | CNI/CSI/device-plugin/Kata/crowdsec planes are privileged by design and the media stack needs NET_ADMIN; Flux/Kyverno must write the policy objects. | 2027-03-18 |
+| `disallow-privileged-containers` | platform-namespaces (legend A) | platform | CNI/CSI/device-plugin/Kata/crowdsec planes are privileged by design and the media/vpn-egress stacks need NET_ADMIN; Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `require-pod-non-root` | platform-namespaces (legend A) | platform | Platform planes legitimately run as root (CNI/CSI/device-plugin/monitoring/build/Kata); Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `require-seccomp-runtimedefault` | platform-namespaces (legend A) | platform | Platform planes need host namespaces/hostPath/privileged and have no seccomp floor of their own; Flux/Kyverno must write the policy objects. | 2027-03-18 |
-| `require-drop-all-capabilities` | platform-namespaces (legend A) | platform | Platform planes legitimately need added capabilities (media/NET_ADMIN, CNI, CSI, device plugins); Flux/Kyverno must write the policy objects. | 2027-03-18 |
+| `require-drop-all-capabilities` | platform-namespaces (legend A) | platform | Platform planes legitimately need added capabilities (media/vpn-egress NET_ADMIN, CNI, CSI, device plugins); Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `require-resource-requests` | platform-namespaces (legend A) | platform | Platform planes are managed by their charts/operators, whose requests are set upstream; Flux/Kyverno must write the policy objects. | 2027-03-18 |
 | `disallow-default-serviceaccount` | platform-namespaces (legend A) | platform | Platform planes use the default ServiceAccount for kubelet-style duties and for cluster debug pods; Flux/Kyverno must write the policy objects. `kube-system` is the specific case that matters (its debug pods are the one place a default token may be wanted). | 2027-03-18 |
 | `require-cilium-default-deny-floor` | platform-namespaces (legend A) | platform | System and platform namespaces are policed by Cilium and the platform charts themselves, and several have no workloads; Flux/Kyverno must write the policy objects. | 2027-03-18 |

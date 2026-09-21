@@ -1,0 +1,21 @@
+# The vpn-egress pool: five ProtonVPN WireGuard tunnels (PL / BE / NL / DE-FRA /
+# DE-BER), one gluetun pod each, all behind a single ClusterIP Service that acts
+# as the load balancer. It is deliberately built with no consumer in this change:
+# it is a reusable egress pool that later workloads point at via HTTPS_PROXY, and
+# the first consumer is synthetic-proxy (Phase 2).
+#
+# No gateway ingress label: nothing here is exposed outside the cluster — the
+# whole surface is one in-cluster CONNECT proxy port.
+#
+# Talos enforces PodSecurity `baseline` cluster-wide, and baseline forbids adding
+# NET_ADMIN — but gluetun needs exactly that to create the WireGuard interface
+# and install its kill-switch rules. Same explicit override (enforce privileged,
+# keep audit/warn at baseline as signal) as the media and buildkit namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vpn-egress
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

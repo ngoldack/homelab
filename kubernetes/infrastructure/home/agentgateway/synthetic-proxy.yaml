@@ -27,6 +27,17 @@
 # whose namespace-wide allowlist (cilium-allowlist.yaml, endpointSelector {})
 # already admits in-namespace ingress (the data plane's calls) and egress to
 # `world` on 443 (Synthetic) plus cluster DNS.
+---
+# Dedicated ServiceAccount (repo convention + the cluster's
+# disallow-default-serviceaccount policy: a pod must never run as `default`).
+# The proxy makes no Kubernetes API call, so the token is not mounted at all.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synthetic-proxy
+  namespace: agentgateway
+automountServiceAccountToken: false
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,8 +62,8 @@ spec:
       labels:
         app.kubernetes.io/name: synthetic-proxy
     spec:
-      # The proxy never touches the Kubernetes API: it needs no RBAC and no SA
-      # token (its only inputs are env + the requests it serves).
+      # Dedicated SA (see the ServiceAccount above); the token is not mounted.
+      serviceAccountName: synthetic-proxy
       automountServiceAccountToken: false
       nodeSelector:
         topology.homelab/site: home
@@ -119,6 +130,14 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem: true — the Go runtime may still want a
+            # writable temp dir, so give it one (repo convention).
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

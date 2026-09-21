@@ -104,14 +104,17 @@ spec:
             - name: QUOTA_POLL_SECONDS
               value: "300"
             # How long a bad key is held off LOCALLY, without touching
-            # Synthetic. This is the authoritative no-poke window now: the
-            # gateway's eviction is deliberately short (5m) so it re-probes
-            # cheaply, and this proxy short-circuits those probes from state,
-            # so at most one request per gateway-eviction window reaches
-            # Synthetic — not the continuous poke that kept a 429 alive for
-            # 8h+.
+            # Synthetic. Deliberately SHORT (10m): the poke rate that justified
+            # the original 1h window no longer exists, because this proxy
+            # short-circuits from state — only ONE request per gateway eviction
+            # window (5m) reaches Synthetic, not the continuous agent traffic
+            # that kept a 429 alive for 8h+. At 1h, two transient upstream 429s
+            # (or a single blip) cost a full hour of OpenRouter; 10m bounds
+            # that while still leaving a real no-poke window, and it outlasts
+            # the gateway's 5m eviction so the proxy stays the authority
+            # instead of being re-probed every cycle.
             - name: UNHEALTHY_AFTER
-              value: 1h
+              value: 10m
           livenessProbe:
             httpGet:
               path: /healthz

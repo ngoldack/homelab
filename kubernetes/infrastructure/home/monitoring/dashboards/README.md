@@ -50,6 +50,24 @@ Sources, all pinned:
                         metrics from llama.cpp server --metrics
   authentik.json        hand-authored (no official dashboard) — django-
                         prometheus process metrics on the :9300 metrics server
+  synthetic-proxy.json  hand-authored (no official dashboard) — the
+                        synthetic_proxy_* metrics from image-builds/
+                        synthetic-proxy, the per-key quota/health gate in
+                        front of api.synthetic.new: requests by verdict,
+                        upstream responses by code, the request-latency
+                        histogram, refusals as a percentage of traffic,
+                        quota-check outcomes, keys tracked and lifetime
+                        requests. Every expression was run against the live
+                        VictoriaMetrics query API before commit and the
+                        numbers observed at that time are recorded in each
+                        panel's description. Two coverage caveats recorded
+                        there: synthetic_proxy_probes_total does not exist
+                        until the reachability probe runs (it fires only when
+                        the quota endpoint call fails), so that panel is
+                        empty in steady state by design; and the
+                        verdict="quota_exhausted"/"rate_limited" and code="429"
+                        series appear only once the proxy has seen such an
+                        answer, so they can be absent rather than zero.
   survivability.json    hand-authored (no official dashboard), uid
                         homelab-survivability, schemaVersion 39 — the cluster
                         survivability set: backup ages (talos-backup etcd

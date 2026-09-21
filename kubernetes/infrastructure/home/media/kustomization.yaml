@@ -5,7 +5,9 @@ resources:
   - cilium-allowlist.yaml
   - namespace.yaml
   - nad-vlan-2080.yaml
-  - vlan-routes-configmap.yaml
+  - vpn-routes-configmap.yaml
+  - vpn-gateway-configmap.yaml
+  - wireguard.sops.yaml
   - storage.yaml
   - sources.yaml
   - seerr.yaml

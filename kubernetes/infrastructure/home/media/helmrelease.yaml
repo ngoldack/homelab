@@ -3,18 +3,21 @@
 # except the request UI: Seerr ships its own upstream chart + release
 # (seerr.yaml) instead of a controller/service entry here.
 #
-# Two pods families live here:
+# Three pod families live here:
 #
 #   playback   jellyfin (+ Seerr for requests, its own release above) —
 #              LAN-resident media server, no VLAN attachment, reached on the
 #              LAN VIP.
+#   gateway    vpn-gateway — the stack's single WireGuard tunnel, on VLAN 2080.
+#              It is what makes the download chain's egress obfuscated: see the
+#              controller below and vpn-gateway-configmap.yaml.
 #   automation sabnzbd, prowlarr, sonarr, radarr, bazarr — the download chain.
 #              Every one of these carries a macvlan interface on VLAN 2080
-#              (UniFi "Obfuscated", auto-VPN-routed) so indexer queries and
-#              usenet traffic leave through the VPN, and a vlan-routes init
-#              container that moves the pod's default route onto it while
-#              keeping cluster traffic on eth0. See ../media/nad-vlan-2080.yaml
-#              and vlan-routes-configmap.yaml.
+#              (UniFi "Obfuscated") and a vpn-routes init container that moves
+#              the pod's default route onto it, pointing at the vpn-gateway
+#              pod: their internet egress is tunneled and NAT'd there, while
+#              cluster traffic stays on eth0. See ../media/nad-vlan-2080.yaml,
+#              vpn-routes-configmap.yaml and vpn-gateway-configmap.yaml.
 #
 # Everything shares /data (the media-library PVC): downloads land in
 # /data/usenet/complete and Sonarr/Radarr import into /data/media/{tv,movies}
@@ -124,7 +127,7 @@ spec:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.205/24"]}]'
         initContainers:
-          vlan-routes:
+          vpn-routes:
             image:
               repository: ghcr.io/nicolaka/netshoot
               tag: v0.16
@@ -222,7 +225,7 @@ spec:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.201/24"]}]'
         initContainers:
-          vlan-routes:
+          vpn-routes:
             image:
               repository: ghcr.io/nicolaka/netshoot
               tag: v0.16
@@ -316,7 +319,7 @@ spec:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.202/24"]}]'
         initContainers:
-          vlan-routes:
+          vpn-routes:
             image:
               repository: ghcr.io/nicolaka/netshoot
               tag: v0.16
@@ -410,7 +413,7 @@ spec:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.203/24"]}]'
         initContainers:
-          vlan-routes:
+          vpn-routes:
             image:
               repository: ghcr.io/nicolaka/netshoot
               tag: v0.16
@@ -504,7 +507,7 @@ spec:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.204/24"]}]'
         initContainers:
-          vlan-routes:
+          vpn-routes:
             image:
               repository: ghcr.io/nicolaka/netshoot
               tag: v0.16
@@ -592,6 +595,61 @@ spec:
                   periodSeconds: 10
                   timeoutSeconds: 10
                   failureThreshold: 30
+      # The one shared WireGuard tunnel for the whole download/indexer chain.
+      #
+      # A WireGuard peer is identified by its public key, so a sidecar per app
+      # sharing one config would be a single peer whose endpoint flips to
+      # whichever pod handshook last — only one of them would ever work. Instead
+      # the tunnel lives here, on the VLAN 2080 address (10.20.80.200) the app
+      # pods route their default through, and this pod does what a router does:
+      # masquerade their traffic into wg0 (media-vpn.nft), drop anything that
+      # tries to leave any other way, and clamp MSS to the tunnel MTU.
+      vpn-gateway:
+        type: deployment
+        pod:
+          annotations:
+            k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.200/24"]}]'
+        containers:
+          main:
+            image:
+              repository: linuxserver/wireguard
+              tag: "1.0.20260223-r0-ls122"
+            # Bypass the image's s6 entrypoint (which would run wg-quick and
+            # rewrite the pod's shared /etc/resolv.conf): the script owns the
+            # interface, the routes and the firewall. The image is used for its
+            # tooling — wg, wg-quick strip, iproute2, nftables.
+            command: ["/bin/sh", "/scripts/gateway.sh"]
+            securityContext:
+              capabilities:
+                add: ["NET_ADMIN"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+            probes:
+              # The pod is not usable (and the apps' egress fails closed) until
+              # the first handshake lands; 60 x 5s gives the tunnel five
+              # minutes to come up at boot.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/bin/sh", "/scripts/healthcheck.sh"]
+                  periodSeconds: 5
+                  timeoutSeconds: 3
+                  failureThreshold: 60
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/bin/sh", "/scripts/healthcheck.sh"]
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
     service:
       jellyfin:
         controller: jellyfin
@@ -624,26 +682,44 @@ spec:
           http:
             port: 6767
     persistence:
-      # The route-script ConfigMap, mounted into every VLAN pod's init
-      # container (not the app container — nothing else needs it).
-      vlan-routes:
+      # The route script, mounted into the download pods' init container (not
+      # the app container — nothing else needs it).
+      vpn-routes:
         type: configMap
-        name: vlan-routes
+        name: vpn-routes
         advancedMounts:
           sabnzbd:
-            vlan-routes:
+            vpn-routes:
               - path: /scripts
           sonarr:
-            vlan-routes:
+            vpn-routes:
               - path: /scripts
           radarr:
-            vlan-routes:
+            vpn-routes:
               - path: /scripts
           prowlarr:
-            vlan-routes:
+            vpn-routes:
               - path: /scripts
           bazarr:
-            vlan-routes:
+            vpn-routes:
+              - path: /scripts
+      # The WireGuard config (SOPS-encrypted Secret) and the gateway's own
+      # scripts, mounted only into the gateway pod. /wg, not /etc/wireguard:
+      # the image ships /etc/wireguard as a symlink to /config/wg_confs.
+      wireguard:
+        type: secret
+        name: media-wireguard
+        advancedMounts:
+          vpn-gateway:
+            main:
+              - path: /wg
+                readOnly: true
+      vpn-gateway-scripts:
+        type: configMap
+        name: vpn-gateway
+        advancedMounts:
+          vpn-gateway:
+            main:
               - path: /scripts
       library:
         type: persistentVolumeClaim

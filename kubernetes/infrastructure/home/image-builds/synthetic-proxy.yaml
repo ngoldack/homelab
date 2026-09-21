@@ -13,6 +13,15 @@
 # VerdictRateLimited). The context SHA, the --output tag and the Job name
 # suffix travel together (Jobs are immutable): to rebuild, bump all three.
 #
+# WHY THE CONTEXT SHA — NOT "was this edit only a comment?" — IS WHAT KEEPS THE
+# PIN REPRODUCIBLE: Go embeds a build ID derived from the source content, so even
+# a comment-only edit yields a different binary. Measured 2026-09-21: two builds
+# of the same program differing only in a comment hash differently, with
+# `-trimpath -ldflags="-s -w"` applied. A pinned digest therefore only
+# reproduces from the exact revision recorded here, which is why a docs-only
+# source change still moves this SHA (the commit `76f9ae6` reasoning — "the
+# compiled binary is unchanged" — is not sound).
+#
 # WHY s11 AND NOT s9: the suffix only has to be unique among the Jobs that
 # actually exist in the cluster, because a Job spec is immutable and Flux fails
 # the whole Kustomization on a colliding name. Two newer suffixes are already

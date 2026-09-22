@@ -9,9 +9,12 @@
 # the response-body buffering it required, are gone from this file.
 #
 # So the contract is one line: the proxy said the leg is unhealthy -> evict and
-# fail the chain over to the next priority group (OpenRouter). Anything that is
-# not a 5xx is left alone — including Synthetic's transient parallel-limit 429,
-# which the proxy deliberately passes through untouched.
+# fail the chain over to the next provider it has. With OpenRouter removed from
+# hindsight-chain there is no next group, so the 503 surfaces to the client
+# until the proxy's hold-off lapses; the mechanism is intact for the day a
+# second provider is added back.
+# Whatever is not a 5xx is left alone — including Synthetic's transient
+# parallel-limit 429, which the proxy deliberately passes through untouched.
 #
 # duration: 5m — short on purpose. The proxy holds a bad key off for its own
 # UNHEALTHY_AFTER window and answers 503 locally WITHOUT touching Synthetic, so

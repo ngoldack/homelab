@@ -61,6 +61,26 @@ RUN set -eu; \
     node --input-type=module -e 'const m = await import("@whiskeysockets/baileys"); if (!m.makeWASocket && !m.default) throw new Error("baileys has no makeWASocket/default export"); console.log("whatsapp bridge: baileys resolves offline")'; \
     node --input-type=module -e 'for (const d of ["express","qrcode-terminal","pino"]) await import(d); console.log("whatsapp bridge: express/qrcode-terminal/pino resolve offline")'
 
+# Pin the transitive `tar` and `anyio` installs past the two CRITICALs the build
+# gate fails on (same shape as the base image's own `uv pip install --upgrade`
+# lines above — an in-place version bump, not a dependency change):
+#   * tar CVE-2026-59873 (gzip-bomb DoS) arrives with the bridge tree above;
+#     fixed in 7.5.19; `npm install` re-resolves the tree and the version is
+#     asserted immediately after.
+#   * anyio CVE-2026-63374 (IDNA-2003 name encoding) is inherited from the
+#     upstream base image's uv-managed venv (4.12.1 < 4.14.2). That venv is out
+#     of this Dockerfile's control, so it is patched here; without it NO rebuild
+#     of this image can pass its own trivy gate.
+RUN set -eu; \
+    cd /opt/hermes/scripts/whatsapp-bridge; \
+    npm install --omit=dev --silent --no-audit --no-fund "tar@>=7.5.19"; \
+    node -e 'const p=require("./node_modules/tar/package.json"); const [maj,min]=p.version.split(".").map(Number); if (maj<7 || (maj===7 && min<5)) throw new Error("tar still vulnerable: "+p.version); if (maj===7 && min===5 && Number(p.version.split(".")[2])<19) throw new Error("tar still vulnerable: "+p.version); console.log("whatsapp bridge: tar "+p.version+" >= 7.5.19")'; \
+    sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash; \
+    test "$(cat node_modules/.hermes-pkg-hash)" = "$(sha256sum package.json | cut -c1-16)"; \
+    uv pip install --python /opt/hermes/.venv/bin/python3 --no-cache "anyio>=4.14.2"; \
+    test -z "$(ls -d /opt/hermes/.venv/lib/python3.13/site-packages/anyio-4.12.* 2>/dev/null)" || { echo "old anyio dist-info still present"; exit 1; }; \
+    /opt/hermes/.venv/bin/python3 -c 'import importlib.metadata as md; v=md.version("anyio"); assert tuple(int(x) for x in v.split(".")[:2]) >= (4,14), "anyio still vulnerable: "+v; print("base venv: anyio "+v+" >= 4.14.2")'
+
 # Install the pinned agent-sandbox python SDK (with its grpc extra) and the
 # plugin package into a SEPARATE plain venv, NOT the base image's uv-managed
 # /opt/hermes/.venv: uv pip refuses to resolve against that venv (uv-managed

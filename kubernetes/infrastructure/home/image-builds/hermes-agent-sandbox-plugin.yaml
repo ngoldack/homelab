@@ -59,8 +59,12 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          DIGEST=$(grep -oE ''sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1);
+          DIGEST=$(grep -oE ''docker-content-digest: sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1 | grep -oE ''sha256:[a-f0-9]{64}'');
 
+          if [ -z "$DIGEST" ]; then
+            echo "note: buildctl printed no docker-content-digest line; asking the registry"
+            DIGEST=$(curl -fsSI "https://registry.ngoldack.de/v2/hermes-agent-sandbox-plugin/manifests/0.1.0-aa9130d" | tr -d ''\\r'' | sed -n ''s/^docker-content-digest: //Ip'' | tr -d ''\\n'');
+          fi
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
 
           echo "DIGEST=$DIGEST";

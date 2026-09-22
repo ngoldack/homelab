@@ -35,7 +35,7 @@
 # them).
 #
 # Scope: the app namespaces (authentik, paperless, immich, langfuse, hindsight,
-# headlamp, hermes, agentgateway, aigateway, registry, llmkube-system,
+# headlamp, hermes, agentgateway, aigateway, registry,
 # talos-backup, unpoller, homelab-infra-metrics, …). The platform namespaces
 # below are excluded because they legitimately need what these policies
 # prohibit — the CNI/CSI/device-plugin plane uses host namespaces and hostPath
@@ -45,7 +45,7 @@
 #   kube-system, kube-node-lease, kube-public, cilium-secrets, flux-system,
 #   kyverno, monitoring, network, cert-manager, cnpg-system,
 #   clickhouse-operator, seaweedfs-operator, valkey-operator-system,
-#   truenas-csi, nvidia-device-plugin, buildkit, agent-sandbox-system,
+#   truenas-csi, buildkit, agent-sandbox-system,
 #   hermes-sandbox, media, vpn-egress, tetragon, crowdsec
 ---
 # Explicit image tags (or digests) only. Two rules so the report distinguishes
@@ -101,7 +101,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -139,7 +138,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -207,7 +205,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -275,7 +272,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -346,7 +342,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -734,7 +729,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -777,7 +771,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -890,7 +883,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -934,7 +926,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -1055,7 +1046,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -1169,7 +1159,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -1278,7 +1267,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -1337,13 +1325,11 @@ spec:
 #      RE2 engine (used by Kyverno) does not support.
 #
 # AUDIT -> ENFORCE: rule 1 is enforceable once a fresh report is clean (it already
-# is); rule 2 waited on Unit 4.1's digest pass, which has since landed — the
-# llmkube-models manifests now pin
-# registry.ngoldack.de/llama-p100@sha256:f5839c86e75d832fa538bd8b59715a8ea64dd20d356e2d1e9485b43d3a26aa6d
-# (commit 4ac06c9). The only tag-pinned first-party references still visible are
-# the two llmkube-system pods running the pre-change ReplicaSets, which the next
-# Flux reconcile replaces; enforce rule 2 once an audit report taken AFTER that
-# reconcile is clean.
+# is); rule 2 waited on Unit 4.1's digest pass, which has since landed (commit
+# 4ac06c9 pinned the then-live first-party images by digest). Every first-party
+# reference is digest-pinned today — the llama.cpp/llmkube images that were the
+# last exceptions were deleted on 2026-09-22 — so enforce rule 2 once an audit
+# report confirms it.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -1551,7 +1537,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox

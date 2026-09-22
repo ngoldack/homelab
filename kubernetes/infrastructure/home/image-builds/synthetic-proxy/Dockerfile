@@ -7,7 +7,7 @@
 # exactly what the gateway's eviction policy acts on.
 #
 # WHY golang:1.27-alpine — same Go line and build flags as the sibling
-# hermes-egress-guard and llama-kv-broker builds. The module declares `go 1.27`;
+# hermes-egress-guard build. The module declares `go 1.27`;
 # GOTOOLCHAIN=local keeps the build resolving entirely from the pinned public
 # tags below. CGO_ENABLED=0 yields a static binary, so the runtime layer needs
 # no libc beyond busybox.
@@ -25,7 +25,7 @@ WORKDIR /src/go
 
 # The module + the library package. The *_test.go sibling is deliberately NOT
 # copied: it guards the verdict logic on a developer machine and is not built
-# here (the hermes-egress-guard and llama-kv-broker precedent).
+# here (the same rule the hermes-egress-guard build follows).
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/go.mod ./
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/config.go ./
 COPY kubernetes/infrastructure/home/image-builds/synthetic-proxy/go/state.go ./

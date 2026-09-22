@@ -36,8 +36,9 @@ bug in backups.tf); retention is enforced by barman itself (see below).
   starts carrying durable semantics.
 - **TrueNAS datasets without snapshot tasks** — `registry/zot` (images are
   rebuildable artifacts pushed from builds), `monitoring/vmsingle` (metrics
-  history), `llmkube/models` (re-downloadable GGUF weights), `immich/cache`
-  (ML model cache). Their StorageClasses carry no `snapshot.*` parameters —
+  history), `immich/cache` (ML model cache). The `llmkube/models` dataset
+  (re-downloadable GGUF weights) left this list with its lane on 2026-09-22;
+  the dataset itself still exists on the NAS. Their StorageClasses carry no `snapshot.*` parameters —
   parameters are immutable in-cluster and provision-time only, so adding them
   to an existing class fails reconcile and would not protect the already-bound
   PVCs anyway (the 2026-09-15 commit that tried this was reverted).

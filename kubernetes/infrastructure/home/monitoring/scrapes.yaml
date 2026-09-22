@@ -235,27 +235,6 @@ spec:
     # no port name and discovered zero targets.
     - port: metrics
 ---
-# ---- llmkube llama.cpp qwen3-27b: the llama-server runs with --metrics on
-# :8080 (the InferenceService Service of the same name exposes it).
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMServiceScrape
-metadata:
-  name: qwen3-27b
-  namespace: llmkube-system
-spec:
-  namespaceSelector:
-    matchNames: [llmkube-system]
-  selector:
-    matchLabels:
-      app: qwen3-27b
-  endpoints:
-    # The InferenceService Service names its 8080 port "http", so the numeric
-    # form discovered nothing (job serviceScrape/llmkube-system/qwen3-27b has
-    # no up series; the Service also has no ready endpoints right now because
-    # no model pod is scheduled, so the name is the only form that can
-    # resolve once one is).
-    - port: http
----
 # ---- cilium agent (9962, default prometheus-serve-addr) and operator
 # (9963, container port name "prometheus"). Both live in kube-system and have
 # no scrapeable Service of their own, so these are pod scrapes.
@@ -431,30 +410,6 @@ spec:
   endpoints:
     - port: metrics
 ---
-# ---- llama-kv-broker: the slot-choreography broker in front of the
-# qwen36-35b serving Service serves Prometheus text at /metrics on the SAME
-# :8080 its proxy traffic already listens on (so this is a service scrape,
-# not a pod scrape, against the broker's own ClusterIP Service).
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMServiceScrape
-metadata:
-  name: llama-kv-broker
-  namespace: llmkube-system
-spec:
-  namespaceSelector:
-    matchNames: [llmkube-system]
-  selector:
-    matchLabels:
-      app: llama-kv-broker
-  endpoints:
-    # The broker's Service names its 8080 port "http", and service-scrape
-    # discovery keeps targets on __meta_kubernetes_endpoint_port_name, so the
-    # numeric form would discover nothing here either (same lesson as the
-    # qwen3-27b block above). No Cilium change accompanies this object: the
-    # namespace-wide allowlist in ../llmkube/cilium-allowlist.yaml already
-    # admits monitoring into llmkube-system on :8080.
-    - port: http
----
 # ---- synthetic-proxy: the per-key quota/health gate in front of
 # api.synthetic.new (../agentgateway/synthetic-proxy.yaml). It serves its
 # Prometheus exposition on the SAME listener as the proxy, so the scrape
@@ -478,7 +433,7 @@ spec:
   endpoints:
     # Port NAME, not number: service-scrape discovery keeps targets on
     # __meta_kubernetes_endpoint_port_name, so the numeric form discovers
-    # nothing (the qwen3-27b / cert-manager / zot lesson).
+    # nothing (the cert-manager / zot lesson).
     - port: http
       path: /metrics
       interval: 30s

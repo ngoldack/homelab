@@ -167,14 +167,6 @@ configMapGenerator:
         grafana_dashboard: "1"
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
-  - name: grafana-dashboard-llamacpp
-    namespace: monitoring
-    files: [dashboards/llamacpp.json]
-    options:
-      labels:
-        grafana_dashboard: "1"
-      annotations:
-        kustomize.toolkit.fluxcd.io/substitute: disabled
   - name: grafana-dashboard-cilium-agent
     namespace: monitoring
     files: [dashboards/cilium-agent.json]

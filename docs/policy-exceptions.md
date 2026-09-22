@@ -76,7 +76,7 @@ scope is readable in one place):
 ```
 kube-system, kube-node-lease, kube-public, cilium-secrets, flux-system, kyverno,
 monitoring, network, cert-manager, cnpg-system, clickhouse-operator,
-seaweedfs-operator, valkey-operator-system, truenas-csi, nvidia-device-plugin,
+seaweedfs-operator, valkey-operator-system, truenas-csi,
 buildkit, agent-sandbox-system, hermes-sandbox, media, vpn-egress, tetragon,
 crowdsec
 ```
@@ -124,6 +124,6 @@ they are known, owned and dated, rather than assuming the policy is broken.
 | Containers without an effective `RuntimeDefault` seccomp profile | `require-seccomp-runtimedefault` | 42 of 75 containers (none uses `Localhost`) | platform | Same flip as above. Review 2027-03-18. |
 | Containers without an effective `drop: [ALL]` | `require-drop-all-capabilities` | 35 of 75 containers | platform | Same flip as above. Review 2027-03-18. |
 | Containers missing `requests.cpu` and/or `requests.memory` | `require-resource-requests` | 16 of 75 containers | platform | Add requests workload-by-workload (CronJobs first). Review 2027-03-18. |
-| Pods running as the `default` ServiceAccount | `disallow-default-serviceaccount` | 19 of 55 pods, in `authentik`, `langfuse`, `llmkube-system`, `paperless`, `talos-backup` | platform | Not a live credential exposure: `security-baseline/default-service-accounts.yaml` stops the token being projected in those namespaces and no binding in the cluster names a `default` subject. Fix by naming a dedicated SA per workload as each is touched. Review 2027-03-18. |
-| First-party image pinned by tag | `restrict-image-registries` (`first-party-digest-pin`) | `registry.ngoldack.de/llama-p100:0.4.0-p100` in `llmkube-system` (6 of 8 first-party references were digest-pinned at census) | platform | Fixed in Git by Phase 4.1 (commit `4ac06c9`: the llmkube-models manifests pin `llama-p100@sha256:f5839c86…26aa6d`); the two llmkube-system pods still running the pre-change ReplicaSets are replaced on the next Flux reconcile, after which this finding should be empty — enforce rule 2 once a post-reconcile report is clean. Review 2027-03-18. |
+| Pods running as the `default` ServiceAccount | `disallow-default-serviceaccount` | 19 of 55 pods at the 2026-09-18 census, in `authentik`, `langfuse`, `llmkube-system`, `paperless`, `talos-backup` (`llmkube-system` no longer exists) | platform | Not a live credential exposure: `security-baseline/default-service-accounts.yaml` stops the token being projected in those namespaces and no binding in the cluster names a `default` subject. Fix by naming a dedicated SA per workload as each is touched. Review 2027-03-18. |
+| First-party image pinned by tag | `restrict-image-registries` (`first-party-digest-pin`) | none — every first-party reference is digest-pinned (`registry.ngoldack.de/llama-p100:0.4.0-p100`, the last tag-pinned one, lived in `llmkube-system` until that lane was removed 2026-09-22) | platform | Closed by the digest pass (Phase 4.1, commit `4ac06c9`) and by removing the local-LLM lane. Enforce rule 2 once an audit report confirms it. Review 2027-03-18. |
 | Namespaces without a Cilium default-deny floor | `require-cilium-default-deny-floor` | `default` and `reach-test` (non-Flux scratch namespaces, no pods at census time); `aigateway` is a retired lane with no resources | platform | No Flux-managed namespace is affected. Clean the scratch namespaces up or give them a pair. Review 2027-03-18. |

@@ -5,7 +5,8 @@
 # route resources are duplicated rather than multi-parented.
 #
 # KEEP IN SYNC with routes.yaml — same rule set, same ordering (first-match
-# wins: exact /v1/chat/completions + /v1/models BEFORE the /v1/chat prefix).
+# wins: the /v1/chain/<name> aliases and the pinned /v1/synthetic-* tiers
+# BEFORE the broad /v1/chat prefix).
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -16,22 +17,6 @@ spec:
     - name: agentgateway-edge
       namespace: agentgateway
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/chat/completions
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: local-p100
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/models
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: local-p100
     - matches:
         - path:
             type: PathPrefix

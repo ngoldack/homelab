@@ -563,7 +563,7 @@ func ReaperHandler(reaper *Reaper) Handler {
 }
 
 // BuildReaperServer builds the blocking HTTP server (container SIGTERM
-// terminates it — the kv-broker precedent, no signal hook).
+// terminates it — no signal hook, the same shape synthetic-proxy uses).
 func BuildReaperServer(reaper *Reaper, port int, bind string) *http.Server {
 	return &http.Server{
 		Addr:              net.JoinHostPort(bind, strconv.Itoa(port)),

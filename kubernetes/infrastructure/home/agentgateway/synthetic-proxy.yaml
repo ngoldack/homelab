@@ -20,8 +20,7 @@
 # WHY the backends point here: agent-chains.yaml, backends.yaml, chat-chain.yaml
 # and hindsight-chain.yaml repoint each Synthetic provider at
 # synthetic-proxy.agentgateway.svc.cluster.local:8080 (plaintext, no
-# policies.tls — the same shape as the in-cluster local-p100 provider). The
-# proxy then reaches api.synthetic.new:443 itself.
+# policies.tls). The proxy then reaches api.synthetic.new:443 itself.
 #
 # CILIUM: the namespace-wide allowlist (cilium-allowlist.yaml,
 # endpointSelector {}) admits in-namespace ingress (the data plane's calls),

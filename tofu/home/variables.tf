@@ -81,13 +81,6 @@ variable "proxmox_nodes" {
         model   = "Intel UHD Graphics 770"
         vram_gb = 4
       }
-      gpu = [
-        {
-          name    = "nvidia-p100-x16"
-          model   = "Tesla P100"
-          vram_gb = 16
-        }
-      ]
     }
   }
 
@@ -212,9 +205,13 @@ variable "nodes" {
     extensions   = optional(list(string), [])
     gpu          = optional(bool, false)
     gpu_vram_gb  = optional(number, 0)
-    node_labels  = optional(map(string), {})
+    # This node hosts the rootless BuildKit builder, so its machine config
+    # raises user.max_user_namespaces (see talos.tf). It used to be implied by
+    # `gpu = true`, which no longer exists on any node.
+    rootless_buildkit = optional(bool, false)
+    node_labels       = optional(map(string), {})
     hostpci = optional(list(object({
-      # device is the Proxmox PCI resource mapping name (e.g. "nvidia-p100"),
+      # device is the Proxmox PCI resource mapping name (e.g. "intel-igpu"),
       # translated to hostpciX slots + mapping= in the VM resource.
       device  = string
       id      = optional(string)
@@ -263,30 +260,17 @@ variable "nodes" {
       }
     }
     wk-main-performance = {
-      host        = "pmx-main"
-      cpu_cores   = 16
-      cpu_class   = "performance"
-      memory      = 49152
-      disk_size   = 96
-      talos_role  = "worker"
-      gpu         = true
-      gpu_vram_gb = 16
-      # Pascal P100 needs the proprietary/production-branch driver (open modules
-      # are Turing+ only). 580 LTS variants match the known-good host driver.
-      extensions = [
-        "siderolabs/nonfree-kmod-nvidia-lts",
-        "siderolabs/nvidia-container-toolkit-lts",
-      ]
-      hostpci = [
-        {
-          device = "nvidia-p100-x16"
-          pcie   = true
-          rombar = true
-        }
-      ]
+      host              = "pmx-main"
+      cpu_cores         = 16
+      cpu_class         = "performance"
+      memory            = 49152
+      disk_size         = 96
+      talos_role        = "worker"
+      rootless_buildkit = true
       node_labels = {
+        # Historical value, kept because the BuildKit builder selects on it.
         "node.kubernetes.io/instance-type" = "gpu-worker"
-        "workload/ai-inference"            = "true"
+        "workload.hermes.io/sandbox"       = "true"
       }
     }
   }

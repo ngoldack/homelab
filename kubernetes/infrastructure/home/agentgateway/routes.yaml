@@ -1,14 +1,16 @@
-# Routes for agentgateway: /v1/chat/completions and /v1/models spring to
-# local-p100, /v1/chat (prefix) falls back to the tiered chat-chain, and
-# /v1/synthetic-{small,large,deepseek} pin one Synthetic tier each
-# (synthetic-small / synthetic-large / synthetic-hf-deepseek backends).
+# Routes for agentgateway: /v1/chat (prefix) walks the tiered chat-chain and
+# /v1/synthetic-{small,large,deepseek,gpt-oss} pin one Synthetic tier each
+# (synthetic-small / synthetic-large / synthetic-hf-deepseek /
+# synthetic-hf-openai-gpt-oss-120b backends).
 #
-# The exact-match rules (/v1/chat/completions, /v1/models) are placed BEFORE
-# the /v1/chat prefix rule to respect Gateway API's first-match semantics (the
-# agentgateway OpenTelemetry demo uses the same ordering: exact completions
-# before chain). The same constraint applies to the tier rules below: they are
-# listed before /v1/chat, and nothing here may widen /v1/chat to a bare /v1
-# prefix — that would swallow /v1/models and every /v1/synthetic-* path, since
+# The two exact-match rules that used to open this file (/v1/chat/completions
+# and /v1/models, straight to the local P100) went with that backend on
+# 2026-09-22. The name `local-llm` is kept only because renaming it would also
+# touch the look-alike `local-llm-key` scope, which is a different HTTPRoute
+# (/v1/key/*) referenced by name from policy-apikey.yaml and policy-retry.yaml.
+#
+# The tier rules are listed before /v1/chat, and nothing here may widen /v1/chat
+# to a bare /v1 prefix — that would swallow every /v1/synthetic-* path, since
 # first-match means the earlier broad rule wins. (PathPrefix matches on path
 # segments, so today /v1/chat cannot capture /v1/synthetic-*; the ordering is
 # belt-and-braces against a later edit.)
@@ -27,22 +29,6 @@ spec:
     - name: agentgateway
       namespace: agentgateway
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/chat/completions
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: local-p100
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/models
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: local-p100
     - matches:
         - path:
             type: PathPrefix

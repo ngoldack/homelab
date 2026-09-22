@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "7"
+        hermes.ngoldack.de/config-rev: "8"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -179,13 +179,13 @@ spec:
               value: sanitized
             - name: HERMES_LANGFUSE_MAX_CHARS
               value: "12000"
-            # P100 request budget, 600 s (default is 1800). This is the knob the
+            # Chain request budget, 600 s (default is 1800). This is the knob the
             # client actually reads: run_agent._resolved_api_call_timeout and
             # chat_completion_helpers._stream_timeouts both prefer a per-provider
             # providers.<id>.request_timeout_seconds and fall back to this env —
             # and the per-provider key does not match here, because a named
             # custom endpoint resolves to the bare provider id "custom" (see the
-            # CAVEAT in configmap.yaml). The read timeout for this local
+            # CAVEAT in configmap.yaml). The read timeout for this in-cluster
             # endpoint follows the same value (is_local_endpoint matches
             # .cluster.local).
             - name: HERMES_API_TIMEOUT
@@ -244,8 +244,8 @@ spec:
         # RemoteProtocolError (error_code=output_truncated); the relay re-frames
         # that response close-delimited, the shape that completes. It listens on
         # 127.0.0.1 only (same pod network namespace, no Service, no Cilium
-        # change) and forwards to the same agentgateway Service the P100
-        # provider keeps calling directly. Script + rationale: stream-relay.yaml;
+        # change) and forwards to the same agentgateway Service the chain
+        # provider calls directly. Script + rationale: stream-relay.yaml;
         # removal condition: docs/hermes-agent-sandbox.md, "Model choice".
         - name: syn-stream-relay
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5

@@ -71,6 +71,11 @@ tasks:
           | grep '^ *HINDSIGHT_API_TENANT_API_KEY' \
           | sed -E 's/^ *HINDSIGHT_API_TENANT_API_KEY: *//'
 
+  hindsight:retry-failed:
+    desc: Requeue failed Hindsight async operations through the API (ARGS=--dry-run to preview)
+    cmds:
+      - ./hack/hindsight-retry-failed.sh {{.ARGS}}
+
   sops:edit:
     desc: Edit a SOPS-encrypted file
     requires:

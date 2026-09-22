@@ -1,7 +1,7 @@
 # Multi-Agent Hermes + Self-Hosted Matrix
 
 Operator + design document for four coordinated Hermes agent processes
-(`orchestrator`, `dave`, `chad`, `lindner`) on a self-hosted Matrix homeserver
+(`orchestrator`, `dave`, `chad`, `lindner`, `marius`) on a self-hosted Matrix homeserver
 (Synapse + Matrix Authentication Service + Element Web), with Authentik SSO,
 Hermes Kanban for durable delegation, Hindsight for per-agent memory, and the
 agentgateway for all LLM traffic.
@@ -111,13 +111,25 @@ Two more mechanics belong to the same boundary:
 
 - **One shared data volume.** All four pods mount the ReadWriteMany PVC
   `hermes-agents-data` at `/opt/data`, laid out as
-  `profiles/{orchestrator,dave,chad,lindner}/{config.yaml,SOUL.md,.env}` plus
+  `profiles/{orchestrator,dave,chad,lindner,marius}/{config.yaml,SOUL.md,.env}` plus
   `kanban/kanban.db`. A per-pod volume cannot work: the dispatcher spawns each
   task's worker locally and resolves that worker's home as
   `<root>/profiles/<assignee>`.
-- **The board is SQLite on NFS**, so the profiles run
+- **The board is SQLite on NFS**, the profiles request
   `database.journal_mode: delete` (Hermes' documented NFS-safe mode) and all
-  four pods are pinned to one node: `nodeSelector: workload.hermes.io/sandbox=true`
+  four pods are pinned to one node. Note what that setting does and does not do
+  today: a database created BEFORE the setting went in is already WAL, and
+  Hermes refuses a live downgrade ("keeping WAL … a live downgrade under open
+  connections can corrupt the DB"), so the existing `state.db` files stay WAL
+  and the setting only takes effect for databases created afterwards. Making it
+  true for the existing ones is a deliberate offline step (stop the agents, run
+  `PRAGMA journal_mode=DELETE` on each DB file, start them again). The pin only
+  removes the cross-writer hazard: SQLite's WAL mode needs same-host access
+  *and* filesystem support for its `-shm` locking/mmap, and NFS is not in the
+  supported set — so WAL over this volume class is not a supported
+  configuration and that offline conversion is an outstanding action, not an
+  optional nicety.
+  The pods are pinned with `nodeSelector: workload.hermes.io/sandbox=true`
   — the only node carrying that label, and the one the sandbox runtime and the
   parent gateway already use. A *preferred* pod affinity (weight 100, same
   hostname topology) is kept as belt-and-braces rather than as the primary
@@ -138,6 +150,7 @@ Two more mechanics belong to the same boundary:
 | `dave` | General orchestration and share-sync work; the only WhatsApp-facing profile | Matrix + WhatsApp (`:8642`) | `/v1/chain/general-purpose` | `nicolas-core` | `agent_sandbox` (full terminal) |
 | `chad` | Coding work: PRs, refactors, builds | Matrix (`:8662`) | `/v1/chain/coding-medium`, plus `coding-small` / `coding-large` providers for per-card overrides | `nicolas-dev` | `agent_sandbox` (full terminal) |
 | `lindner` | Read-only finance analysis | Matrix (`:8682`) | `/v1/chain/general-purpose` | `nicolas-finance` | read-only by construction (see below) |
+| `marius` | Security operations: evidence-first triage of scan/policy/alert findings | Matrix (`:8722`) | `/v1/chain/general-purpose` | `nicolas-security` | `agent_sandbox` (Kata, no cluster credentials) — see below |
 
 Lindner's read-only posture is the profile config, not a promise: its
 `plugins.enabled` omits `agent_sandbox`, so it has no terminal toolset and
@@ -146,8 +159,11 @@ chain. It is a text-and-reasoning analyst with a Matrix surface. There is no
 finance data source wired to it at all (see
 [Deliberately not implemented](#deliberately-not-implemented)).
 
-Chad's terminal is the Kata sandbox — every model-authored command runs in a
-microVM, never in the gateway pod. Dave has the same terminal and additionally
+Chad's and Marius's terminal is the Kata sandbox — every model-authored command
+runs in a microVM, never in the gateway pod. Marius's sandbox deliberately has
+no cluster credentials at all (`automountServiceAccountToken: false` in the
+sandbox profile), so a security agent cannot read or change the cluster: it
+works from evidence handed to it and asks for specific read-only commands. Dave has the same terminal and additionally
 holds the WhatsApp session. Orchestrator has the sandbox backend configured but
 does no messaging; it exists to own the board and spawn workers.
 
@@ -157,7 +173,7 @@ does no messaging; it exists to own the board and spawn workers.
 
 | Caller | Endpoint | Why |
 | --- | --- | --- |
-| The three bots (in-cluster) | `http://matrix-synapse.matrix.svc.cluster.local:8008` | No Gateway hop, no public DNS/TLS dependency; matches the Cilium grant `hermes -> matrix:8008` |
+| The bots (in-cluster) | `http://matrix-synapse.matrix.svc.cluster.local:8008` | No Gateway hop, no public DNS/TLS dependency; matches the Cilium grant `hermes -> matrix:8008` |
 | The human and external clients | `https://matrix.ngoldack.de` | The edge Gateway, then `matrix-synapse` (haproxy pods) on `:8008` |
 
 Both terminate at the same Synapse, so user IDs and room IDs are identical
@@ -174,7 +190,7 @@ client dials.
 | `MATRIX_REQUIRE_MENTION` | `true` | In rooms, the bot only answers when mentioned |
 | `MATRIX_ALLOWED_ROOMS` | `optional: true` secret ref, **empty until the operator fills it** | Empty = any room a bot is joined to can trigger it; filling `MATRIX_ALLOWED_ROOMS` in `hermes-agents-secret` with the immutable room id restricts it — see the gap note below |
 | `MATRIX_SESSION_SCOPE` / `MATRIX_AUTO_THREAD` | `thread` / `true` | Each task or conversation is isolated in a Matrix thread instead of sharing one room timeline |
-| `MATRIX_IGNORE_USER_PATTERNS` | `^@dave:…,^@chad:…,^@lindner:…` | No agent can be triggered by another agent's (or a bridge ghost's) event |
+| `MATRIX_IGNORE_USER_PATTERNS` | `^@dave:…,^@chad:…,^@lindner:…,^@marius:…` | No agent can be triggered by another agent's (or a bridge ghost's) event |
 
 **Gap, stated rather than papered over:** the manifests carry
 `MATRIX_ALLOWED_ROOMS` from an `optional: true` secret reference, but the
@@ -188,7 +204,7 @@ has been invited to can reach it. Filling that key with the immutable room id
 ### Bot-authored events
 
 Hermes never treats its own events as input. On top of that, every profile
-sets `MATRIX_IGNORE_USER_PATTERNS` to the three bot user IDs, so a
+sets `MATRIX_IGNORE_USER_PATTERNS` to the four bot user IDs, so a
 bot-authored event cannot trigger *any* agent — the guard is configuration, not
 a convention. This matters because a bot that reacted to another bot's output
 would be an unbounded loop. The design does not rely on Matrix for
@@ -283,7 +299,7 @@ The board is a SQLite database at `/opt/data/kanban/kanban.db` on the shared
    `--provider <provider>` appended to that argv.
 
 **Single-dispatcher invariant.** Only `orchestrator` sets
-`dispatch_in_gateway: true`. `dave`, `chad` and `lindner` set it to `false` and
+`dispatch_in_gateway: true`. `dave`, `chad`, `lindner` and `marius` set it to `false` and
 are messaging-plus-execution only. Two dispatchers against one `kanban.db` race
 for claims; this is the one configuration rule that must never be relaxed.
 
@@ -361,6 +377,7 @@ data. These are not separate databases.
 | `dave` | `nicolas-core` | `HINDSIGHT_D_API_KEY` |
 | `chad` | `nicolas-dev` | `HINDSIGHT_C_API_KEY` |
 | `lindner` | `nicolas-finance` | `HINDSIGHT_L_API_KEY` |
+| `marius` | `nicolas-security` | `HINDSIGHT_M_API_KEY` |
 | `orchestrator` | none | — (memory provider not enabled) |
 
 The **credential** half needs saying plainly: the deployed Hindsight exposes
@@ -533,53 +550,100 @@ complete the Authentik login. This creates the operator's Matrix account via
 MAS. Public registration is disabled, so this is the only self-service path;
 everything else is created by an administrator.
 
-### 4. Create the three bot accounts
+### 4. Create the four bot accounts — the bootstrap Job does it
+
+Steps 4-6 are one Job: `kubernetes/infrastructure/home/matrix/bootstrap/`
+registers the four accounts in MAS (dave, chad, lindner, marius) (skipping any that already exist, checked
+through the client API), mints one compatibility token each with a stable device
+id, creates the shared private room and records its immutable id. Flux applies
+it with the namespace; to run it deliberately, or to re-run it after a change:
 
 ```bash
-MAS_POD=$(kubectl -n matrix get pod \
-  -l app.kubernetes.io/name=matrix-authentication-service \
-  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n matrix apply -k kubernetes/infrastructure/home/matrix/bootstrap
+kubectl -n matrix logs job/matrix-bots-bootstrap-s1 -f        # watch it run
+# KEY NAMES only — never print the values into shared output:
+kubectl -n matrix get secret matrix-bots-bootstrap -o jsonpath='{.data}' \
+  | tr ',' '\n' | cut -d'"' -f2
+```
 
-for u in dave chad lindner; do
-  kubectl -n matrix exec "$MAS_POD" -- \
-    mas-cli manage register-user --username "$u" \
-    --password "$(openssl rand -base64 24)" --yes --no-admin
+It publishes `matrix-bots-bootstrap` rather than writing to
+`hermes-agents-secret`: that file is SOPS-managed in git, and a live write would
+silently drift from git. Copy the values in step 7, then delete the Job's Secret.
+
+Two operational notes: the script lives in a ConfigMap (mutable), so fixing it
+needs no new Job name — `kubectl -n matrix delete job matrix-bots-bootstrap-s1`
+then apply again; the *spec* is immutable, so a change to `job.yaml` does need a
+new suffix (`-s1` → `-s2`). And `REISSUE=true` on the Job mints fresh tokens,
+which invalidates the ones the running agents hold until they are rolled.
+
+The Job refuses to guess: if it cannot reach the client API to ask whether a
+localpart is free, it stops with an error instead of assuming the account exists
+(that failure mode already bit once, when a policy revert removed the
+`bootstrap -> haproxy:8008` pair mid-run).
+
+<details>
+<summary>Doing it by hand (fallback)</summary>
+
+```bash
+for u in dave chad lindner marius; do
+  kubectl -n matrix exec deploy/matrix-matrix-authentication-service -- \
+    mas-cli --config /conf/mas-config.yaml manage register-user --yes \
+      --ignore-password-complexity --no-admin --display-name "$u" \
+      --password "$(openssl rand -base64 24)" "$u"
 done
 ```
 
-Re-running for an existing user fails harmlessly (the account already exists);
-use `mas-cli manage set-password <user> <password>` to reset one. Do **not**
-pass `--yes-i-want-to-grant-synapse-admin-privileges`: these are unprivileged
-bot accounts.
+Do **not** pass `--yes-i-want-to-grant-synapse-admin-privileges`: these are
+unprivileged bot accounts. Reset a password with
+`mas-cli manage set-password <user> <password>`.
+</details>
 
 ### 5. Mint one compatibility token per bot
 
-Each bot is a legacy Matrix client that does not speak OAuth, so it needs a
-compatibility token. The device id is chosen here and must be recorded — it is
-the same value that goes into the Secret.
+The Job does this and writes the tokens straight into its Secret — they are
+never printed. Each bot gets a stable device id (`hermes-dave`, `hermes-chad`,
+`hermes-lindner`), which is what makes the Matrix device (and its E2EE crypto
+store on the PVC) survive a token rotation.
+
+By hand, note the **positional** argument order in MAS 1.24 (the docs mention a
+`--device-id` flag that this build does not have):
 
 ```bash
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token dave --device-id HERMES_DAVE
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token chad --device-id HERMES_CHAD
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token lindner --device-id HERMES_LINDNER
+kubectl -n matrix exec deploy/matrix-matrix-authentication-service -- \
+  mas-cli --config /conf/mas-config.yaml \
+  manage issue-compatibility-token dave hermes-dave
 ```
 
 Each command prints a token **once**. Capture it straight into the SOPS editor
-(step 7) without echoing it to a shared terminal, and note the device id you
-passed. The three device ids must be distinct — a shared device id across
-accounts is a configuration error, not a shortcut.
+(step 7) rather than echoing it to a shared terminal. The three device ids must
+be distinct — a shared device id across accounts is a configuration error, not a
+shortcut.
 
 ### 6. Record the room id
 
-Create the shared room in Element Web (or accept an existing one), invite
-`@dave`, `@chad` and `@lindner`, then read the room's **internal id** from
-Room -> Settings -> Advanced. It starts with `!` and is *not* the alias
-(`#room:matrix.ngoldack.de`). Record the `!…:matrix.ngoldack.de` form — aliases
-can be re-pointed, ids cannot. This value is only needed if and when the room
-allowlist is enabled (see the gap in
+The Job creates the room (as dave, who is the only account that exists first)
+on the alias `#agent-hq:matrix.ngoldack.de`, invites the operator and records
+the **internal id** in its Secret as `MATRIX_ALLOWED_ROOMS`. It is the `!…` form
+on purpose: aliases can be re-pointed, ids cannot, and the allowlist wants the
+immutable one.
+
+Re-running adopts an existing alias instead of creating a second room, so the id
+is stable. Membership is set up by the Job too, and deliberately by *self-join*:
+the adapters reject invites from senders outside `MATRIX_ALLOWED_USERS` (that is
+the bot-loop guard), so a bot inviting another bot is refused. The Job therefore
+joins each bot with its own token — opening the room's join rules for the moment
+it takes — and leaves the room **invite-only** with the four bots and the
+invited human inside. Its log ends with the membership it verified:
+
+```text
+room members: @chad:… @dave:… @lindner:… @marius:… (one per agent)
+```
+
+To do any of it by hand: Room -> Settings -> Advanced in Element Web.
+
+If you would rather not pin the room allowlist yet, leave
+`MATRIX_ALLOWED_ROOMS` empty — the sender allowlist and the mention requirement
+still gate every turn (see the gap note in
 [Per-profile policy](#per-profile-policy-what-the-manifests-actually-set)).
 
 ### 7. Fill the SOPS secret
@@ -588,15 +652,15 @@ allowlist is enabled (see the gap in
 task sops:edit FILE=kubernetes/infrastructure/home/hermes-agents/secret.sops.yaml
 ```
 
-Fill, for each bot, the three keys the StatefulSets reference:
+Fill, for each bot, the keys the StatefulSets reference:
 
 | Key | Value |
 | --- | --- |
-| `MATRIX_D_ACCESS_TOKEN` / `MATRIX_C_ACCESS_TOKEN` / `MATRIX_L_ACCESS_TOKEN` | the compatibility token from step 5 |
-| `MATRIX_D_DEVICE_ID` / `MATRIX_C_DEVICE_ID` / `MATRIX_L_DEVICE_ID` | the device id used in step 5 (`HERMES_DAVE` / `HERMES_CHAD` / `HERMES_LINDNER`) |
-| `MATRIX_D_RECOVERY_KEY` / `MATRIX_C_RECOVERY_KEY` / `MATRIX_L_RECOVERY_KEY` | the account's recovery key, once cross-signing exists (see the E2EE section) |
+| `MATRIX_D_ACCESS_TOKEN` / `MATRIX_C_ACCESS_TOKEN` / `MATRIX_L_ACCESS_TOKEN` / `MATRIX_M_ACCESS_TOKEN` | the compatibility token from step 5 |
+| `MATRIX_D_DEVICE_ID` / `MATRIX_C_DEVICE_ID` / `MATRIX_L_DEVICE_ID` / `MATRIX_M_DEVICE_ID` | the device id used in step 5 (`hermes-dave` / `hermes-chad` / `hermes-lindner` / `hermes-marius`) |
+| `MATRIX_D_RECOVERY_KEY` / `MATRIX_C_RECOVERY_KEY` / `MATRIX_L_RECOVERY_KEY` / `MATRIX_M_RECOVERY_KEY` | the account's recovery key, once cross-signing exists (see the E2EE section) |
 | `WHATSAPP_ALLOWED_USERS` | dave's allowlisted phone numbers, country code, no `+` |
-| `HINDSIGHT_D_API_KEY` / `HINDSIGHT_C_API_KEY` / `HINDSIGHT_L_API_KEY` | one Hindsight tenant key per agent |
+| `HINDSIGHT_D_API_KEY` / `HINDSIGHT_C_API_KEY` / `HINDSIGHT_L_API_KEY` / `HINDSIGHT_M_API_KEY` | one Hindsight tenant key per agent |
 | `API_SERVER_KEY` | bearer token for the agents' OpenAI-compatible API |
 
 `API_SERVER_KEY` is a **single shared key** across all four profiles, so
@@ -869,14 +933,17 @@ These are stated so nothing here implies support that does not exist.
 - **WhatsApp is the local Baileys bridge**, not the Cloud API, and carries the
   account-restriction risk that comes with it. It is confined to dave.
 - **One messaging identity per process.** Hermes binds platform credentials per
-  process at startup, so three bots mean three gateway processes. This is the
+  process at startup, so four bots mean four gateway processes. This is the
   design; do not try to multiplex them into one.
 - **One dispatcher, one board, one host — and that host is now mandatory.**
   Kanban is single-host by design: the board is a local SQLite file and worker
   crash detection assumes host-local PIDs, so the four agents are pinned with
   `nodeSelector: workload.hermes.io/sandbox=true` (the only node with that
   label) plus a preferred pod affinity, and every profile runs
-  `database.journal_mode: delete` as the backstop. Consequence, stated plainly:
+  `database.journal_mode: delete` as the backstop (see the caveat earlier: for
+  databases created before that setting the files are already WAL and Hermes
+  keeps them that way rather than risk a live downgrade). Consequence, stated
+  plainly:
   that node is a single point of failure for the whole agent fleet, it also
   hosts `hermes-0`, the sandbox warm pool and the Kata runtime, and its CPU
   requests are close to the ceiling — the four profiles request 100m/256Mi each
@@ -899,7 +966,7 @@ These are stated so nothing here implies support that does not exist.
 - **Hindsight isolation is bank-deep, not tenant-deep, until proven.** The
   deployment ships three per-agent keys but the server publishes one tenant key
   and a custom tenant extension; the smoke test above is what decides whether
-  the three keys give real tenant separation or all three agents share one
+  the per-agent keys give real tenant separation or all of them share one
   tenant and rely on `HINDSIGHT_BANK_ID`. Document the measured result before
   claiming isolation.
 - **The agents' Matrix identity is a long-lived access token per bot**, not an

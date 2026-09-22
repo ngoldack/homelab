@@ -19,3 +19,6 @@ resources:
   # R2: the MAS upstream-OIDC additional-config Secret, mounted by the
   # HelmRelease (matrixAuthenticationService.additional.0-upstream-oidc).
   - mas-authentik-config.sops.yaml
+  # The one-shot Job that configures the Hermes bot accounts in MAS and creates
+  # the shared room (idempotent; its own ServiceAccount and output Secret).
+  - bootstrap

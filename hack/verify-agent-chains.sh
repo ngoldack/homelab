@@ -53,6 +53,7 @@ expected = {
     "dave": "general-purpose",
     "lindner": "general-purpose",
     "chad": "coding-medium",
+    "marius": "general-purpose",
     "orchestrator": "general-purpose",
 }
 tiers = {"chad": ("coding-small", "coding-large")}
@@ -121,6 +122,19 @@ if printf '%s\n' "$offline_out" | grep -q '^FAIL'; then
 else
   printf '%s\n' "$offline_out" | grep '^NOTE'
   ok "offline chain wiring (manifests)"
+fi
+
+# ------------------------------------------------------- pod structure ----
+# A profile copied from a sibling keeps the sibling's numbers and lists: a wrong
+# probe port leaves the pod never-Ready, a missing boot-config key fails the seed
+# initContainer under `set -eu` (blocking the roll of EVERY pod), and an env var
+# renamed on one side of a reference is an unbound variable in that script. All
+# three are silent until a rollout, so they are asserted here.
+if ! struct_out="$(python3 "$ROOT/hack/verify-agent-structure.py" "$AGENTS_DIR")"; then
+  printf '%s\n' "$struct_out" | grep '^FAIL' >&2 || printf '%s\n' "$struct_out" >&2
+  fail=1
+else
+  ok "pod structure (boot-config projections, probe ports, token suffix, seed script)"
 fi
 
 # ------------------------------------------------------------------- live ----

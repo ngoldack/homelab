@@ -72,13 +72,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: synapse-main
-      toPorts:
-        - ports:
-            - port: "8008"
-              protocol: TCP
+    # No egress to the homeserver: Element Web is a static bundle, so the
+    # *browser* talks to Synapse, never this pod. (The gateway is the only
+    # thing that dials it from inside.)
 ---
 # HAPROXY — the ESS L7 shim (app.kubernetes.io/name=haproxy). It is what the
 # HTTPRoutes actually reach: the `matrix-synapse` Service (port 8008) selects
@@ -112,6 +108,31 @@ spec:
             - port: "8405"
               protocol: TCP
             - port: "8406"
+              protocol: TCP
+    # In-namespace peers. MAS dials http://matrix-synapse:8008 for the homeserver
+    # endpoints and that Service selects THESE pods, so a peer list naming only
+    # synapse-main left MAS unable to reach the homeserver (mas-cli doctor:
+    # "Can't reach the homeserver"). Same reason synapse's own rules are on the
+    # namespace rather than on individual pods.
+    # MAS dials http://matrix-synapse:8008 — that Service's endpoints are
+    # these pods, so MAS needs its own peer here (without it MAS cannot
+    # reach the homeserver: mas-cli doctor reports "Can't reach the
+    # homeserver", and every authenticated request fails).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: matrix-authentication-service
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    # The bootstrap Job registers users through this Service and creates the
+    # shared room, so it needs the client API too (see matrix-bots-bootstrap-*).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: matrix-bots-bootstrap
+      toPorts:
+        - ports:
+            - port: "8008"
               protocol: TCP
     # The Hermes bots' client-API path (see hermes/cilium-policy.yaml, whose
     # egress rule points at the matrix namespace on 8008).
@@ -179,10 +200,12 @@ spec:
             # reachable by health-checkers.
             - port: "8080"
               protocol: TCP
-    # In-namespace peers: MAS's synapse handshake (matrix/mas config endpoint
-    # http://matrix-synapse-main.matrix.svc.cluster.local:8008) and haproxy —
-    # both its forwarding on 8008 and the rendered config's active health check
-    # (`http-check connect port 8080`, GET /health).
+    # In-namespace peers: MAS's synapse handshake and haproxy — both its
+    # forwarding on 8008 and the rendered config's active health check
+    # (`http-check connect port 8080`, GET /health). Note MAS dials the
+    # `matrix-synapse` SERVICE (rendered config endpoint), which resolves to the
+    # HAPROXY pods, so the haproxy policy carries the matching namespace peer.
+
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: matrix
@@ -228,6 +251,15 @@ spec:
     # 8008 here — federation is OFF (federation_domain_whitelist: [] in the
     # HelmRelease), so Synapse never dials a remote homeserver's federation
     # port; adding it back is part of re-enabling federation.
+    # In-namespace peers: MAS for MSC3861 token handling (the Service
+    # resolves to the MAS pods).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: matrix-authentication-service
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     - toEntities:
         - world
       toPorts:
@@ -248,6 +280,19 @@ spec:
     matchLabels:
       app.kubernetes.io/name: matrix-authentication-service
   ingress:
+    # In-namespace peers: Synapse dials
+    # http://matrix-matrix-authentication-service:8080 (the Service -> these
+    # pods) for MSC3861 token handling. Without this, every authenticated
+    # request fails at the homeserver.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: synapse-main
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
     - fromEntities:
         - ingress
         - health
@@ -289,8 +334,13 @@ spec:
               protocol: TCP
     # The MAS→Synapse handshake for user lookup (mas → synapse client API).
     - toEndpoints:
+    # Dialled through its Service (the endpoints are the haproxy pods).
         - matchLabels:
-            app.kubernetes.io/name: synapse-main
+    # The homeserver is dialled through its Service (`matrix-synapse`), whose
+    # endpoints are the HAPROXY pods — so the peer names haproxy, not
+    # synapse-main. This exact mistake left MAS unable to reach the
+    # homeserver (mas-cli doctor: "Can't reach the homeserver").
+            app.kubernetes.io/name: haproxy
       toPorts:
         - ports:
             - port: "8008"
@@ -462,4 +512,56 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+---
+# The one-shot bot-bootstrap Job (matrix/bootstrap/). It reaches two things:
+# the client API (to ask whether a localpart is free, and to create the room as
+# dave) and the Kubernetes API (kubectl exec into the MAS pod, plus its own
+# output Secret). No ingress: nothing connects to it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-bots-bootstrap-allowlist
+  namespace: matrix
+spec:
+  description: >-
+    Egress for the bot-bootstrap Job: DNS, the homeserver client API and the
+    Kubernetes API.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: matrix-bots-bootstrap
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: haproxy
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.1/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP

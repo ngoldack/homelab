@@ -64,6 +64,8 @@ spec:
               protocol: TCP
             - port: "8702"
               protocol: TCP
+            - port: "8722"
+              protocol: TCP
   egress:
     # Cluster DNS.
     - toEndpoints:

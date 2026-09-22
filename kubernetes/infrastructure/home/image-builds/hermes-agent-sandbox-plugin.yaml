@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-s2
+  name: build-hermes-agent-sandbox-plugin-s3
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -48,9 +48,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#2fbcf0733e1390a46322a67561631101e2604b2c''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#aa9130d369788327311c188648ee45d438b5f77e''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-aa9130d,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -65,7 +65,7 @@ spec:
 
           echo "DIGEST=$DIGEST";
 
-          IMAGE=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-2fbcf07;
+          IMAGE=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-aa9130d;
 
           echo "== trivy gate ==" &&
 
@@ -84,7 +84,7 @@ spec:
 
           echo "== provenance attest ==" &&
 
-          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"2fbcf0733e1390a46322a67561631101e2604b2c"}},"buildMetadata":{"reproducible":"false"}}''
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"aa9130d369788327311c188648ee45d438b5f77e"}},"buildMetadata":{"reproducible":"false"}}''
           > /tmp/prov.json &&
 
           DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json

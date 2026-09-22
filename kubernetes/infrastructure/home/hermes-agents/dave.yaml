@@ -58,7 +58,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: dave
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:ec4b7cacb2d21a13ea8ec2675057ec29a4e2e0b797adc2cbfdce96d3c27cf406
           env:
             - name: HERMES_HOME
               value: /opt/data/profiles/dave
@@ -272,7 +272,7 @@ spec:
         # drops the terminating chunk of chunked bodies from REMOTE upstreams, so
         # the profile's syn-* provider points at this loopback relay instead.
         - name: syn-stream-relay
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:ec4b7cacb2d21a13ea8ec2675057ec29a4e2e0b797adc2cbfdce96d3c27cf406
           command: ["/opt/hermes/.venv/bin/python3", "-u", "/opt/relay/stream_relay.py"]
           env:
             - name: RELAY_UPSTREAM
@@ -324,7 +324,7 @@ spec:
         # All four exist everywhere because a Kanban worker may be spawned by the
         # orchestrator on any pod and resolves its home as <root>/profiles/<assignee>.
         - name: seed-profile
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:ec4b7cacb2d21a13ea8ec2675057ec29a4e2e0b797adc2cbfdce96d3c27cf406
           command: ["/bin/sh", "-c"]
           env:
             - name: HERMES_CONFIG_REV

@@ -173,7 +173,7 @@ does no messaging; it exists to own the board and spawn workers.
 
 | Caller | Endpoint | Why |
 | --- | --- | --- |
-| The three bots (in-cluster) | `http://matrix-synapse.matrix.svc.cluster.local:8008` | No Gateway hop, no public DNS/TLS dependency; matches the Cilium grant `hermes -> matrix:8008` |
+| The bots (in-cluster) | `http://matrix-synapse.matrix.svc.cluster.local:8008` | No Gateway hop, no public DNS/TLS dependency; matches the Cilium grant `hermes -> matrix:8008` |
 | The human and external clients | `https://matrix.ngoldack.de` | The edge Gateway, then `matrix-synapse` (haproxy pods) on `:8008` |
 
 Both terminate at the same Synapse, so user IDs and room IDs are identical
@@ -204,7 +204,7 @@ has been invited to can reach it. Filling that key with the immutable room id
 ### Bot-authored events
 
 Hermes never treats its own events as input. On top of that, every profile
-sets `MATRIX_IGNORE_USER_PATTERNS` to the three bot user IDs, so a
+sets `MATRIX_IGNORE_USER_PATTERNS` to the four bot user IDs, so a
 bot-authored event cannot trigger *any* agent — the guard is configuration, not
 a convention. This matters because a bot that reacted to another bot's output
 would be an unbounded loop. The design does not rely on Matrix for
@@ -632,7 +632,7 @@ is stable. Membership is set up by the Job too, and deliberately by *self-join*:
 the adapters reject invites from senders outside `MATRIX_ALLOWED_USERS` (that is
 the bot-loop guard), so a bot inviting another bot is refused. The Job therefore
 joins each bot with its own token — opening the room's join rules for the moment
-it takes — and leaves the room **invite-only** with the three bots and the
+it takes — and leaves the room **invite-only** with the four bots and the
 invited human inside. Its log ends with the membership it verified:
 
 ```text
@@ -652,15 +652,15 @@ still gate every turn (see the gap note in
 task sops:edit FILE=kubernetes/infrastructure/home/hermes-agents/secret.sops.yaml
 ```
 
-Fill, for each bot, the three keys the StatefulSets reference:
+Fill, for each bot, the keys the StatefulSets reference:
 
 | Key | Value |
 | --- | --- |
-| `MATRIX_D_ACCESS_TOKEN` / `MATRIX_C_ACCESS_TOKEN` / `MATRIX_L_ACCESS_TOKEN` | the compatibility token from step 5 |
-| `MATRIX_D_DEVICE_ID` / `MATRIX_C_DEVICE_ID` / `MATRIX_L_DEVICE_ID` | the device id used in step 5 (`HERMES_DAVE` / `HERMES_CHAD` / `HERMES_LINDNER`) |
-| `MATRIX_D_RECOVERY_KEY` / `MATRIX_C_RECOVERY_KEY` / `MATRIX_L_RECOVERY_KEY` | the account's recovery key, once cross-signing exists (see the E2EE section) |
+| `MATRIX_D_ACCESS_TOKEN` / `MATRIX_C_ACCESS_TOKEN` / `MATRIX_L_ACCESS_TOKEN` / `MATRIX_M_ACCESS_TOKEN` | the compatibility token from step 5 |
+| `MATRIX_D_DEVICE_ID` / `MATRIX_C_DEVICE_ID` / `MATRIX_L_DEVICE_ID` / `MATRIX_M_DEVICE_ID` | the device id used in step 5 (`hermes-dave` / `hermes-chad` / `hermes-lindner` / `hermes-marius`) |
+| `MATRIX_D_RECOVERY_KEY` / `MATRIX_C_RECOVERY_KEY` / `MATRIX_L_RECOVERY_KEY` / `MATRIX_M_RECOVERY_KEY` | the account's recovery key, once cross-signing exists (see the E2EE section) |
 | `WHATSAPP_ALLOWED_USERS` | dave's allowlisted phone numbers, country code, no `+` |
-| `HINDSIGHT_D_API_KEY` / `HINDSIGHT_C_API_KEY` / `HINDSIGHT_L_API_KEY` | one Hindsight tenant key per agent |
+| `HINDSIGHT_D_API_KEY` / `HINDSIGHT_C_API_KEY` / `HINDSIGHT_L_API_KEY` / `HINDSIGHT_M_API_KEY` | one Hindsight tenant key per agent |
 | `API_SERVER_KEY` | bearer token for the agents' OpenAI-compatible API |
 
 `API_SERVER_KEY` is a **single shared key** across all four profiles, so
@@ -933,7 +933,7 @@ These are stated so nothing here implies support that does not exist.
 - **WhatsApp is the local Baileys bridge**, not the Cloud API, and carries the
   account-restriction risk that comes with it. It is confined to dave.
 - **One messaging identity per process.** Hermes binds platform credentials per
-  process at startup, so three bots mean three gateway processes. This is the
+  process at startup, so four bots mean four gateway processes. This is the
   design; do not try to multiplex them into one.
 - **One dispatcher, one board, one host — and that host is now mandatory.**
   Kanban is single-host by design: the board is a local SQLite file and worker
@@ -966,7 +966,7 @@ These are stated so nothing here implies support that does not exist.
 - **Hindsight isolation is bank-deep, not tenant-deep, until proven.** The
   deployment ships three per-agent keys but the server publishes one tenant key
   and a custom tenant extension; the smoke test above is what decides whether
-  the three keys give real tenant separation or all three agents share one
+  the per-agent keys give real tenant separation or all of them share one
   tenant and rely on `HINDSIGHT_BANK_ID`. Document the measured result before
   claiming isolation.
 - **The agents' Matrix identity is a long-lived access token per bot**, not an

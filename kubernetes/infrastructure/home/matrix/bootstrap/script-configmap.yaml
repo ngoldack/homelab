@@ -10,7 +10,7 @@ data:
     # matrix-bots-bootstrap — configure the Hermes bot accounts in MAS, idempotently.
     #
     # The executable form of the "Bot accounts" runbook step. It:
-    #   * ensures dave/chad/lindner exist (registering any that do not),
+    #   * ensures dave/chad/lindner/marius exist (registering any that do not),
     #   * mints one Matrix access token per bot with a stable device id, so the
     #     device — and the E2EE crypto store on the PVC — survives a rotation,
     #   * creates the shared private room on #agent-hq and records its IMMUTABLE id
@@ -46,9 +46,31 @@ data:
 
     log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
+    # mas-cli reaches the homeserver through the same in-cluster Service the
+    # runtime uses, and that single hop can blip: a 2026-09-22 run died inside
+    # register-user with "error sending request … operation timed out" while
+    # the very same call answered normally moments later. A transport error is
+    # therefore retried; an application answer ("User not found") is passed
+    # straight back to the caller, which branches on it.
+    MAS_RETRIES="${MAS_RETRIES:-4}"
     mas() {
-      kubectl -n "$NS_MATRIX" exec "deploy/$MAS_DEPLOY" -- \
-        mas-cli --config "$MAS_CFG" "$@"
+      attempt=1
+      while :; do
+        if mas_out="$(kubectl -n "$NS_MATRIX" exec "deploy/$MAS_DEPLOY" -- \
+                        mas-cli --config "$MAS_CFG" "$@" 2>&1)"; then
+          printf '%s\n' "$mas_out"; return 0
+        fi
+        case "$mas_out" in
+          *"error sending request"*|*"operation timed out"*|*"timed out"*|\
+          *"error trying to connect"*|*"connection refused"*|*"connection reset"*)
+            if [ "$attempt" -ge "$MAS_RETRIES" ]; then
+              printf '%s\n' "$mas_out"; return 1
+            fi
+            log "mas-cli transport error (attempt $attempt/$MAS_RETRIES) — retrying in 5s"
+            attempt=$((attempt + 1)); sleep 5 ;;
+          *) printf '%s\n' "$mas_out"; return 1 ;;
+        esac
+      done
     }
 
     # Values already recorded, so a re-run does not churn tokens.
@@ -153,7 +175,7 @@ data:
     # private_chat room is invite-only, so a plain self-join is refused too (403).
     # The room is therefore opened for the joins and closed again immediately after,
     # which leaves exactly the intended end state: an invite-only room whose members
-    # are the three bots plus the invited human.
+    # are the four bots plus the invited human.
     room_enc="$(printf '%s' "$room_id" | sed 's/!/%21/')"
     dave_token="$(grep '^MATRIX_D_ACCESS_TOKEN=' "$out" | cut -d= -f2-)"
     [ -n "$dave_token" ] || { log "FATAL: dave's token is needed to manage the room"; exit 1; }

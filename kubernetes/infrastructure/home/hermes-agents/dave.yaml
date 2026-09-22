@@ -194,7 +194,7 @@ spec:
             - name: MATRIX_IGNORE_USER_PATTERNS
               value: >-
                 ^@dave:matrix\.ngoldack\.de$,^@chad:matrix\.ngoldack\.de$,
-                ^@lindner:matrix\.ngoldack\.de$
+                ^@lindner:matrix\.ngoldack\.de$,^@marius:matrix\.ngoldack\.de$
             # E2EE is available but NOT yet proven for these bots: promote to
             # `required` only after the encrypted-room test in the runbook passes.
             - name: MATRIX_E2EE_MODE
@@ -458,22 +458,26 @@ spec:
           configMap:
             name: hermes-agents-config
             items:
-              - key: orchestrator.yaml
-                path: orchestrator.yaml
-              - key: orchestrator.soul.md
-                path: orchestrator.soul.md
-              - key: dave.yaml
-                path: dave.yaml
-              - key: dave.soul.md
-                path: dave.soul.md
-              - key: chad.yaml
-                path: chad.yaml
               - key: chad.soul.md
                 path: chad.soul.md
-              - key: lindner.yaml
-                path: lindner.yaml
+              - key: chad.yaml
+                path: chad.yaml
+              - key: dave.soul.md
+                path: dave.soul.md
+              - key: dave.yaml
+                path: dave.yaml
               - key: lindner.soul.md
                 path: lindner.soul.md
+              - key: lindner.yaml
+                path: lindner.yaml
+              - key: marius.soul.md
+                path: marius.soul.md
+              - key: marius.yaml
+                path: marius.yaml
+              - key: orchestrator.soul.md
+                path: orchestrator.soul.md
+              - key: orchestrator.yaml
+                path: orchestrator.yaml
         - name: router-token
           secret:
             secretName: hermes-secret

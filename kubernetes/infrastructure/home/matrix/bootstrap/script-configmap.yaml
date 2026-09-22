@@ -1,12 +1,4 @@
 # The bootstrap logic, mounted into the Job at /scripts/bootstrap.sh.
-# Keeping it in a ConfigMap (not a container image) matches the restore
-# drills: the script is reviewable in git and the Job stays a thin runner.
-#
-# RE-RUNNING: the script lives here (ConfigMaps are mutable), so a fix does
-# not need a Job rename — delete the Job and re-apply and the next run
-# re-reads this script:  kubectl -n matrix delete job matrix-bots-bootstrap-s1
-# (only a SPEC change in job.yaml needs a new suffix, because Jobs are
-# immutable.)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -138,7 +130,7 @@ data:
     if [ -n "$room_id" ]; then
       log "room #$ROOM_ALIAS_LOCALPART already exists: reusing it"
     else
-      dave_token="$(grep '^MATRIX_DAVE_ACCESS_TOKEN=' "$out" | cut -d= -f2-)"
+      dave_token="$(grep '^MATRIX_D_ACCESS_TOKEN=' "$out" | cut -d= -f2-)"
       [ -n "$dave_token" ] || { log "FATAL: dave's token is required to create the room"; exit 1; }
       invite_json='[]'
       [ -n "$OPERATOR_MXID" ] && invite_json="[\"$OPERATOR_MXID\"]"
@@ -154,12 +146,25 @@ data:
     log "room id: $room_id (this is what MATRIX_ALLOWED_ROOMS pins)"
     printf 'MATRIX_ALLOWED_ROOMS=%s\n' "$room_id" >> "$out"
 
-    # Each bot JOINS with its own token. It must not be invited by another bot: the
-    # adapters reject invites from senders outside MATRIX_ALLOWED_USERS (that is the
-    # bot-loop guard doing its job), so a bot-issued invite is refused — observed
-    # live as "rejecting invite … from unauthorized user @dave:…". A self-join
-    # involves no inviter and is idempotent.
+    # Membership. Each bot JOINS with its own token: the adapters reject invites
+    # from senders outside MATRIX_ALLOWED_USERS (the bot-loop guard, working as
+    # designed — a bot-issued invite reads as "unauthorized user"), and a
+    # private_chat room is invite-only, so a plain self-join is refused too (403).
+    # The room is therefore opened for the joins and closed again immediately after,
+    # which leaves exactly the intended end state: an invite-only room whose members
+    # are the three bots plus the invited human.
     room_enc="$(printf '%s' "$room_id" | sed 's/!/%21/')"
+    dave_token="$(grep '^MATRIX_D_ACCESS_TOKEN=' "$out" | cut -d= -f2-)"
+    [ -n "$dave_token" ] || { log "FATAL: dave's token is needed to manage the room"; exit 1; }
+
+    set_join_rule() {   # $1 = public|invite
+      curl -s -o /dev/null -m 15 -X PUT -H "Authorization: Bearer $dave_token" \
+        -H 'Content-Type: application/json' -d "{\"join_rule\":\"$1\"}" \
+        "$SYNAPSE/_matrix/client/v3/rooms/$room_enc/state/m.room.join_rules"
+    }
+
+    joined=""
+    refused=""
     for bot in $BOTS; do
       case "$bot" in
         dave)    upper=D ;;
@@ -173,21 +178,44 @@ data:
         -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' \
         "$SYNAPSE/_matrix/client/v3/join/$room_enc")"
       case "$code" in
-        200) log "$bot: joined the room" ;;
-        403) log "$bot: join refused (403) — check the room's join rules" ;;
+        200) joined="$joined $bot"; log "$bot: joined the room" ;;
+        403) refused="$refused $bot" ;;
         *)   log "$bot: join returned HTTP $code" ;;
       esac
     done
 
-    # Invite the human (the bots are already in, so nobody has to accept a bot's
-    # invite).
-    if [ -n "$OPERATOR_MXID" ] && [ -n "$room_id" ]; then
+    if [ -n "$refused" ]; then
+      log "opening the room briefly to admit:$refused"
+      set_join_rule public
+      for bot in $refused; do
+        case "$bot" in
+          dave) upper=D ;; chad) upper=C ;; lindner) upper=L ;;
+          *) upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
+        esac
+        tok="$(grep "^MATRIX_${upper}_ACCESS_TOKEN=" "$out" | cut -d= -f2-)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST \
+          -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' \
+          "$SYNAPSE/_matrix/client/v3/join/$room_enc")"
+        log "$bot: join after opening -> HTTP $code"
+      done
+    fi
+    # Invite-only from here on: the members are already inside.
+    set_join_rule invite
+
+    # Invite the human (the bots are members, so nobody has to accept a bot invite).
+    if [ -n "$OPERATOR_MXID" ]; then
       invite_code="$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST \
-        -H "Authorization: Bearer $(grep '^MATRIX_D_ACCESS_TOKEN=' "$out" | cut -d= -f2-)" \
-        -H 'Content-Type: application/json' -d "{\"user_id\":\"$OPERATOR_MXID\"}" \
+        -H "Authorization: Bearer $dave_token" -H 'Content-Type: application/json' \
+        -d "{\"user_id\":\"$OPERATOR_MXID\"}" \
         "$SYNAPSE/_matrix/client/v3/rooms/$room_enc/invite")"
       log "operator invite ($OPERATOR_MXID): HTTP $invite_code"
     fi
+
+    # Who is in the room now — the proof that the wiring worked end to end.
+    members="$(curl -s -m 15 -H "Authorization: Bearer $dave_token" \
+      "$SYNAPSE/_matrix/client/v3/rooms/$room_enc/joined_members" \
+      | jq -r '.joined | keys[]' 2>/dev/null | tr '\n' ' ')"
+    log "room members: $members"
 
     # --------------------------------------------------------------- publish -----
     # The Job owns exactly one Secret; the operator copies these into

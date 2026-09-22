@@ -611,7 +611,18 @@ on purpose: aliases can be re-pointed, ids cannot, and the allowlist wants the
 immutable one.
 
 Re-running adopts an existing alias instead of creating a second room, so the id
-is stable. To do it by hand: Room -> Settings -> Advanced in Element Web.
+is stable. Membership is set up by the Job too, and deliberately by *self-join*:
+the adapters reject invites from senders outside `MATRIX_ALLOWED_USERS` (that is
+the bot-loop guard), so a bot inviting another bot is refused. The Job therefore
+joins each bot with its own token — opening the room's join rules for the moment
+it takes — and leaves the room **invite-only** with the three bots and the
+invited human inside. Its log ends with the membership it verified:
+
+```text
+room members: @chad:matrix.ngoldack.de @dave:matrix.ngoldack.de @lindner:matrix.ngoldack.de
+```
+
+To do any of it by hand: Room -> Settings -> Advanced in Element Web.
 
 If you would rather not pin the room allowlist yet, leave
 `MATRIX_ALLOWED_ROOMS` empty — the sender allowlist and the mention requirement

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-s4
+  name: build-hermes-agent-sandbox-plugin-s5
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -59,10 +59,10 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          DIGEST=$(grep -oE ''docker-content-digest: sha256:[a-f0-9]{64}'' /tmp/build.log | tail -1 | grep -oE ''sha256:[a-f0-9]{64}'');
+          DIGEST=$(sed -n ''s/.*pushing manifest for .*@\(sha256:[a-f0-9]\{64\}\).*/\1/p'' /tmp/build.log | tail -1);
 
           if [ -z "$DIGEST" ]; then
-            echo "note: buildctl printed no docker-content-digest line; asking the registry"
+            echo "note: buildctl printed no pushing-manifest line; asking the registry"
             DIGEST=$(curl -fsSI "https://registry.ngoldack.de/v2/hermes-agent-sandbox-plugin/manifests/0.1.0-2f29397" | tr -d ''\\r'' | sed -n ''s/^docker-content-digest: //Ip'' | tr -d ''\\n'');
           fi
           test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };

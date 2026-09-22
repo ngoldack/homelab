@@ -1,14 +1,21 @@
-# Hindsight's LLM chain: synthetic gpt-oss-120b primary, OpenRouter fallback.
+# Hindsight's LLM chain: Synthetic gpt-oss-120b, no fallback.
 #
-# Groups are priority order (agentgateway failover mechanism): the gateway
-# tries group 1 first and only moves to group 2 once every provider in
-# group 1 is evicted. Eviction is driven by the hindsight-health policy
-# (policy-hindsight-health.yaml) — without it, this backend never fails over.
+# OpenRouter was removed from this chain on 2026-09-22 for cost: hindsight's
+# extraction/consolidation load is high-volume, and the chain's OpenRouter leg
+# was serving nearly all of it while the Synthetic leg sat held off by the
+# proxy's rate-limit detector, so the fallback had become the main spend.
 #
-# Group 1 is a verbatim copy of the synthetic-hf-openai-gpt-oss-120b provider
-# from backends.yaml (keep in sync); group 2 mirrors the openrouter backend
-# shape but pins openai.model so the client's `hf:` model string is replaced
-# per group (openai/gpt-oss-120b is how OpenRouter names the same model).
+# The failover MECHANISM is kept because its remaining shapes are still real:
+#   - `groups` is what policy-hindsight-health.yaml targets;
+#   - more than one provider in group 1 is intra-group failover — the gateway
+#     tries the next provider in the group before moving on — so a second
+#     Synthetic key makes the chain resilient without leaving the provider.
+#
+# The rate-limit/backpressure case is NOT solved here and is tracked
+# separately: synthetic-proxy refuses a key it judges rate-limited (503, the
+# shape this chain's health policy evicts on) and nothing else serves
+# hindsight, so that refusal surfaces to the client. The proxy's
+# HOLD_OFF_FAILOVER clock is what bounds how long it lasts.
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -29,39 +36,3 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-      - providers:
-          - name: openrouter-gpt-oss
-            host: openrouter.ai
-            port: 443
-            path: /api/v1/chat/completions
-            openai:
-              model: openai/gpt-oss-120b
-            policies:
-              ai:
-                # FORCE OpenRouter's provider routing for gpt-oss-120b to the
-                # cheap akashml/bf16 endpoint ONLY (no fallbacks). Without
-                # this, OpenRouter's default routing picked Grok-family
-                # endpoints for gpt-oss-120b, costing ~10x per token (user
-                # report 2026-09-20; the ~30$/M unknown endpoint vs the
-                # akashml bf16 price). `overrides` (not `defaults`) so the
-                # pin always wins even if a client sends its own `provider`.
-                # TWO cheap bf16 endpoints, both ~the same price (verified
-                # against OpenRouter's /endpoints for openai/gpt-oss-120b on
-                # 2026-09-21: akashml/bf16 0.03/0.17 per M, dekallm/bf16
-                # 0.03/0.18 per M -- the two cheapest of 24 endpoints, and the
-                # next cheapest bf16 is ~2x). Listing both lets OpenRouter use
-                # whichever is available without ever reaching for a Grok-family
-                # or fp4 endpoint; `allow_fallbacks: false` keeps it to these
-                # two. Add a third only if it is genuinely in this price band.
-                overrides:
-                  - field: provider
-                    value:
-                      only:
-                        - akashml/bf16
-                        - dekallm/bf16
-                      allow_fallbacks: false
-              auth:
-                secretRef:
-                  name: openrouter-key
-              tls:
-                sni: openrouter.ai

@@ -116,8 +116,28 @@ spec:
             # anti-poke guarantee — the proxy issues no unprompted request to
             # Synthetic, so a key sitting out its rate-limit recovery window is
             # never prodded (which is what kept the 429 state alive before).
+            #
+            # 300 -> 60 (2026-09-22). This knob is not only a quota-check
+            # interval: `decide()` reuses a NON-healthy verdict for this long
+            # after the refusal lapses, so it sets the real length of a
+            # TRANSIENT blackout — max(UNHEALTHY_AFTER, QUOTA_POLL_SECONDS).
+            # At 300s one upstream header timeout therefore cost ~5 minutes of
+            # total outage instead of the 2 minutes UNHEALTHY_AFTER advertises,
+            # and the shared synthetic-key means every chain pays it. Measured
+            # 2026-09-22 12:0x-12:4x: 29 `http2: timeout awaiting response
+            # headers` plus 6 `context canceled` against only 13 real upstream
+            # 503s, yet 22.8k local refusals, with whole minutes (12:37-12:41,
+            # 12:46-12:48) carrying zero requests through.
+            #
+            # 60 does NOT shorten the failover clock: a rate-limited/quota
+            # verdict sets RefusedUntil = now + HOLD_OFF_FAILOVER (5m), and the
+            # in-force-refusal check runs BEFORE this freshness check, so the
+            # long no-poke window is untouched — and with it the anti-poke
+            # guarantee above. The only cost is one /v2/quotas call per key per
+            # minute while a key is being served, which is what this knob was
+            # named for.
             - name: QUOTA_POLL_SECONDS
-              value: "300"
+              value: "60"
             # TWO clocks, because one number cannot serve both cases, and the
             # difference is measured rather than theoretical.
             #

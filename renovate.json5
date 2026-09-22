@@ -28,7 +28,7 @@
   ],
   // ---- managers (evidence-based; see per-entry comments) ----
   enabledManagers: [
-    "github-actions", // .github/workflows/{flux-reconcile,validate,codeql}.yml
+    "github-actions", // .github/workflows/{flux-reconcile,validate}.yml
     "dockerfile", // 7 Dockerfiles under kubernetes/infrastructure/home/image-builds/
     "kubernetes", // raw manifests with single-line `image: name[:tag]@sha256` refs (patterns below)
     "flux", // Flux GitOpsToolkit HelmRelease/HelmRepository/Kustomization resources

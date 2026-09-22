@@ -304,15 +304,22 @@ spec:
         HINDSIGHT_API_LLM_STRICT_SCHEMA: "true"
         HINDSIGHT_API_LLM_TIMEOUT: "600"
         HINDSIGHT_API_LLM_CONNECT_TIMEOUT: "15"
-        # 3600 -> 14400 (4h). The 3600s ceiling was firing while the task was
-        # QUEUED on the global LLM semaphore (`+structured.queued`) or asleep in
-        # 429 retry backoff (`.attempt=1/4.backoff`), not wedged: 11 tasks were
-        # cancelled that way in the 2h to 18:30, and `_mark_failed` makes that
-        # terminal with no re-queue, so their extraction work was discarded and
-        # the queue could never drain. 4h keeps the backstop the ceiling exists
-        # for (a genuinely wedged task holding a slot forever, poller.py:65) while
-        # removing the queue-time kills. Not 0: that deletes the backstop.
-        HINDSIGHT_API_RETAIN_WALL_TIMEOUT: "14400"
+        # 14400 -> 86400 (24h) on 2026-09-22. The 4h ceiling was still firing on
+        # the giant retains the bulk commit-message ingest submitted: the largest
+        # pending payload is 79 MB, which at RETAIN_BATCH_TOKENS=10k (~40 kB per
+        # sub-batch) is ~2,000 sub-batches and ~2,450 LLM calls, and a claimed op
+        # holds only 2 permits / 6 slots - a third of one worker's concurrency -
+        # so a single such op needs ~10h of wall clock. Measured 2026-09-22: the
+        # 10 ops claimed at 07:45-07:49 each fanned out 637-868 LLM calls inside a
+        # 6-second window (trace 83a3bf7b: 718 calls started 07:46:54-07:47:00)
+        # and were still draining 3h later - they were queueing on the LLM
+        # semaphore, not wedged - while `_mark_failed` makes a ceiling kill
+        # terminal with no re-queue, so the whole execution and its ~5,500 calls
+        # were discarded and the queue could not drain.
+        # 86400 is ~2x the worst-case single-op estimate and keeps the backstop
+        # the ceiling exists for (a genuinely wedged task holding a slot forever,
+        # poller.py:65). Not 0: that deletes the backstop.
+        HINDSIGHT_API_RETAIN_WALL_TIMEOUT: "86400"
         # 96 -> 2 (2026-09-22). A measured attempt at 3 was rolled back the same
         # day; the ceiling note is below.
         # The semaphore is per PROCESS (llm_wrapper.py:52), so 96 permits x 3

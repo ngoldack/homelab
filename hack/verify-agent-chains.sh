@@ -155,9 +155,10 @@ of your request, e.g.:
   # or the Gateway API route status for the path you called:
   kubectl -n agentgateway get httproute local-llm -o jsonpath='{.status.parents[*].conditions[*].type}{"\n"}'
 
-A synthetic tier that answers a 429/5xx evicts itself for 10 minutes
-(policy-agent-chains-health.yaml), so a call served by OpenRouter right after a
-synthetic failure is the expected fallback, not a misconfiguration.
+A synthetic tier that answers a 5xx (the proxy's "hold this key off" signal)
+evicts itself for 5 minutes (policy-agent-chains-health.yaml). The chains have
+had no fallback group since 2026-09-22, so the caller sees that 503 rather than
+a second provider serving the call -- an eviction is not a failover any more.
 EOF
 fi
 

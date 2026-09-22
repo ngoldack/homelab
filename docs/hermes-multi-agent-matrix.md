@@ -303,20 +303,26 @@ Four chains exist as `AgentgatewayBackend` priority groups in
 `agentgateway/agent-chains.yaml`, routed by `agentgateway/routes.yaml` (JWT) and
 `httproute-key.yaml` (static key) under `/v1/chain/*` and `/v1/key/*`.
 
-| Chain | Synthetic leg (first) | OpenRouter leg (fallback) |
-| --- | --- | --- |
-| `general-purpose` | `hf:deepseek-ai/DeepSeek-V4.1-Flash` | `~deepseek/deepseek-v4-flash-latest` |
-| `coding-small` | `hf:zai-org/GLM-4.7-Flash` | `~deepseek/deepseek-v4-flash-latest` |
-| `coding-medium` | `hf:zai-org/GLM-5.3-Flash` | `~deepseek/deepseek-v4-flash-latest` |
-| `coding-large` | `hf:deepseek-ai/DeepSeek-V4.1-Flash` | `deepseek/deepseek-v4.1-flash` |
+| Chain | Provider (single group) |
+| --- | --- |
+| `general-purpose` | `hf:deepseek-ai/DeepSeek-V4.1-Flash` |
+| `coding-small` | `hf:zai-org/GLM-4.7-Flash` |
+| `coding-medium` | `hf:zai-org/GLM-5.3-Flash` |
+| `coding-large` | `hf:deepseek-ai/DeepSeek-V4.1-Flash` |
 
-Failover is driven by `agentgateway/policy-agent-chains-health.yaml`:
+Every leg is Synthetic, reached through
+`synthetic-proxy.agentgateway.svc.cluster.local:8080`. Each chain carried an
+OpenRouter fallback group until 2026-09-22, when it was removed for cost, so a
+chain now holds one group and has no failover target.
+
+Eviction is driven by `agentgateway/policy-agent-chains-health.yaml`:
 `unhealthyCondition: response.code >= 500`, `eviction.duration: 5m`,
-`consecutiveFailures: 1`. The Synthetic legs point at
-`synthetic-proxy.agentgateway.svc.cluster.local:8080`, which is what actually
-classifies Synthetic's responses and answers `503` when a key must be held off;
-the gateway evicts on that `503` and fails over to OpenRouter. A transient
-429 that the proxy passes through does **not** evict anything. (The comment in
+`consecutiveFailures: 1`. The proxy is what actually classifies Synthetic's
+responses and answers `503` when a key must be held off. The gateway evicts on
+that `503`, which now only stops it hammering the provider for the eviction
+window — with no second group there is nowhere to move the request, so the
+caller sees the `503` and the proxy's own hold-off bounds how long that lasts.
+A transient 429 that the proxy passes through does **not** evict anything. (The comment in
 `routes.yaml` still says "10 min"; the policy object says `5m` and the policy is
 what the data plane enforces.)
 

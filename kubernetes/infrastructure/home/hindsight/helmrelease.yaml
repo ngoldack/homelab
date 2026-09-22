@@ -1,14 +1,14 @@
 # Hindsight — agent memory that learns (vectorize-io/hindsight, MIT).
 # Self-hosted after the Hindsight Cloud credits ran out; the client just
 # repoints base_url.
-# LLM: OpenRouter DIRECT (2026-09-16) — single model
-# ~deepseek/deepseek-v4-flash-latest at low reasoning effort, strictly JSON
-# via STRICT_SCHEMA. The prior 3-member failover chain (incl. the local
-# qwen3-27b leg) made startup verification cross the chart's 30s liveness
-# budget, crash-looping the API pod mid-boot — removed 2026-09-13. The
-# in-cluster Envoy AI Gateway hop (model "chat") was removed 2026-09-16
-# because the aigateway controller is crash-looping and its routes 500;
-# restore it once the gateway is healthy (see the api env block).
+# LLM: the in-cluster agentgateway, chain `hindsight-chain` (Synthetic
+# gpt-oss-120b), at low reasoning effort, strictly JSON via STRICT_SCHEMA.
+# History: a direct OpenRouter hop (2026-09-16) and, before that, a 3-member
+# failover chain (incl. the local qwen3-27b leg) that made startup
+# verification cross the chart's 30s liveness budget and crash-loop the API
+# pod mid-boot — removed 2026-09-13. The gateway now fronts the Synthetic
+# primary through synthetic-proxy, and OpenRouter was removed from
+# hindsight-chain entirely on 2026-09-22 (cost) — see the api env block.
 #
 # Embeddings + reranker stay on the chart defaults (LOCAL bge-small-en-v1.5 /
 # ms-marco-MiniLM in-process on CPU): they are small, they run per-pod, and
@@ -182,10 +182,11 @@ spec:
       # calls, each holding its DB conn for the call duration.
       # 3 (not more) because podAntiAffinity only spreads across the two home
       # nodes and the per-pod claim width below is the real memory driver.
-      # CAVEAT: the drain is currently provider-gated (measured ~12% HTTP 429
-      # from the OpenRouter leg with zero traffic on the synthetic leg), so
-      # extra replicas add concurrency, not necessarily throughput, until the
-      # model provider has headroom.
+      # CAVEAT: the drain is provider-gated. It used to be the OpenRouter leg
+      # (measured ~12% HTTP 429 with zero traffic on the synthetic leg); that
+      # leg is gone (2026-09-22), so the ceiling is now Synthetic's capacity
+      # plus the proxy's hold-off window. Extra replicas still add concurrency
+      # rather than throughput while the provider is the constraint.
       replicaCount: 3
       # Memory raised three times on 2026-09-18. Evidence, not estimation —
       # live VmRSS of a booting worker, sampled every 2s:
@@ -253,7 +254,7 @@ spec:
       # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
       # both can otherwise co-schedule on one 10-core node and, being burstable
       # to 1000m each, compete for CPU during retain bursts — the exact
-      # contention that showed 212s/diff. Workers are I/O-bound on OpenRouter, so
+      # contention that showed 212s/diff. Workers are I/O-bound on the LLM leg, so
       # spreading only helps; preferred (not required) so placement still works if
       # one home node is full.
       affinity:

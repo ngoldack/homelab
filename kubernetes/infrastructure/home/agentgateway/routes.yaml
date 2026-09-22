@@ -80,8 +80,8 @@ spec:
     # /chat/completions, so this is the exact path such a client emits).
     # JWT-authenticated (the gateway's Strict JWT policy); NOT under /v1/key/*
     # (apiKeyAuthentication Strict on X-Api-Key would reject a JWT-only
-    # request). Targets the general-purpose chain: synthetic-first with
-    # OpenRouter fallback, so it stays healthy while synthetic rate-limits.
+    # request). Targets the general-purpose chain: one Synthetic group, so a
+    # Synthetic rate-limit surfaces as the proxy's 503 rather than a failover.
     - matches:
         - path:
             type: PathPrefix
@@ -94,8 +94,9 @@ spec:
     # routing (the 4 chains in agent-chains.yaml). Hermes agents call these
     # paths with the SAME aigateway-oidc JWT the existing /v1/* routes use
     # (the /v1/key/* static-key variants remain for CLI consumers). Each
-    # walks its own chain backend; synthetic 429 evicts synthetic for 10 min
-    # (policy-agent-chains-health.yaml).
+    # walks its own chain backend, which is now a single Synthetic group: a
+    # 5xx from the proxy evicts that provider for 5m
+    # (policy-agent-chains-health.yaml) and the 503 surfaces to the caller.
     - matches:
         - path:
             type: PathPrefix

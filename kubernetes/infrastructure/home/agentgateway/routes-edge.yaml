@@ -69,8 +69,8 @@ spec:
     # /chat/completions, so this is the exact path such a client emits).
     # JWT-authenticated (the gateway's Strict JWT policy); NOT under /v1/key/*
     # (apiKeyAuthentication Strict on X-Api-Key would reject a JWT-only
-    # request). Targets the general-purpose chain: synthetic-first with
-    # OpenRouter fallback, so it stays healthy while synthetic rate-limits.
+    # request). Targets the general-purpose chain: one Synthetic group, so a
+    # Synthetic rate-limit surfaces as the proxy's 503 rather than a failover.
     - matches:
         - path:
             type: PathPrefix
@@ -81,7 +81,8 @@ spec:
           name: general-purpose-chain
     # Agent chains (R4): same as routes.yaml — KEEP IN SYNC. JWT-authenticated
     # aliases for the 4 agent chains (general-purpose/coding-{small,medium,
-    # large}); each walks its own chain backend with synthetic-429 eviction.
+    # large}); each walks its own chain backend, now a single Synthetic group,
+    # with a 5xx from the proxy evicting that provider for 5m.
     - matches:
         - path:
             type: PathPrefix

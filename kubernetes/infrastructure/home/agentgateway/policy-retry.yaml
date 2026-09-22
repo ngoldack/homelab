@@ -1,9 +1,10 @@
 # Retry policy for the key-authenticated routes: when a backend answers 429
 # or 500, retry up to 3 times (attempts counts the initial attempt, so 4 = one try plus 3 retries)
 # after 1s. Retries prefer a different backend, so combined with the health
-# policies' eviction this produces transparent failover — the client never
-# sees the first error. Without eviction, a retry loops onto the same
-# failing group.
+# policies' eviction this produced transparent failover while the chains had
+# an OpenRouter group. That group is gone (2026-09-22), so a retry now has
+# nowhere else to go; the policy is kept because it still absorbs a transient
+# error within one request.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -22,9 +23,12 @@ spec:
       # failover-worthy upstream answers AND its own local refusals to 503, and
       # the health policy evicts on `response.code >= 500`. So 503 MUST be
       # retried here, or the in-flight failover never happens and the client
-      # sees the 503 instead of the OpenRouter answer. 502/504 are the same
-      # class. 429 stays for a transient parallel-limit answer, which the proxy
-      # deliberately passes through untouched.
+      # sees the 503. 502/504 are the same class. 429 stays for a transient
+      # parallel-limit answer, which the proxy deliberately passes through
+      # untouched. NOTE (2026-09-22): the chains have a single Synthetic group
+      # now, so a retry lands on the SAME provider -- the retry still matters
+      # (it re-attempts once the eviction/hold-off state has moved on) but it
+      # no longer buys a different backend.
       codes:
         - 429
         - 500

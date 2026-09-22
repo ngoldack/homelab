@@ -2,7 +2,7 @@
 #
 # WHY: Synthetic's 429s are three different conditions (transient
 # parallel-limit, a slow-clearing generic rate limit, and hard quota
-# exhaustion) and only the last two should fail the chain over to OpenRouter.
+# exhaustion) and only the last two mean "do not use this key for a while".
 # Discriminating them by sniffing response bodies inside the gateway is
 # fragile. This service instead asks Synthetic's authoritative /v2/quotas
 # endpoint with the SAME key the gateway injects, keeps per-caller state, and
@@ -23,10 +23,19 @@
 # policies.tls — the same shape as the in-cluster local-p100 provider). The
 # proxy then reaches api.synthetic.new:443 itself.
 #
-# CILIUM: no new policy is needed. This pod lives in namespace agentgateway,
-# whose namespace-wide allowlist (cilium-allowlist.yaml, endpointSelector {})
-# already admits in-namespace ingress (the data plane's calls) and egress to
-# `world` on 443 (Synthetic) plus cluster DNS.
+# CILIUM: the namespace-wide allowlist (cilium-allowlist.yaml,
+# endpointSelector {}) admits in-namespace ingress (the data plane's calls),
+# cluster DNS, and — for the Synthetic leg — egress to the vpn-egress namespace
+# on :8888. That last edge is load-bearing: HTTPS_PROXY below sends the upstream
+# request through the vpn-egress Service, and Cilium needs the rule on BOTH sides
+# (vpn-egress admits this namespace in its own allowlist). With one side missing
+# the connection is dropped silently, and the symptom is indistinguishable from a
+# broken VPN.
+#
+# The namespace's `world:443` rule is no longer used by this pod: its only
+# upstream (Synthetic) leaves through the vpn-egress pool, and OTLP export goes
+# to langfuse:3000 in-cluster. The rule is kept deliberately rather than deleted
+# blind — see the note in cilium-allowlist.yaml.
 ---
 # Dedicated ServiceAccount (repo convention + the cluster's
 # disallow-default-serviceaccount policy: a pod must never run as `default`).
@@ -77,10 +86,17 @@ spec:
       containers:
         - name: synthetic-proxy
           # Pinned by manifest digest (Docker-Content-Digest of
-          # registry.ngoldack.de/synthetic-proxy:0.1.0-545e576, built from this
-          # revision's sources through buildkitd:1234). Re-pin after every
-          # rebuild — the new digest is printed by image-builds/synthetic-proxy.yaml.
-          image: registry.ngoldack.de/synthetic-proxy@sha256:70adc920b7d1db35a337aed96d62e2901418bad9f21cc8d5f0e36b03769243e6
+          # registry.ngoldack.de/synthetic-proxy:0.1.0-7ccb99f, built from this
+          # revision's sources through buildkitd:1234 by build Job
+          # build-synthetic-proxy-s11). Re-pin after every rebuild — the new
+          # digest is printed by image-builds/synthetic-proxy.yaml.
+          #
+          # This build adds DisableKeepAlives, which is what makes the
+          # vpn-egress pool rotate per request instead of pinning the proxy to
+          # one exit. The previous digest (…f0e36b03769243e6, tag 0.1.0-545e576)
+          # is the rollback: repin it and the Synthetic leg goes back to a
+          # direct connection with keep-alives on.
+          image: registry.ngoldack.de/synthetic-proxy@sha256:f33662dd76212cc1fdb7b12e128ccb54ad66ab950fbe5daca7ea809e9e92cf8d
           ports:
             - name: http
               containerPort: 8080
@@ -115,22 +131,21 @@ spec:
             # 429, so the proxy burned 14059 refusals re-confirming a state it
             # was itself keeping open. The proxy is the only component that
             # pokes Synthetic, so a long hold-off is what stopped the endless
-            # 429s -- see the 2026-09-22 note below for why it is no longer an
-            # hour.
+            # 429s.
             #
             # 1h -> 5m on 2026-09-22, when OpenRouter was removed from
-            # hindsight-chain: this clock now sets how long a rate-limited key
-            # keeps its OWNERS offline, not how long they stay on a fallback,
-            # so the two clocks serve opposite goals and must agree. The long
-            # window above was measured under the old topology, where the cost
-            # of re-probing was one wasted OpenRouter failover; with a single
-            # provider it is a full outage. 5m matches the gateway's eviction
-            # duration, so both lapse together and re-probing is normal
-            # operation rather than the thing holding the window open.
+            # hindsight-chain and the agent chains: this clock no longer means
+            # "how long a caller stays on a fallback", it means "how long the
+            # caller is offline", so the two clocks serve opposite goals and
+            # must agree. The long window above was measured under the old
+            # topology, where the cost of re-probing was one wasted OpenRouter
+            # call; with a single provider it is an outage. 5m matches the
+            # gateway's eviction duration, so both lapse together and
+            # re-probing is normal operation rather than the thing holding the
+            # window open.
             # NOTE: a shorter window does re-poke Synthetic more often while it
-            # recovers, which is exactly what the 1h value avoided — the
-            # measured trade is deliberate, and the reason the earlier
-            # per-caller-state design exists at all.
+            # recovers, which is exactly what the 1h value avoided — that trade
+            # is deliberate.
             - name: HOLD_OFF_FAILOVER
               value: 5m
             # UNHEALTHY_AFTER (transient only: transport unreachability, a 5xx
@@ -148,6 +163,28 @@ spec:
             # quicker failover.
             - name: UPSTREAM_HEADER_TIMEOUT
               value: 60s
+            # The Synthetic leg leaves through the vpn-egress pool: five
+            # WireGuard tunnels (PL / BE / NL / DE-fra / DE-ber) behind one
+            # ClusterIP Service, each running gluetun's HTTP CONNECT proxy. The
+            # Service IS the load balancer — Cilium hands every new connection a
+            # random *Ready* tunnel — and because http.go disables keep-alives,
+            # each request is a new connection and therefore a fresh exit, so
+            # requests genuinely arrive at Synthetic from five different source
+            # IPs.
+            #
+            # Go reads this once, at the first proxied request, and caches it: a
+            # live `kubectl set env` is NOT picked up by a running process, the
+            # value has to be in the container env (it is) and the pod restarted.
+            - name: HTTPS_PROXY
+              value: http://vpn-egress.vpn-egress.svc.cluster.local:8888
+            # Keep anything in-cluster off the tunnel. The only upstream today is
+            # api.synthetic.new, so this is insurance rather than load-bearing:
+            # it stops a future in-cluster upstream from being sent out through a
+            # Proton exit. (The vpn-egress pods also keep the cluster CIDRs out
+            # of their tunnels, so a request that did go this way would fail
+            # rather than quietly take the long way round.)
+            - name: NO_PROXY
+              value: localhost,127.0.0.1,.svc,.svc.cluster.local
           livenessProbe:
             httpGet:
               path: /healthz

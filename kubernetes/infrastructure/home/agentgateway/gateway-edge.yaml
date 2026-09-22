@@ -5,9 +5,16 @@
 # Split-horizon routing: the public hostname llm.aigateway.svc.ngoldack.de
 # terminates at the edge envoy (network/edge.yaml https-aigateway-svc
 # listener) and is forwarded by httproute-edge.yaml (llm-edge) to THIS
-# gateway's Service — so public LLM requests egress to OpenRouter/synthetic
-# from the datacenter uplink, never over the home wifi bridge. Internal
-# consumers keep hitting the original `agentgateway` Gateway (home node).
+# gateway's Service. Internal consumers keep hitting the original
+# `agentgateway` Gateway (home node).
+#
+# CAVEAT (2026-09-22): this plane originally existed so public LLM requests
+# egressed from the datacenter uplink (OpenRouter directly) instead of over the
+# home wifi bridge. Every backend is now in-cluster — the Synthetic leg goes
+# through synthetic-proxy, which runs on the home site — so a public request
+# traverses cloud → home → vpn-egress and the plane no longer buys the egress
+# path it was built for. Kept because it still terminates the public hostname;
+# revisit if that path is measurably slow.
 #
 # Both Gateways share the same AgentgatewayBackends, chain health policies and
 # keys; each proxy subscribes to the configuration scoped to its own Gateway.

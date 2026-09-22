@@ -23,8 +23,8 @@ func resp429(body, retryAfter string) *http.Response {
 
 // TestClassify429 pins the three-way discrimination. Getting this wrong in
 // either direction is a real cost: misreading parallel_limit as failover-worthy
-// burns an OpenRouter failover on a condition that clears in seconds, and
-// missing a genuine rate limit serves a 429 to the client.
+// refuses a key for a condition that clears in seconds, and missing a genuine
+// rate limit serves a 429 to the client instead of holding the key off.
 func TestClassify429(t *testing.T) {
 	cases := []struct {
 		name         string

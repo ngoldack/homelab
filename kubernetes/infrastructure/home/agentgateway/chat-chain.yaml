@@ -1,17 +1,15 @@
-# LLM chain backend for the agentgateway data plane — tiered fallback.
+# LLM chain backend for the agentgateway data plane — tiered Synthetic chain.
 #
-# Mirrors the aigateway lane's chat-chain (EAG pattern) from the canonical
-# repo commit 1812b9c. The plan's original tiers (syn:small/text →
-# deepseek-v4 → openrouter-flash) match exactly; the reverse substituion
-# model string "deepseek/deepseek-v4-flash-latest" is mirrored verbatim.
+# Groups are priority order: the gateway tries providers from the first group
+# onward; when a provider's upstream fails (connect failure or retriable
+# status), the gateway moves to the next priority group — the tiered behavior
+# the old EAG chain got from prioritized backendRefs + the
+# BackendTrafficPolicy's retriable-status-codes trigger.
 #
-# Groups are priority order: the gateway tries providers from the first
-# group onward; when a provider's upstream fails (connect failure or retriable
-# status), the gateway moves to the next priority group — the same tiered
-# behavior the old EAG chain got from prioritized backendRefs + the
-# BackendTrafficPolicy's retriable-status-codes trigger. Tiers and model
-# strings mirror aigateway/chat-chain.yaml exactly (including the leading `~`
-# on the OpenRouter latest-alias).
+# Every tier is Synthetic: syn:small:text → syn:large:text →
+# hf:deepseek-ai/DeepSeek-V4.1-Flash. The OpenRouter flash leg that used to end
+# this chain (the `~deepseek/deepseek-v4-flash-latest` alias) was removed
+# 2026-09-22 for cost, so the chain now ends at the DeepSeek tier.
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -54,16 +52,3 @@ spec:
               auth:
                 secretRef:
                   name: synthetic-key
-      - providers:
-          - name: openrouter-flash
-            host: openrouter.ai
-            port: 443
-            path: /api/v1/chat/completions
-            openai:
-              model: ~deepseek/deepseek-v4-flash-latest
-            policies:
-              auth:
-                secretRef:
-                  name: openrouter-key
-              tls:
-                sni: openrouter.ai

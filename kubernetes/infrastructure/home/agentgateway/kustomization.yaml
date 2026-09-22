@@ -14,7 +14,6 @@
 # - policy-tracing.yaml (OpenTelemetry tracing policy)
 # - referencegrant-authentik.yaml (allow ik-controller to reach authentik server)
 # - langfuse-otel.sops.yaml (OTel collector telegrams → Langfuse)
-# - openrouter-key.sops.yaml (OpenRouter API key as secret)
 # - synthetic-key.sops.yaml (Synthetic API key as secret)
 # - otel-collector.yaml (OpenTelemetry Collector helmrelease)
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -38,7 +37,6 @@ resources:
   - policy-tracing-edge.yaml
   - referencegrant-authentik.yaml
   - langfuse-otel.sops.yaml
-  - openrouter-key.sops.yaml
   - synthetic-key.sops.yaml
   - httproute-edge.yaml
   - api-keys.sops.yaml

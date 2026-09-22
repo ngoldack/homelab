@@ -8,8 +8,10 @@
 // response bodies inside the gateway is fragile. This proxy instead asks
 // Synthetic's authoritative /v2/quotas endpoint with the SAME API key the
 // gateway injects, keeps per-key state (reachable? quota left?), and fails the
-// request itself when it has positive evidence of exhaustion, so the gateway's
-// existing eviction policy fails the chain over to OpenRouter.
+// request itself when it has positive evidence of exhaustion, which is the
+// signal the gateway's eviction policy acts on. (When the chains had an
+// OpenRouter group this produced a failover; since 2026-09-22 they have a
+// single provider, so it surfaces the judgement instead.)
 //
 // It holds NO secret: the gateway injects the Authorization header; the proxy
 // only hashes it (SHA-256) for its state map and forwards the raw value.

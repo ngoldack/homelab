@@ -3,9 +3,10 @@
 # Replaces the aigateway (Envoy AI Gateway) lane's per-model backends:
 # - aigateway/synthetic.yaml -> `synthetic` (host api.synthetic.new:443,
 #   OpenAI-compatible /v1 — mirrored verbatim from the old EG Backend fqdn).
-# - aigateway/models.yaml    -> `openrouter` (host openrouter.ai:443, the
-#   OpenAI-compatible /api/v1 path the old lane expressed as
-#   schema {name: OpenAI, prefix: /api/v1}).
+# NO OpenRouter. Removed 2026-09-22 for cost: the backend, the key Secret and
+# every chain's OpenRouter leg are gone. Each backend below is Synthetic
+# (through the in-cluster synthetic-proxy) or the local P100, so a Synthetic
+# outage is an outage rather than a failover.
 # - chat-chain's per-tier Synthetic providers -> `synthetic-small`,
 #   `synthetic-large`, `synthetic-hf-deepseek`: the three provider stanzas
 #   chat-chain lists as priority groups, each promoted to a single-provider
@@ -56,28 +57,6 @@ spec:
                   # llama.cpp untouched.
                   "/v1/models": "Passthrough"
                   "/v1/chat/completions": "Completions"
----
-apiVersion: agentgateway.dev/v1alpha1
-kind: AgentgatewayBackend
-metadata:
-  name: openrouter
-  namespace: agentgateway
-spec:
-  ai:
-    groups:
-      - providers:
-          - name: openrouter
-            openai: {}
-            host: openrouter.ai
-            port: 443
-            # OpenRouter is OpenAI-compatible but under /api/v1, not /v1.
-            path: /api/v1/chat/completions
-            policies:
-              auth:
-                secretRef:
-                  name: openrouter-key
-              tls:
-                sni: openrouter.ai
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend

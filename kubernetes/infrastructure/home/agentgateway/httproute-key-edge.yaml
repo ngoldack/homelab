@@ -1,9 +1,17 @@
-# Key-authenticated routes for the EDGE data plane (agentgateway-edge):
-# mirror of httproute-key.yaml (local-llm-key) parented to the edge Gateway,
-# so CLI consumers (opencode via /v1/key/chat) keep working on the public
-# hostname llm.aigateway.svc.ngoldack.de with the same X-Api-Key auth.
+# Key-authenticated routes for the EDGE data plane (agentgateway-edge): the static-key
+# (/v1/key/*) scope, authenticated by policy-apikey-edge.yaml from an
+# X-Api-Key instead of an authentik JWT. Used by CLI consumers (opencode) and
+# LibreChat.
 #
-# KEEP IN SYNC with httproute-key.yaml — identical rules, identical order.
+# NO provider fallback (2026-09-22). Two rules that used to sit here pointed at
+# OpenRouter backends that NEVER EXISTED (dangling references, so both paths
+# were already failing). The coding path now walks the Synthetic DeepSeek
+# backend, which is the model the rule always named; the stealth-model rule
+# (no Synthetic equivalent) is deleted.
+#
+# KEEP IN SYNC with httproute-key.yaml -- identical rules, identical order,
+# and the same deletion of the stealth-model rule (the edge copy is not
+# exempt).
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -14,7 +22,10 @@ spec:
     - name: agentgateway-edge
       namespace: agentgateway
   rules:
-    # Coding model: DeepSeek V4.1 Flash (OpenRouter).
+    # Coding model: Synthetic DeepSeek V4.1 Flash
+    # (hf:deepseek-ai/DeepSeek-V4.1-Flash, backends.yaml). Single-provider
+    # backend, so the client's model id (`deepseek-v4.1-flash`) is replaced by
+    # the provider's pinned model.
     - matches:
         - path:
             type: PathPrefix
@@ -22,21 +33,9 @@ spec:
       backendRefs:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
-          name: openrouter-deepseek-v41-flash
-    # Free model: Union Alpha (OpenRouter stealth).
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/key/free
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: openrouter-union-alpha
+          name: synthetic-hf-deepseek
     # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model.
-    # Walks the hindsight-chain backend (synthetic primary, OpenRouter
-    # fallback). The fallback is driven by the proxy's 503 -- see the
-    # equivalent comment in httproute-key.yaml -- not by the gateway reading a
-    # 429.
+    # Walks hindsight-chain (hindsight-chain.yaml) -- Synthetic only.
     - matches:
         - path:
             type: PathPrefix
@@ -45,8 +44,11 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: hindsight-chain
-    # Agent chains: synthetic-first with OpenRouter fallback (see
-    # agent-chains.yaml). Same chains as the home data plane.
+    # Agent chains: one Synthetic provider each (agent-chains.yaml). The proxy
+    # in front of synthetic (synthetic-proxy.yaml) owns the 429 decision: when
+    # it judges that leg unusable it answers 503, which evicts the provider for
+    # 5m (policy-agent-chains-health.yaml). There is no fallback group to move
+    # to, so that 503 reaches the client -- the proxy's own hold-off bounds it.
     - matches:
         - path:
             type: PathPrefix

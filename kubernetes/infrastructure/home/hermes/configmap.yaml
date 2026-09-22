@@ -70,7 +70,7 @@ data:
       # gateway routes to Synthetic's upstream (verified live 2026-09-17:
       # 200 with upstream model zai-org/GLM-4.7-Flash / zai-org/GLM-5.3-Flash /
       # deepseek-ai/DeepSeek-V4.1-Flash). Same Gateway-scoped Strict JWT, so
-      # key_env points at the OpenRouter-style OPENAI_API_KEY JWT as well.
+      # key_env points at the same OPENAI_API_KEY JWT as well.
       # `models:` is declared explicitly because these tiers are fixed-model
       # passthroughs: GET <tier>/models is rejected 400 by Synthetic, so
       # discovery can never populate the provider's catalog (and the model ids

@@ -127,7 +127,12 @@ spec:
       toPorts:
         - ports:
             - {port: "8888", protocol: TCP}
-    # Upstream model providers (OpenRouter etc.) and OTLP export.
+    # General internet egress on 443. Its documented consumer was OpenRouter,
+    # which was removed 2026-09-22, so nothing here is known to use it today --
+    # it is kept deliberately rather than deleted blind, because removing an
+    # egress grant on the assumption that nothing needs it is how a later
+    # change breaks silently. In-cluster backends (synthetic-proxy, llmkube)
+    # are reached by the scoped rules above; OTLP export goes to langfuse:3000.
     - toEntities:
         - world
       toPorts:

@@ -73,8 +73,18 @@ RUN set -eu; \
 #     of this image can pass its own trivy gate.
 RUN set -eu; \
     cd /opt/hermes/scripts/whatsapp-bridge; \
-    npm install --omit=dev --silent --no-audit --no-fund "tar@>=7.5.19"; \
-    node -e 'const p=require("./node_modules/tar/package.json"); const [maj,min]=p.version.split(".").map(Number); if (maj<7 || (maj===7 && min<5)) throw new Error("tar still vulnerable: "+p.version); if (maj===7 && min===5 && Number(p.version.split(".")[2])<19) throw new Error("tar still vulnerable: "+p.version); console.log("whatsapp bridge: tar "+p.version+" >= 7.5.19")'; \
+    npm pkg set 'overrides.tar=^7.5.19' >/dev/null; \
+    npm install --omit=dev --silent --no-audit --no-fund; \
+    node -e 'const FIXED=[7,5,19]; const lt=(a,b)=>a[0]!==b[0]?a[0]<b[0]:a[1]!==b[1]?a[1]<b[1]:a[2]<b[2]; \
+      const seen=[]; \
+      const lock=require("./package-lock.json"); \
+      for (const [k,v] of Object.entries(lock.packages||{})) if (k.endsWith("node_modules/tar") && v.version) seen.push(["lock:"+k, v.version]); \
+      const walk=(d)=>{for (const e of require("fs").readdirSync(d,{withFileTypes:true})) { const p=d+"/"+e.name; if (e.isDirectory()) { if (e.name==="tar" && require("fs").existsSync(p+"/package.json")) seen.push(["tree:"+p, require(p+"/package.json").version]); else walk(p); } }}; \
+      walk("./node_modules"); \
+      if (!seen.length) throw new Error("no tar copy found at all"); \
+      const bad=seen.filter(([w,v])=>lt(v.split(".").map(Number),FIXED)); \
+      if (bad.length) throw new Error("tar below 7.5.19: "+JSON.stringify(bad)); \
+      console.log("whatsapp bridge: tar "+seen.map(([w,v])=>v+" ("+w+")").join(", ")+" all >= 7.5.19")'; \
     sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash; \
     test "$(cat node_modules/.hermes-pkg-hash)" = "$(sha256sum package.json | cut -c1-16)"; \
     uv pip install --python /opt/hermes/.venv/bin/python3 --no-cache "anyio>=4.14.2"; \

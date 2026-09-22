@@ -17,27 +17,27 @@ data:
     #!/bin/sh
     # matrix-bots-bootstrap — configure the Hermes bot accounts in MAS, idempotently.
     #
-    # Runs as a one-shot Job in the matrix namespace (see job.yaml). It is the
-    # executable form of the "Bot accounts (one-time)" runbook step:
+    # The executable form of the "Bot accounts" runbook step. It:
+    #   * ensures dave/chad/lindner exist (registering any that do not),
+    #   * mints one Matrix access token per bot with a stable device id, so the
+    #     device — and the E2EE crypto store on the PVC — survives a rotation,
+    #   * creates the shared private room on #agent-hq and records its IMMUTABLE id
+    #     (the allowlist wants the id: aliases can be re-pointed, ids cannot),
+    #   * publishes all of it as the Secret `matrix-bots-bootstrap`, which the
+    #     operator copies into hermes-agents/secret.sops.yaml. Nothing is printed:
+    #     tokens are captured here and written straight to that Secret.
     #
-    #   * register dave/chad/lindner in MAS with a random password (skipped when the
-    #     localpart is already taken — checked through the client API, the only
-    #     non-interactive way to ask MAS "does this user exist": the CLI has no
-    #     user-listing command and the MAS image ships no shell, so the check goes
-    #     over HTTP from THIS pod and the mutations go through `kubectl exec` into
-    #     the running MAS pod, which is where the merged config and secrets live);
-    #   * mint one Matrix access token per bot with a stable device id, so the
-    #     Hermes adapters have a device identity that survives restarts;
-    #   * create the shared private room on the alias and record its IMMUTABLE room
-    #     id (the alias is a convenience; the id is what the agents are allowlisted
-    #     on), inviting the operator;
-    #   * publish everything as a Secret the operator copies into
-    #     hermes-agents/secret.sops.yaml. Nothing is printed: tokens are captured in
-    #     this shell and written straight to the Secret.
+    # Two facts about this stack shape the implementation:
+    #   * the MAS image ships NO SHELL, and its merged config + secrets exist only
+    #     inside its own pod — so every mas-cli call goes through `kubectl exec`
+    #     into that pod;
+    #   * MAS itself is the authority on whether a user exists (the CLI has no user
+    #     listing and this build does not serve /register/available — it 404s), so
+    #     existence is probed with the token call, which answers "User not found".
     #
-    # Re-running is safe: an existing user is left alone, an existing token in the
-    # OUTPUT Secret is reused (set REISSUE=true to mint new ones, which invalidates
-    # the old tokens for the running agents until they are rolled).
+    # Re-running is safe: an existing account is left alone and an existing token in
+    # the output Secret is reused. REISSUE=true mints new tokens, which invalidates
+    # the ones the running agents hold until they are rolled.
     set -eu
 
     NS_MATRIX="${NS_MATRIX:-matrix}"
@@ -59,36 +59,15 @@ data:
         mas-cli --config "$MAS_CFG" "$@"
     }
 
-    # Existing values, so a re-run does not churn tokens.
+    # Values already recorded, so a re-run does not churn tokens.
     existing_secret="$(kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o json 2>/dev/null || true)"
-    have_key() {
-      printf '%s' "$existing_secret" | grep -q "\"$1\":" 2>/dev/null || return 1
-    }
+    have_key() { printf '%s' "$existing_secret" | grep -q "\"$1\":" 2>/dev/null; }
     read_key() {
-      kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o "jsonpath={.data.$1}" \
-        | base64 -d
+      kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o "jsonpath={.data.$1}" | base64 -d
     }
 
     rand_pw() {
-      # 24 chars from urandom, base64-safe for the CLI (no shell metachars).
       head -c 24 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-24
-    }
-
-    # 0 = free, 1 = taken, 2 = could not ask. An unreachable homeserver must NOT be
-    # read as "the account already exists": that is how a policy revert during a run
-    # turned into a silent skip (the run then failed later with "User not found"
-    # instead of saying the network was broken).
-    localpart_state() {
-      for _ in 1 2 3; do
-        if body="$(curl -fsS -m 5 "$SYNAPSE/_matrix/client/v3/register/available?username=$1" 2>/dev/null)"; then
-          case "$body" in
-            *'"available":true'*) return 0 ;;
-            *) return 1 ;;
-          esac
-        fi
-        sleep 2
-      done
-      return 2
     }
 
     out="$(mktemp)"
@@ -98,56 +77,61 @@ data:
 
     # ---------------------------------------------------------------- accounts ---
     for bot in $BOTS; do
-      upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')"
-      state=2
-      localpart_state "$bot" || state=$?
-      case "$state" in
-        0)
-          log "$bot: registering (localpart free)"
-          if ! reg_out="$(mas manage register-user --yes --ignore-password-complexity \
-                            --no-admin --display-name "$bot" --password "$(rand_pw)" "$bot" 2>&1)"; then
-            log "FATAL: register-user failed for $bot:"; printf '%s\n' "$reg_out" | tail -5
-            exit 1
-          fi
-          printf 'MATRIX_%s_STATUS=created\n' "$upper" >> "$out"
-          ;;
-        1)
-          log "$bot: account already exists — leaving it alone"
-          printf 'MATRIX_%s_STATUS=existed\n' "$upper" >> "$out"
-          ;;
-        *)
-          log "FATAL: cannot ask $SYNAPSE whether $bot exists (client API unreachable)."
-          log "       Check the Cilium pair bootstrap -> haproxy:8008 before re-running."
-          exit 1
-          ;;
+      # The Secret key suffix is NOT the bot's name: the StatefulSets read
+      # MATRIX_D_/MATRIX_C_/MATRIX_L_ (see hermes-agents/*.yaml), so the mapping is
+      # explicit here. Getting this wrong is silent — the pods would simply find no
+      # token and the operator would be copying values nobody reads.
+      case "$bot" in
+        dave)    upper=D ;;
+        chad)    upper=C ;;
+        lindner) upper=L ;;
+        *)       upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
       esac
-
       # A stable device id keeps the bot's Matrix device (and its E2EE crypto store
       # on the PVC) the same across token rotations.
       device="hermes-$bot"
-      if [ "$REISSUE" = "true" ] || ! have_key "MATRIX_${upper}_ACCESS_TOKEN"; then
-        log "$bot: minting an access token (device $device)"
-        # Syntax is positional in MAS 1.24: <USERNAME> [DEVICE_ID] (the docs'
-        # --device-id flag does not exist in this build).
-        token="$(mas manage issue-compatibility-token "$bot" "$device" \
-          | tr -d '\r' | tail -1 | tr -d '[:space:]')"
-        case "$token" in
-          *" "*) log "FATAL: mas-cli output for $bot is not a bare token"; exit 1 ;;
-          "") log "FATAL: no token in mas-cli output for $bot - output format changed?"; exit 1 ;;
-        esac
-        [ "${#token}" -gt 20 ] || { log "FATAL: token for $bot looks too short"; exit 1; }
-        printf 'MATRIX_%s_ACCESS_TOKEN=%s\n' "$upper" "$token" >> "$out"
-        printf 'MATRIX_%s_DEVICE_ID=%s\n' "$upper" "$device" >> "$out"
-      else
+
+      if [ "$REISSUE" != "true" ] && have_key "MATRIX_${upper}_ACCESS_TOKEN"; then
         log "$bot: reusing the token already recorded in $OUTPUT_SECRET"
         printf 'MATRIX_%s_ACCESS_TOKEN=%s\n' "$upper" "$(read_key "MATRIX_${upper}_ACCESS_TOKEN")" >> "$out"
         printf 'MATRIX_%s_DEVICE_ID=%s\n' "$upper" "$(read_key "MATRIX_${upper}_DEVICE_ID")" >> "$out"
+        continue
       fi
+
+      log "$bot: asking MAS for a token (device $device)"
+      tok_out="$(mas manage issue-compatibility-token "$bot" "$device" 2>&1)" || true
+      case "$tok_out" in
+        *"User not found"*)
+          log "$bot: no such account yet — registering it"
+          if ! reg_out="$(mas manage register-user --yes --ignore-password-complexity \
+                            --no-admin --display-name "$bot" --password "$(rand_pw)" "$bot" 2>&1)"; then
+            log "FATAL: register-user failed for $bot:"; printf '%s\n' "$reg_out" | tail -5; exit 1
+          fi
+          printf 'MATRIX_%s_STATUS=created\n' "$upper" >> "$out"
+          tok_out="$(mas manage issue-compatibility-token "$bot" "$device" 2>&1)" || true
+          ;;
+        *)
+          printf 'MATRIX_%s_STATUS=existed\n' "$upper" >> "$out"
+          ;;
+      esac
+
+      # The CLI logs the token to stderr inside a tracing line
+      # ("…INFO … Compatibility token issued: mct_… compat_access_token.id=…"), so
+      # take the field after the marker rather than "the last word" — a naive
+      # whitespace-stripping capture yields the whole log line and Synapse answers
+      # 401 to it.
+      token="$(printf '%s\n' "$tok_out" \
+        | sed -n 's/.*Compatibility token issued: \([^ ][^ ]*\).*/\1/p' | tail -1)"
+      case "$token" in
+        "") log "FATAL: no token for $bot:"; printf '%s\n' "$tok_out" | tail -3; exit 1 ;;
+      esac
+      [ "${#token}" -gt 20 ] || { log "FATAL: token for $bot looks too short"; exit 1; }
+      printf 'MATRIX_%s_ACCESS_TOKEN=%s\n' "$upper" "$token" >> "$out"
+      printf 'MATRIX_%s_DEVICE_ID=%s\n' "$upper" "$device" >> "$out"
     done
 
     # ------------------------------------------------------------------- room ----
-    # The alias is the human-facing name; the room ID is what the allowlist needs.
-    room_id=""
+    # The alias is the human-facing name; the room ID is what the allowlist pins.
     alias_escaped="%23${ROOM_ALIAS_LOCALPART}:${SERVER_NAME}"
     room_id="$(curl -fsS -m 10 "$SYNAPSE/_matrix/client/v3/directory/room/$alias_escaped" \
       | jq -r '.room_id // empty' 2>/dev/null || true)"
@@ -164,22 +148,55 @@ data:
       payload="$payload\"room_alias_name\":\"$ROOM_ALIAS_LOCALPART\"}"
       room_id="$(curl -fsS -m 20 -X POST \
         -H "Authorization: Bearer $dave_token" -H 'Content-Type: application/json' \
-        -d "$payload" "$SYNAPSE/_matrix/client/v3/createRoom" \
-        | jq -r '.room_id // empty')"
+        -d "$payload" "$SYNAPSE/_matrix/client/v3/createRoom" | jq -r '.room_id // empty')"
       [ -n "$room_id" ] || { log "FATAL: room creation returned no room_id"; exit 1; }
     fi
     log "room id: $room_id (this is what MATRIX_ALLOWED_ROOMS pins)"
     printf 'MATRIX_ALLOWED_ROOMS=%s\n' "$room_id" >> "$out"
 
+    # Each bot JOINS with its own token. It must not be invited by another bot: the
+    # adapters reject invites from senders outside MATRIX_ALLOWED_USERS (that is the
+    # bot-loop guard doing its job), so a bot-issued invite is refused — observed
+    # live as "rejecting invite … from unauthorized user @dave:…". A self-join
+    # involves no inviter and is idempotent.
+    room_enc="$(printf '%s' "$room_id" | sed 's/!/%21/')"
+    for bot in $BOTS; do
+      case "$bot" in
+        dave)    upper=D ;;
+        chad)    upper=C ;;
+        lindner) upper=L ;;
+        *)       upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
+      esac
+      tok="$(grep "^MATRIX_${upper}_ACCESS_TOKEN=" "$out" | cut -d= -f2-)"
+      [ -n "$tok" ] || continue
+      code="$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST \
+        -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' \
+        "$SYNAPSE/_matrix/client/v3/join/$room_enc")"
+      case "$code" in
+        200) log "$bot: joined the room" ;;
+        403) log "$bot: join refused (403) — check the room's join rules" ;;
+        *)   log "$bot: join returned HTTP $code" ;;
+      esac
+    done
+
+    # Invite the human (the bots are already in, so nobody has to accept a bot's
+    # invite).
+    if [ -n "$OPERATOR_MXID" ] && [ -n "$room_id" ]; then
+      invite_code="$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST \
+        -H "Authorization: Bearer $(grep '^MATRIX_D_ACCESS_TOKEN=' "$out" | cut -d= -f2-)" \
+        -H 'Content-Type: application/json' -d "{\"user_id\":\"$OPERATOR_MXID\"}" \
+        "$SYNAPSE/_matrix/client/v3/rooms/$room_enc/invite")"
+      log "operator invite ($OPERATOR_MXID): HTTP $invite_code"
+    fi
+
     # --------------------------------------------------------------- publish -----
-    # The Job owns exactly one Secret; the operator copies these values into
+    # The Job owns exactly one Secret; the operator copies these into
     # hermes-agents/secret.sops.yaml and can then delete it.
     kubectl -n "$NS_MATRIX" create secret generic "$OUTPUT_SECRET" \
       --from-env-file="$out" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     rm -f "$out"
 
-    count="$(kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" \
-      -o jsonpath='{.data}' | tr ',' '\n' | wc -l | tr -d ' ')"
+    count="$(kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o jsonpath='{.data}' \
+      | tr ',' '\n' | wc -l | tr -d ' ')"
     log "wrote $OUTPUT_SECRET ($count values)"
-    log "next: copy them into kubernetes/infrastructure/home/hermes-agents/secret.sops.yaml,"
-    log "      roll the agents, then delete $OUTPUT_SECRET."
+    log "next: copy them into hermes-agents/secret.sops.yaml, roll the agents, delete the Secret."

@@ -29,8 +29,17 @@ USER root
 
 # ca-certificates: ensure the TLS trust store is present for the gateway's own
 # tooling (git/curl). No homelab CA is layered in here.
+# `upgrade` (not just `install`) is deliberate: the base image's Debian packages
+# drift behind the security archive, and the build's trivy gate
+# (--severity CRITICAL --exit-code 1) fails the whole build when they do. On
+# 2026-09-22 a rebuild was rejected on 18 inherited CRITICALs — perl/libxml2/
+# glib/mbedtls/openssh-client/linux-libc-dev — every one of them with a fixed
+# version available in the suite, and none of them anything to do with this
+# image's own content. Refreshing them here keeps the gate meaningful instead of
+# turning a DB refresh into a blocked build.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get -y --no-install-recommends upgrade \
     && rm -rf /var/lib/apt/lists/*
 
 # The WhatsApp bridge's node dependencies, baked in — because Hermes otherwise

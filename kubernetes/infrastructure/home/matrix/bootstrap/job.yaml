@@ -48,7 +48,7 @@ spec:
             - name: NS_MATRIX
               value: matrix
             - name: BOTS
-              value: dave chad lindner
+              value: dave chad lindner marius
             - name: SYNAPSE
               value: http://matrix-synapse.matrix.svc.cluster.local:8008
             - name: OUTPUT_SECRET

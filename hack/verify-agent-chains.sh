@@ -53,6 +53,7 @@ expected = {
     "dave": "general-purpose",
     "lindner": "general-purpose",
     "chad": "coding-medium",
+    "marius": "general-purpose",
     "orchestrator": "general-purpose",
 }
 tiers = {"chad": ("coding-small", "coding-large")}

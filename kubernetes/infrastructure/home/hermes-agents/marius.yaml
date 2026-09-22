@@ -1,10 +1,16 @@
+# marius — the security-operations agent. Matrix messaging, general-purpose
+# LLM chain, own Hindsight bank (nicolas-security). It has the sandbox terminal
+# for read-only diagnostics (trivy/kubectl-style inspection inside the Kata
+# microVM, which carries NO cluster credentials — automountServiceAccountToken
+# is false in the sandbox profile, so it cannot mutate the cluster even by
+# mistake). Hardening mirrors the parent hermes StatefulSet.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: lindner
+  name: marius
   namespace: hermes
 spec:
-  serviceName: lindner
+  serviceName: marius
   replicas: 1
   podManagementPolicy: OrderedReady
   updateStrategy:
@@ -12,7 +18,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: hermes-agents
-      app.kubernetes.io/instance: lindner
+      app.kubernetes.io/instance: marius
   template:
     metadata:
       # Rolls the pod when the profile configs change: the seed initContainer
@@ -23,8 +29,8 @@ spec:
         hermes.ngoldack.de/config-rev: "3"
       labels:
         app.kubernetes.io/name: hermes-agents
-        app.kubernetes.io/instance: lindner
-        hermes.ngoldack.de/sandbox: "false"
+        app.kubernetes.io/instance: marius
+        hermes.ngoldack.de/sandbox: "true"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -57,13 +63,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: lindner
+        - name: marius
           image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
           env:
             - name: HERMES_HOME
-              value: /opt/data/profiles/lindner
+              value: /opt/data/profiles/marius
             - name: HERMES_PROFILE
-              value: lindner
+              value: marius
             # The SINGLE shared board: the orchestrator dispatches from it and every
             # messaging agent creates its cards on it. One file, one dispatcher.
             - name: HERMES_KANBAN_DB
@@ -79,7 +85,7 @@ spec:
                   name: hermes-agents-secret
                   key: API_SERVER_KEY
             - name: API_SERVER_PORT
-              value: "8682"
+              value: "8722"
             - name: API_SERVER_HOST
               value: "0.0.0.0"
             - name: HERMES_API_TIMEOUT
@@ -131,12 +137,23 @@ spec:
             - name: HINDSIGHT_API_URL
               value: http://hindsight-api.hindsight.svc.cluster.local:8888
             - name: HINDSIGHT_BANK_ID
-              value: nicolas-finance
+              value: nicolas-security
             - name: HINDSIGHT_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
-                  key: HINDSIGHT_L_API_KEY
+                  key: HINDSIGHT_M_API_KEY
+            # agent_sandbox terminal backend (Kata sandboxes).
+            - name: AGENT_SANDBOX_ROUTER_URL
+              value: http://sandbox-router-svc.agent-sandbox-system.svc.cluster.local:8080
+            - name: AGENT_SANDBOX_ROUTER_TOKEN_FILE
+              value: /opt/data/router-token
+            - name: AGENT_SANDBOX_EGRESS_HMAC_SECRET_FILE
+              value: /opt/data/egress-hmac
+            - name: TERMINAL_ENV
+              value: agent_sandbox
+            - name: AGENT_SANDBOX_GATEWAY_ID
+              value: marius
             # Matrix bot identity. The client base URL is the IN-CLUSTER Service:
             # the bots never traverse the edge Gateway (the Cilium peer pair is
             # ns-matrix:8008), while the permanent server_name still governs every
@@ -145,22 +162,22 @@ spec:
             - name: MATRIX_HOMESERVER
               value: http://matrix-synapse.matrix.svc.cluster.local:8008
             - name: MATRIX_USER_ID
-              value: "@lindner:matrix.ngoldack.de"
+              value: "@marius:matrix.ngoldack.de"
             - name: MATRIX_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
-                  key: MATRIX_L_ACCESS_TOKEN
+                  key: MATRIX_M_ACCESS_TOKEN
             - name: MATRIX_DEVICE_ID
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
-                  key: MATRIX_L_DEVICE_ID
+                  key: MATRIX_M_DEVICE_ID
             - name: MATRIX_RECOVERY_KEY
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
-                  key: MATRIX_L_RECOVERY_KEY
+                  key: MATRIX_M_RECOVERY_KEY
             - name: MATRIX_ALLOWED_USERS
               value: "@nicolas.matrix:matrix.ngoldack.de"
             # Empty (unset) = any room Nicolas is in; the sender allowlist and the
@@ -208,7 +225,7 @@ spec:
               memory: 2Gi
           startupProbe:
             tcpSocket:
-              port: 8682
+              port: 8722
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
@@ -217,18 +234,69 @@ spec:
                 - /bin/sh
                 - -c
                 - >-
-                  curl -s -o /dev/null --max-time 3 http://127.0.0.1:8682/v1/models
+                  curl -s -o /dev/null --max-time 3 http://127.0.0.1:8662/v1/models
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
-              port: 8682
+              port: 8722
             periodSeconds: 15
             failureThreshold: 4
           volumeMounts:
             - name: data
               mountPath: /opt/data
+            - name: router-token
+              mountPath: /opt/data/router-token
+              subPath: token
+              readOnly: true
+            - name: egress-hmac
+              mountPath: /opt/data/egress-hmac
+              subPath: EGRESS_HMAC_SECRET
+              readOnly: true
             - name: tmp
               mountPath: /tmp
+
+        # Pod-local relay for the syn-* Synthetic providers: agentgateway v1.5.0
+        # drops the terminating chunk of chunked bodies from REMOTE upstreams, so
+        # the profile's syn-* provider points at this loopback relay instead.
+        - name: syn-stream-relay
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
+          command: ["/opt/hermes/.venv/bin/python3", "-u", "/opt/relay/stream_relay.py"]
+          env:
+            - name: RELAY_UPSTREAM
+              value: http://agentgateway.agentgateway.svc.cluster.local:80
+            - name: RELAY_LISTEN_HOST
+              value: "127.0.0.1"
+            - name: RELAY_LISTEN_PORT
+              value: "8643"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            exec:
+              command:
+                - /usr/bin/curl
+                - -s
+                - -o
+                - /dev/null
+                - --max-time
+                - "3"
+                - http://127.0.0.1:8643/healthz
+            periodSeconds: 10
+          volumeMounts:
+            - name: relay-script
+              mountPath: /opt/relay
+              readOnly: true
       initContainers:
         # Profile seeder. For ALL FOUR profiles it writes, under
         # /opt/data/profiles/<name>/:
@@ -280,17 +348,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
-                  key: HINDSIGHT_C_API_KEY
+                  key: HINDSIGHT_M_API_KEY
             - name: HINDSIGHT_L_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
                   key: HINDSIGHT_L_API_KEY
-            - name: HINDSIGHT_M_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: hermes-agents-secret
-                  key: HINDSIGHT_M_API_KEY
           args:
             - |
               set -eu
@@ -386,14 +449,29 @@ spec:
                 path: dave.yaml
               - key: dave.soul.md
                 path: dave.soul.md
-              - key: chad.yaml
-                path: chad.yaml
-              - key: chad.soul.md
-                path: chad.soul.md
+              - key: marius.yaml
+                path: marius.yaml
+              - key: marius.soul.md
+                path: marius.soul.md
               - key: lindner.yaml
                 path: lindner.yaml
               - key: lindner.soul.md
                 path: lindner.soul.md
+        - name: router-token
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: AGENT_SANDBOX_ROUTER_TOKEN
+                path: token
+        - name: egress-hmac
+          secret:
+            secretName: hermes-secret
+            items:
+              - key: EGRESS_HMAC_SECRET
+                path: EGRESS_HMAC_SECRET
+        - name: relay-script
+          configMap:
+            name: hermes-stream-relay
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi

@@ -20,7 +20,7 @@ spec:
       # marker on the volume, so the annotation is what makes a ConfigMap edit
       # take effect. Same mechanism as ../hermes/statefulset.yaml.
       annotations:
-        hermes.ngoldack.de/config-rev: "2"
+        hermes.ngoldack.de/config-rev: "3"
       labels:
         app.kubernetes.io/name: hermes-agents
         app.kubernetes.io/instance: orchestrator
@@ -247,6 +247,11 @@ spec:
                 secretKeyRef:
                   name: hermes-agents-secret
                   key: HINDSIGHT_L_API_KEY
+            - name: HINDSIGHT_M_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
+                  key: HINDSIGHT_M_API_KEY
           args:
             - |
               set -eu
@@ -271,6 +276,7 @@ spec:
               seed_profile dave
               seed_profile chad
               seed_profile lindner
+              seed_profile marius
               write_env() {
                 p="$1"; bank="$2"; hkey="$3"; sandbox="$4"
                 d="/opt/data/profiles/$p"; mkdir -p "$d"
@@ -307,6 +313,7 @@ spec:
               write_env dave nicolas-core "$HINDSIGHT_D_API_KEY" true
               write_env chad nicolas-dev "$HINDSIGHT_C_API_KEY" true
               write_env lindner nicolas-finance "$HINDSIGHT_L_API_KEY" false
+              write_env marius nicolas-security "$HINDSIGHT_M_API_KEY" true
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

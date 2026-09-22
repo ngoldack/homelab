@@ -77,6 +77,7 @@ data:
         dave)    upper=D ;;
         chad)    upper=C ;;
         lindner) upper=L ;;
+        marius)  upper=M ;;
         *)       upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
       esac
       # A stable device id keeps the bot's Matrix device (and its E2EE crypto store
@@ -170,6 +171,7 @@ data:
         dave)    upper=D ;;
         chad)    upper=C ;;
         lindner) upper=L ;;
+        marius)  upper=M ;;
         *)       upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
       esac
       tok="$(grep "^MATRIX_${upper}_ACCESS_TOKEN=" "$out" | cut -d= -f2-)"
@@ -189,7 +191,7 @@ data:
       set_join_rule public
       for bot in $refused; do
         case "$bot" in
-          dave) upper=D ;; chad) upper=C ;; lindner) upper=L ;;
+          dave) upper=D ;; chad) upper=C ;; lindner) upper=L ;; marius) upper=M ;;
           *) upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')" ;;
         esac
         tok="$(grep "^MATRIX_${upper}_ACCESS_TOKEN=" "$out" | cut -d= -f2-)"

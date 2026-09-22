@@ -467,6 +467,85 @@ data:
           meta_name: Seerr (requests)
           meta_launch_url: https://seerr.media.svc.ngoldack.de/
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, seerr-proxy]]
+      # ---------- books stack UIs (media/books.yaml) ----------
+      # Same two-way wiring as the *arr chain above: LAN route -> outpost -> app
+      # UI, providers declared before the applications that !Find them. Bindery
+      # is additionally switched to its own `proxy` auth mode, so this outpost
+      # session IS its login (no second password prompt); Grimmory and pyLoad
+      # keep their own login behind the gate.
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: bindery-proxy
+        attrs:
+          mode: proxy
+          # Bindery's X-Api-Key API must stay reachable without a browser
+          # session (the same reason the *arr providers above skip /api).
+          skip_path_regex: ^/api
+          internal_host: http://books-bindery.media.svc.cluster.local:8787/
+          external_host: https://bindery.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: bindery
+        attrs:
+          name: bindery
+          meta_name: Bindery (books)
+          meta_launch_url: https://bindery.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, bindery-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: grimmory-proxy
+        attrs:
+          mode: proxy
+          # Grimmory's machine surfaces have to survive the SSO gate: OPDS lives
+          # at /api/v1/opds, KOReader/Kobo sync under /api, and the
+          # Komga-compatible API at /komga/api — none of which an e-reader can
+          # reach through a browser redirect. Everything else stays gated.
+          skip_path_regex: ^/(api|komga)
+          internal_host: http://books-grimmory.media.svc.cluster.local:6060/
+          external_host: https://grimmory.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: grimmory
+        attrs:
+          name: grimmory
+          meta_name: Grimmory (library)
+          meta_launch_url: https://grimmory.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, grimmory-proxy]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: pyload-proxy
+        attrs:
+          mode: proxy
+          # pyLoad's API is key/session based, like the *arr apps'.
+          skip_path_regex: ^/api
+          internal_host: http://books-pyload.media.svc.cluster.local:8000/
+          external_host: https://pyload.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        state: present
+        identifiers:
+          slug: pyload
+        attrs:
+          name: pyload
+          meta_name: pyLoad (downloads)
+          meta_launch_url: https://pyload.media.svc.ngoldack.de/
+          provider: !Find [authentik_providers_proxy.proxyprovider, [name, pyload-proxy]]
       - model: authentik_outposts.outpost
         state: present
         identifiers:
@@ -485,6 +564,9 @@ data:
             - !Find [authentik_providers_proxy.proxyprovider, [name, bazarr-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, sabnzbd-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, seerr-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, bindery-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, grimmory-proxy]]
+            - !Find [authentik_providers_proxy.proxyprovider, [name, pyload-proxy]]
       # grafana behind the SAME edge outpost (proxy provider; the edge envoy
       # cannot dial grafana's home pod directly — pod->pod only, measured
       # 20/20). Distinct from the OIDC federation below, which serves the
@@ -1284,6 +1366,32 @@ data:
         state: present
         identifiers:
           target: !Find [authentik_core.application, [slug, seerr]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      # books stack (media/books.yaml): same akadmin-only binding as the rest
+      # of the household SSO surfaces.
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, bindery]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, grimmory]]
+          order: 0
+        attrs:
+          group: !Find [authentik_core.group, [name, akadmin]]
+          negate: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !Find [authentik_core.application, [slug, pyload]]
           order: 0
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]

@@ -1,0 +1,118 @@
+# Grimmory's MariaDB 11.4 — the only MySQL-family datastore in the cluster,
+# because Grimmory is JDBC/mariadb-only.
+#
+# Hand-declared rather than expressed on the books app-template release: that
+# chart (5.1.0) has no controller `strategy` field, and a RollingUpdate on a
+# single-replica pod with a ReadWriteOnce volume is exactly the rollout that
+# stalls — the surge pod cannot attach a volume the old pod still holds.
+# `Recreate` is the right semantic for a data directory anyway, and is what
+# linuxserver/mariadb expects.
+#
+# /config is the image's data directory (databases live in /config/databases)
+# and sits on the NVMe-oF block class for the same reason the other databases
+# do: InnoDB wants block semantics, not NFS. Credentials come from the SOPS
+# secret `books-secrets` (books-secrets.sops.yaml); the root password is only
+# ever expanded inside the pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grimmory-db
+  namespace: media
+  labels:
+    app.kubernetes.io/name: grimmory-db
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grimmory-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grimmory-db
+        app.kubernetes.io/component: database
+    spec:
+      nodeSelector:
+        topology.homelab/site: home
+      securityContext:
+        # Group-owns the mounted block volume for uid/gid 1000. Capabilities
+        # are deliberately NOT dropped: the image's s6 init needs CHOWN,
+        # SETUID and SETGID to drop to PUID/PGID.
+        fsGroup: 1000
+      containers:
+        - name: mariadb
+          image: linuxserver/mariadb:11.4.12@sha256:b68d35ff2da41e568f51e0370a7e1c3ce693fecdacbed061b4b0be5b924f14bb
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: Europe/Berlin
+            - name: MYSQL_DATABASE
+              value: grimmory
+            - name: MYSQL_USER
+              value: grimmory
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: books-secrets
+                  key: mariadb-root-password
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: books-secrets
+                  key: mariadb-password
+          ports:
+            - name: mysql
+              containerPort: 3306
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          # `-h localhost` (socket), not 127.0.0.1: matches the upstream
+          # compose healthcheck and keeps the probe independent of TCP
+          # credentials.
+          startupProbe:
+            exec:
+              command: ["mariadb-admin", "ping", "-h", "localhost"]
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["mariadb-admin", "ping", "-h", "localhost"]
+            periodSeconds: 15
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["mariadb-admin", "ping", "-h", "localhost"]
+            periodSeconds: 15
+            failureThreshold: 6
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: grimmory-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grimmory-db
+  namespace: media
+  labels:
+    app.kubernetes.io/name: grimmory-db
+    app.kubernetes.io/component: database
+spec:
+  selector:
+    app.kubernetes.io/name: grimmory-db
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql

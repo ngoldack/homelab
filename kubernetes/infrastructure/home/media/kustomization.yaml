@@ -12,4 +12,7 @@ resources:
   - sources.yaml
   - seerr.yaml
   - helmrelease.yaml
+  - books.yaml
+  - mariadb.yaml
+  - books-secrets.sops.yaml
   - httproutes.yaml

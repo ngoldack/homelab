@@ -107,3 +107,57 @@ spec:
   resources:
     requests:
       storage: 10Gi
+---
+# ---- books stack (books.yaml / mariadb.yaml) ------------------------------
+# The book library itself has no PVC of its own: it is a directory tree on
+# `media-library` above (/data/books/{library,audiobooks,bookdrop}), which is
+# what lets Bindery hardlink finished Usenet downloads straight into it and
+# Grimmory serve that same tree. These four PVCs hold only application state.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bindery-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-bindery
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grimmory-data
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-grimmory
+  resources:
+    requests:
+      storage: 20Gi
+---
+# MariaDB's data directory: block storage (NVMe-oF), not NFS.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grimmory-db
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: truenas-fast-nvmeof-media-grimmory-database
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pyload-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: truenas-fast-nfs-media-pyload
+  resources:
+    requests:
+      storage: 10Gi

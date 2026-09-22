@@ -1,9 +1,23 @@
 # The bootstrap logic, mounted into the Job at /scripts/bootstrap.sh.
+#
+# Flux post-build substitution is DISABLED for this ConfigMap (annotation below).
+# The file is a shell script, and every ${...} in it belongs to the shell, not to
+# the cluster: ROOM_ALIAS_LOCALPART and SERVER_NAME arrive as container env from
+# bootstrap/job.yaml (the script also carries :-defaults), and `upper` is assigned
+# inside a case statement. The matrix Kustomization substitutes from `cluster-vars`
+# in strict mode, so with substitution on the build fails outright:
+#
+#   post build failed for 'ConfigMap.v1.[noGrp]/matrix-bots-bootstrap-script':
+#   envsubst error: variable substitution failed: variable not set (strict mode)
+#
+# Same treatment the image-builds ConfigMaps get for their dockerfiles.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: matrix-bots-bootstrap-script
   namespace: matrix
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   bootstrap.sh: |
     #!/bin/sh

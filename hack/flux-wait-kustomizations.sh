@@ -49,6 +49,33 @@ suspended_names() {
   jq -r '.items[] | select(.spec.suspend == true) | .metadata.name' <<<"$1" 2>/dev/null || true
 }
 
+source_rev() {
+  # SNAPSHOT_SOURCE_REV is a test seam, matching SNAPSHOT_FILE.
+  if [ -n "${SNAPSHOT_SOURCE_REV:-}" ]; then printf '%s' "$SNAPSHOT_SOURCE_REV"; return 0; fi
+  kubectl -n "$NS" get gitrepository flux-system -o jsonpath='{.status.artifact.revision}' 2>/dev/null || true
+}
+
+report_superseded() {
+  # A run pins the revision it must see applied everywhere. If main advances
+  # while the run is in flight — routine on this repo, where several merges can
+  # land minutes apart — every Kustomization moves to the NEWER revision, the
+  # pinned one can never be applied again, and the run burns its whole budget
+  # before failing. Observed 2026-09-22: run 35714299454 asserted cd60fcd while
+  # the cluster had already moved to 178abfcf (a later merge), and its log read
+  # like a deploy failure. Say what actually happened.
+  local payload="$1" current applied
+  current=$(source_rev)
+  [ -n "$current" ] || return 0
+  [ "$current" = "$TARGET_REV" ] && return 0
+  applied=$(revision_laggards "$payload" | cut -f2 | sort -u)
+  [ -n "$applied" ] && [ "$applied" = "$current" ] || return 0
+  echo "[$(now_ts)] SUPERSEDED: main advanced to $current while this run was asserting $TARGET_REV"
+  echo "      Every Kustomization is on the newer revision, so nothing is broken: this run's premise"
+  echo "      is stale because a later merge landed during it. The run triggered by that merge is the"
+  echo "      one that verifies the deploy (and its revision contains this one). Re-run this workflow"
+  echo "      to assert a specific revision explicitly."
+}
+
 revision_laggards() {
   # name <TAB> applied <TAB> first Ready-condition message (or no-status marker)
   jq -r --arg rev "$TARGET_REV" '
@@ -149,6 +176,7 @@ for phase in "${PHASES[@]}"; do
     if [ $((SECONDS - start)) -ge "$MAX_WAIT" ]; then
       echo "[$(now_ts)] ERROR: $phase gate timed out after ${MAX_WAIT}s"
       log_laggards "$phase" "$payload"
+      report_superseded "$payload"
       report_suspended "$payload"
       echo "--- final kustomization state ---"
       flux get kustomizations -n "$NS" 2>/dev/null || kubectl -n "$NS" get kustomizations

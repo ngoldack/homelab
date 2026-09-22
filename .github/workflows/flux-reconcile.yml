@@ -20,9 +20,17 @@ on:
 permissions:
   contents: read
 
+# A newer push to main SUPERSEDES an in-flight run: each run pins the revision it
+# must see applied everywhere, so once main advances, the older run's revision can
+# never be applied again and it burns its whole wait budget before failing — a red
+# check for a merge that is not broken (observed 2026-09-22: run 35714299454
+# asserted cd60fcd while the cluster had already moved to 178abfcf). Cancelling it
+# loses no coverage: the run triggered by the newer merge asserts a revision that
+# contains the older one. The wait script reports this case explicitly if a run
+# does time out before the cancel lands.
 concurrency:
   group: flux-reconcile
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   reconcile:

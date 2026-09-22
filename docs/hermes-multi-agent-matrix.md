@@ -380,31 +380,42 @@ data. These are not separate databases.
 | `marius` | `nicolas-security` | `HINDSIGHT_M_API_KEY` |
 | `orchestrator` | none | — (memory provider not enabled) |
 
-The **credential** half needs saying plainly: the deployed Hindsight exposes
-exactly one server-side tenant key (`HINDSIGHT_API_TENANT_API_KEY` in the
-`hindsight` namespace, injected into the API by `envFrom`), and the API's
-multi-tenancy comes from a custom `HINDSIGHT_API_TENANT_EXTENSION`. The three
-`HINDSIGHT_{D,C,L}_API_KEY` keys this deployment hands out are therefore
-**operator-supplied**: they must be set to that same server key unless the
-extension in use maps each key to its own tenant. Until that is proven, treat
-the guarantee as "one tenant, three banks selected by `HINDSIGHT_BANK_ID`" and
-verify it rather than assuming it:
+The **credential** half was measured on 2026-09-22, and the result is narrower
+than the first draft assumed. The deployed Hindsight runs the *builtin*
+`ApiKeyTenantExtension`, whose `authenticate()` compares the presented key to a
+single `HINDSIGHT_API_TENANT_API_KEY` and returns one fixed schema for every
+caller that passes:
 
-```bash
-# Retain in dave's bank, then show that lindner's credential cannot read it.
-kubectl -n hermes exec dave-0 -- sh -c \
-  'curl -fsS -X POST -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
-   -H "Content-Type: application/json" \
-   -d "{\"bank_id\":\"$HINDSIGHT_BANK_ID\",\"content\":\"smoke: bank isolation probe\"}" \
-   http://hindsight-api.hindsight.svc.cluster.local:8888/retain'
-kubectl -n hermes exec lindner-0 -- sh -c \
-  'curl -fsS -X POST -H "Authorization: Bearer $HINDSIGHT_API_KEY" \
-   -H "Content-Type: application/json" \
-   -d "{\"bank_id\":\"nicolas-core\"}" \
-   http://hindsight-api.hindsight.svc.cluster.local:8888/recall'
-# MUST NOT return dave's probe. If it does, the banks are not isolated:
-# give each agent its own tenant key (extension-mapped) instead of one key.
+```python
+async def authenticate(self, context: RequestContext) -> TenantContext:
+    if context.api_key != self.expected_api_key:
+        raise AuthenticationError("Invalid API key")
+    return TenantContext(schema_name=get_config().database_schema)
 ```
+
+So there is **one tenant and one credential**. Three separately-invented
+`HINDSIGHT_{D,C,L}_API_KEY` values existed in the Secret and every one of them
+answered `401` — the memory provider was silently unauthenticated, and any
+recall/retain it attempted would have failed. The four agent keys are now all set
+to the server's tenant key, which is the only value the extension accepts.
+Sharing it is not a weakening here: it is the same credential the extension
+already gives every caller, and isolation is the bank id.
+
+**What the bank boundary actually buys you**, measured with the server key:
+
+| Probe | Result |
+| --- | --- |
+| `GET /v1/default/banks` | `200` |
+| `POST /v1/default/banks/nicolas-security/memories/recall` | `200` |
+| `POST /v1/default/banks/nicolas-core/memories/recall` | `200` — same key, any bank |
+
+That is the honest guarantee: profiles are separated by *bank*, not by
+*credential*. Nothing prevents one agent's key from reading another's bank, so
+treat the boundary as organisational, not adversarial — the same reason the
+deployment carries one tenant key at all. Separate tenant keys need a custom
+extension that maps key → schema (that is what `HINDSIGHT_API_TENANT_EXTENSION`
+is for); until one exists, do not claim credential-level isolation, and revisit
+this section if the extension is replaced.
 
 Two rules follow from that:
 
@@ -963,12 +974,14 @@ These are stated so nothing here implies support that does not exist.
 - **The board has no backup path** of its own (see Backup and restore).
 - **The `matrix` namespace has no metrics scrape**, so its CNPG cluster is
   outside the data-protection alerting.
-- **Hindsight isolation is bank-deep, not tenant-deep, until proven.** The
-  deployment ships three per-agent keys but the server publishes one tenant key
-  and a custom tenant extension; the smoke test above is what decides whether
-  the per-agent keys give real tenant separation or all of them share one
-  tenant and rely on `HINDSIGHT_BANK_ID`. Document the measured result before
-  claiming isolation.
+- **Hindsight isolation is bank-deep, not tenant-deep — measured, not assumed.**
+  The builtin `ApiKeyTenantExtension` compares the presented key to the single
+  `HINDSIGHT_API_TENANT_API_KEY` and returns one schema for every caller that
+  passes, so a separately-invented per-agent key can never authenticate: the
+  three original values all answered 401, which left the memory provider
+  silently unauthenticated. The four agent keys are now the server key, and
+  separation is `HINDSIGHT_BANK_ID`. Separate tenant keys require a custom
+  extension; revisit this section if one lands.
 - **The agents' Matrix identity is a long-lived access token per bot**, not an
   OAuth refresh cycle: MAS issues them as compatibility tokens and the rotation
   runbook above is the only lifecycle they have.

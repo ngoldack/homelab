@@ -338,8 +338,8 @@ tasks:
         echo "job: $job"
         # The log carries several digests (config, image manifest, and the cache
         # image manifest written LAST). Only "exporting manifest" is the pushed
-        # image manifest — pinning the last digest in the log is how
-        # llama-kv-broker ended up pinned to a buildkit CACHE manifest.
+        # image manifest — pinning the last digest in the log is how a previous
+        # build ended up pinned to a buildkit CACHE manifest.
         digest=$(kubectl --kubeconfig kubeconfig-home.yaml -n buildkit logs "$job" 2>/dev/null \
           | grep -oE 'exporting manifest sha256:[0-9a-f]{64}' | tail -1 \
           | grep -oE 'sha256:[0-9a-f]{64}' || true)

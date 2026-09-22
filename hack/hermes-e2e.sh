@@ -38,8 +38,8 @@ HOST_KERNEL="${HERMES_E2E_HOST_KERNEL:-6.18.34-talos}"
 POLL_TRIES="${HERMES_E2E_POLL_TRIES:-900}"
 POLL_SLEEP="${HERMES_E2E_POLL_SLEEP:-2}"
 # The chat call must outlast the provider timeout AND the model's own latency:
-# on the P100 a single call is ~125s and a coding turn needs several, so the
-# default budget here is 30 min (keep MAX_TIME >= POLL_TRIES*POLL_SLEEP).
+# a chain turn goes to a remote reasoning-tier model and can take minutes, so
+# the default budget here is 30 min (keep MAX_TIME >= POLL_TRIES*POLL_SLEEP).
 MAX_TIME="${HERMES_E2E_MAX_TIME:-1800}"
 KUBECTL=(kubectl --kubeconfig "$ROOT/kubeconfig-home.yaml")
 TMP_DIR="$(mktemp -d)"

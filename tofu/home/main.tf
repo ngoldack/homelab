@@ -396,8 +396,9 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # CPU and memory configuration per node.
   # cpu_affinity pins vCPUs to host threads resolved from the node's cpu_class
   # (i9-13900HX: performance = threads 0-15, efficiency = 16-23; uniform hosts
-  # declare a single "efficiency" class). The AI worker lands on P-cores for
-  # low-latency inference; control plane and workers stay on E-cores.
+  # declare a single "efficiency" class). The performance worker (sandboxes,
+  # image builds) lands on P-cores; control plane and the general worker stay
+  # on E-cores.
   # Note: affinity requires root@pam auth on the Proxmox API token.
   cpu {
     cores    = each.value.cpu_cores
@@ -483,10 +484,10 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
     file_id = proxmox_download_file.talos_iso["${each.value.host}::${each.value.ext_key}"].id
   }
 
-  # PCIe passthrough — maps host GPUs (e.g. the Tesla P100) into this VM. Only
-  # populated for pools with `hostpci` set (wk-main-performance). Requires IOMMU +
-  # vfio-pci on the Proxmox host and a PCI resource mapping named per pool
-  # config (nvidia-p100-x16 on pmx-main).
+  # PCIe passthrough — maps a host PCI device (today only the Intel UHD 770
+  # iGPU, on wk-main-efficiency) into this VM. Only populated for pools with
+  # `hostpci` set. Requires IOMMU + vfio-pci on the Proxmox host and a PCI
+  # resource mapping named per pool config (intel-igpu on pmx-main).
   # bpg/proxmox: `device` is the hostpciX slot, `mapping` is the Proxmox
   # resource mapping name (works with API-token auth; `id` would need root
   # password auth). pcie=true requires the q35 machine type.
@@ -541,9 +542,9 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # a driver dependency exactly when things are broken enough to need looking
   # at.
   #
-  # The passthrough trade-off is accepted deliberately: on wk-main-media and
-  # wk-main-performance the graphical console will freeze once i915/nvidia
-  # claims it, but POST and early boot — the part worth seeing — appear first.
+  # The passthrough trade-off is accepted deliberately: on the iGPU node the
+  # graphical console will freeze once i915 claims it, but POST and early boot —
+  # the part worth seeing — appear first.
   # Serial is not lost in either case; it moves to `qm terminal <vmid>`.
   #
   # The kernel cmdline already targets both consoles
@@ -563,13 +564,13 @@ resource "proxmox_virtual_environment_vm" "talos_nodes" {
   # never came back, while the GPU-less nodes cycled cleanly.
   #
   # Being precise about the evidence, because the rule is broader than what was
-  # actually observed: wk-main-performance also has passthrough (the P100) and
-  # DID come back on std. The hang was specific to the Intel iGPU, which
-  # participates in VGA arbitration in a way a compute-only NVIDIA card does
-  # not. Keying off hostpci rather than "is it an iGPU" is therefore
-  # deliberately conservative — it costs POST visibility on the P100 node that
-  # node may not need to lose, and that is the right side to err on for a
-  # setting whose failure mode is a node that never boots.
+  # actually observed: when the P100 node existed it also had passthrough and
+  # DID come back on std, so the hang was specific to the Intel iGPU, which
+  # participates in VGA arbitration in a way a compute-only card does not.
+  # Keying off hostpci rather than "is it an iGPU" stays deliberately
+  # conservative: it applies serial0 to any future passthrough pool, which is
+  # the right side to err on for a setting whose failure mode is a node that
+  # never boots.
   vga {
     type = length(each.value.hostpci) > 0 ? "serial0" : "std"
   }

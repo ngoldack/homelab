@@ -1,15 +1,6 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: nvidia
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://nvidia.github.io/k8s-device-plugin
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
   name: truenas-csi
   namespace: flux-system
 spec:
@@ -69,17 +60,6 @@ metadata:
 spec:
   interval: 2h
   url: https://immich-app.github.io/immich-charts
----
-# Consumed by llmkube/, applied by its own Flux Kustomization so the Model and
-# InferenceService CRs can depend on the operator's CRDs existing.
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: llmkube
-  namespace: flux-system
-spec:
-  interval: 2h
-  url: https://defilantech.github.io/LLMKube
 ---
 # Consumed by buildkit/, applied by its own Flux Kustomization so the build
 # Jobs in image-builds/ can depend on the builder being up. moby/buildkit

@@ -24,8 +24,8 @@ pod_cidr     = "172.20.0.0/16"
 service_cidr = "172.21.0.0/16"
 
 # A single Proxmox host. pmx-infra was removed: everything (control plane
-# included) runs on pmx-main.
-# pmx-main carries one Tesla P100 in the x16 slot.
+# included) runs on pmx-main. Its Tesla P100 was handed back on 2026-09-22
+# (local-LLM lane removed), so the host's `gpu` inventory is empty.
 proxmox_nodes = {
   pmx-main = {
     endpoint      = "https://10.20.10.21:8006/"
@@ -67,13 +67,6 @@ proxmox_nodes = {
       model   = "Intel UHD Graphics 770"
       vram_gb = 4
     }
-    gpu = [
-      {
-        name    = "nvidia-p100-x16"
-        model   = "Tesla P100"
-        vram_gb = 16
-      },
-    ]
   }
 }
 
@@ -108,8 +101,9 @@ nodes = {
     # are derived automatically.
   }
 
-  # THE general worker: carries everything that is neither nvidia-pinned nor
-  # control-plane, and owns the Intel UHD 770 iGPU for QuickSync/VAAPI
+  # THE general worker: carries every workload that is not pinned to the
+  # performance worker or the control plane, and owns the Intel UHD 770 iGPU
+  # for QuickSync/VAAPI
   # (consolidated here from the retired wk-main-media node — exactly two
   # workers now). All remaining E-class threads: 16 - 2 host - 4 cp = 10.
   #
@@ -125,8 +119,9 @@ nodes = {
     host      = "pmx-main"
     vm_id     = 104
     cpu_cores = 10
-    # 32 GiB: the general worker carries everything non-nvidia/non-control-plane
-    # plus the media role and the iGPU. Sized to fill the VM pool (88 GiB) under
+    # 32 GiB: the general worker carries everything that is not
+    # performance-pinned or control-plane, plus the media role and the iGPU.
+    # Sized to fill the VM pool (88 GiB) under
     # the 6 GiB host floor: ballooning is off (memory.dedicated), so the only
     # cap that matters is allocated <= (max_memory_gb - reserved.memory) — ARC
     # is shrunk so ZFS cannot grow into this. Raised back to 32 on 2026-09-20
@@ -165,14 +160,16 @@ nodes = {
     }
   }
 
-  # AI/inference worker — the x16 P100 and, since the 2026-09-16 sandbox
-  # merge, all 16 P-class threads and 48 GiB (the pre-carve shape restored;
-  # Kata sandbox workloads also land here, label-pinned).
+  # Performance worker — all 16 P-class threads and 48 GiB (the shape it kept
+  # when the 2026-09-16 sandbox merge folded the dedicated sandbox worker in).
+  # Kata sandbox workloads land here (label-pinned) and so does the rootless
+  # BuildKit builder, which is why this node carries the user-namespace sysctl
+  # below. It hosted the Tesla P100 until 2026-09-22; the card, its NVIDIA
+  # driver extensions, the passthrough and the local-LLM lane are gone.
   #
-  # 48 GiB — the x16 P100 AI/inference worker plus Kata sandboxes. At the top
-  # of the 88 GiB VM pool (94 usable - 6 host). Ballooning is off
-  # (memory.dedicated), so allocated == committed; the ZFS ARC is shrunk so it
-  # never grows into this budget.
+  # 48 GiB — at the top of the 88 GiB VM pool (94 usable - 6 host). Ballooning
+  # is off (memory.dedicated), so allocated == committed; the ZFS ARC is shrunk
+  # so it never grows into this budget.
   # 48 is the proven ceiling for this VM: it would not start at 64 ("QEMU
   # exited with code 1" = allocation failure). A hand-resize on the live VM
   # must precede any tfvars change so the next apply doesn't revert the size.
@@ -186,38 +183,28 @@ nodes = {
     memory     = 49152
     disk_size  = 96
     talos_role = "worker"
-    gpu        = true
-    # NVIDIA driver + container toolkit for the P100. Pascal (cc 6.0) needs the
-    # proprietary/production-branch driver — the open kernel modules support
-    # Turing+ (cc 7.5+) only. Known-good host driver is 580.159.04 (CUDA 13.0),
-    # so pin the 580 LTS extension variants, not the newer `production` (595).
-    # These merge with the cluster-wide nfs-utils/nvme-cli/qemu-guest-agent
-    # defaults. No siderolabs/i915 here — the iGPU lives on the efficiency
-    # worker, which also keeps this node's boot image smaller and any i915
-    # regression away from inference.
+    # Rootless buildkitd refuses to start with Talos's hardened default
+    # (user.max_user_namespaces=0); the builder lives on this node, so the
+    # sysctl patch in talos.tf is keyed on this flag.
+    rootless_buildkit = true
+    # Kata Containers — containerd runtime + QEMU microVM machinery, baked
+    # into the boot image via Image Factory (merged from the old dedicated
+    # sandbox worker on 2026-09-16; this node's extension list forms its own
+    # schematic/ISO in main.tf). No siderolabs/i915 here — the iGPU lives on
+    # the efficiency worker.
     extensions = [
-      "siderolabs/nonfree-kmod-nvidia-lts",
-      "siderolabs/nvidia-container-toolkit-lts",
-      # Kata Containers — containerd runtime + QEMU microVM machinery, baked
-      # into the boot image via Image Factory (merged from the old dedicated
-      # sandbox worker on 2026-09-16; this node's extension list forms its own
-      # schematic/ISO in main.tf).
       "siderolabs/kata-containers",
     ]
-    hostpci = [
-      {
-        device = "nvidia-p100-x16"
-        pcie   = true
-        rombar = true
-      }
-    ]
-    # GPU workload placement is by label + nvidia RuntimeClass (the old
-    # dedicated=nvidia taint was deleted live 2026-09-15; no taint applies).
-    # Sandbox workloads pin via workload.hermes.io/sandbox=true only —
-    # non-sandbox pods also schedule here.
+    # No hostpci: this node's PCI passthrough was the Tesla P100, removed with
+    # the local-LLM lane. The iGPU passthrough stays on the efficiency worker.
+    #
+    # Sandbox workloads pin via workload.hermes.io/sandbox=true. The
+    # `instance-type` value is historical — the node has no GPU any more — and
+    # is kept because the BuildKit builder selects on it
+    # (kubernetes/infrastructure/home/buildkit/helmrelease.yaml); changing the
+    # value would strand the builder until the node restart that applies it.
     node_labels = {
       "node.kubernetes.io/instance-type" = "gpu-worker"
-      "workload/ai-inference"            = "true"
       "workload.hermes.io/sandbox"       = "true"
     }
   }

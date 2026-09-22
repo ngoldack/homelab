@@ -7,8 +7,8 @@
 # Deployments rely on for a misconfigured guard. There is NO EGRESS_ROLE env —
 # the argv IS the selector.
 #
-# WHY golang:1.27-alpine — the cluster's Go line and the llama-kv-broker
-# precedent (same build stage, same flags). The module declares `go 1.27`;
+# WHY golang:1.27-alpine — the cluster's Go line, the same build stage and
+# flags the sibling synthetic-proxy build uses. The module declares `go 1.27`;
 # GOTOOLCHAIN=local keeps the build from fetching any other toolchain, so the
 # image resolves entirely from the pinned public tags below. CGO_ENABLED=0
 # yields a static binary, so the runtime needs no libc beyond busybox.
@@ -25,7 +25,7 @@ WORKDIR /src/go
 
 # The module + the library package (package guard). The *_test.go siblings are
 # deliberately NOT copied: they guard the port on a developer machine and are
-# not built here (llama-kv-broker precedent).
+# not built here (the same rule the sibling Go builds follow).
 COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/go.mod ./
 COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/auth.go ./
 COPY kubernetes/infrastructure/home/image-builds/hermes-egress-guard/go/authorizer.go ./

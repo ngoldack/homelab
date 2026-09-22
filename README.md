@@ -10,7 +10,7 @@ ARP; DNS for it lives in the public Hetzner zone.
 Proxmox host (pmx-main)                 Hetzner Cloud
 ├── cp-main            control plane     └── home-talos-ingress-fsn1 (ARM64)
 ├── wk-main-efficiency general + iGPU        public IP, KubeSpan member,
-└── wk-main-performance P100 + Kata          tainted for ingress only
+└── wk-main-performance Kata + image builds  tainted for ingress only
           \                |                /
            \    Talos KubeSpan (WireGuard) /
             ──── one Kubernetes cluster ────

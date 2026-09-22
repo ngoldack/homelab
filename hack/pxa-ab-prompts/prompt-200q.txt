@@ -1,5 +1,0 @@
-QUESTION: Given all the reasoning context above, state precisely which constraints dominate, which tradeoffs apply, and what the single most important decision should be, in concise prose.
-QUESTION: Given all the reasoning context above, state precisely which constraints dominate, which tradeoffs apply, and what the single most important decision should be, in concise prose.
-QUESTION: Given all the reasoning context above, state precisely which constraints dominate, which tradeoffs apply, and what the single most important decision should be, in concise prose.
-QUESTION: Given all the reasoning context above, state precisely which constraints dominate, which tradeoffs apply, and what the single most important decision should be, in concise prose.
-QUESTION: Given all the reasoning context above, state precisely

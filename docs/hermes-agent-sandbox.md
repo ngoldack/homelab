@@ -85,9 +85,12 @@ unready pool.
     -d '{"model":"local","messages":[{"role":"user","content":"…"}]}' \
     http://hermes.hermes.svc:8642/v1/chat/completions
   ```
-  `model: local` routes to the P100 (qwen36-35b) through the in-cluster
-  agentgateway. The ConfigMap pins that path explicitly, and all three keys
-  matter:
+  `model: local` is only a label: the provider's `base_url` addresses the
+  in-cluster agentgateway's general-purpose **chain**, which selects the real
+  model (Synthetic, through `synthetic-proxy`). It used to address the P100's
+  qwen36-35b through the `local-p100` backend; that backend, the GPU and the
+  llmkube lane were removed on 2026-09-22. The ConfigMap pins that path
+  explicitly, and all three keys matter:
   - `provider: custom:agentgateway` — with the default `auto` Hermes resolved
     `local` to the **OpenRouter** provider, whose public API this namespace's
     egress allowlist blocks (every session then failed with "Hermes can't reach
@@ -96,8 +99,9 @@ unready pool.
     reached agentgateway with an empty bearer token and was rejected 401
     ("token header is malformed"); `key_env` names the pod env var, so no
     credential is stored in the ConfigMap;
-  - `providers.agentgateway.request_timeout_seconds: 600` — the P100 is a
-    reasoning model on one GPU: a single call runs ~125 s (≈11k-token system
+  - `providers.agentgateway.request_timeout_seconds: 600` — a chain turn goes
+    to a remote reasoning-tier model and can retry inside the gateway: a single
+    call is measured in tens of seconds (≈11k-token system
     prompt) and a turn with tool calls takes minutes, so the default budget
     interrupted calls with "Operation interrupted: waiting for model response".
     This is the canonical v12+ shape; the old `custom_providers[0].timeout`
@@ -145,7 +149,7 @@ selected purely by path/model id:
 
 | Alias (`model`) | Gateway path | Upstream model | Live latency |
 |---|---|---|---|
-| `local` (default) | `/v1` → `local-p100` → `llama-kv-broker` | `qwen36-35b` on the P100 | ~125 s/call |
+| `local` (default) | `/v1/chain/general-purpose` | Synthetic's general-purpose tier (via `synthetic-proxy`) | tens of seconds |
 | `syn-small` | `/v1/synthetic-small` | `zai-org/GLM-4.7-Flash` | ~2.6 s |
 | `syn-large` | `/v1/synthetic-large` | `zai-org/GLM-5.3-Flash` | ~4.0 s |
 | `syn-deepseek` | `/v1/synthetic-deepseek` | `deepseek-ai/DeepSeek-V4.1-Flash` | ~9.6 s |
@@ -165,8 +169,9 @@ not the upstream names). Two ways to select one, plus the global default:
   syn:small:text, provider: custom:syn-small}`); the same mapping is what
   `GET /v1/models` advertises.
 - **Global default**: the dashboard's **Models** page — the only path that
-  moves the default off `local`, which is deliberately left as the P100
-  (`provider: custom:agentgateway`, `model: local`).
+  moves the default off `local`, which stays the general-purpose chain
+  (`provider: custom:agentgateway`, `model: local`, base_url
+  `…/v1/chain/general-purpose`).
 
 #### Streaming: the agentgateway chunked-body defect (Synthetic tiers only)
 A **streamed** turn against any of the three Synthetic tiers fails on
@@ -186,9 +191,8 @@ kubectl -n hermes exec hermes-0 -c hermes -- sh -c \
      -d "{\"model\":\"syn:small:text\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: OK\"}],\"stream\":true}" \
    > /tmp/t.bin; echo "curl_exit=$?"; tail -c 5 /tmp/t.bin | od -c'
 # → curl_exit=18, body ends `data: [DONE]` with no trailing newlines and no
-#   `0 \r \n \r \n`. The identical request to /v1/chat/completions (the local
-#   P100 route) exits 0 and ends `data: [DONE] \n \n` — the defect is upstream-
-#   side, not path-side.
+#   `0 \r \n \r \n`. A non-streamed call to the same tier is byte-perfect, so
+#   the defect is upstream-side, not path-side.
 ```
 
 - gateway log: `warn proxy::gateway proxy error: error from user's Body stream`
@@ -217,7 +221,7 @@ warned about and ignored). Per-model `capabilities` are lifted onto
 `model_routes` accepts only model/provider/api_key/base_url. The one switch
 Hermes does honour, `model.streaming: false` (`agent_init._apply_display_config`
 → `agent._disable_streaming` → `_should_stream`), is **global**: it would stop
-the P100 streaming too.
+the chain route streaming too.
 
 **Mitigation (in force):** the three `providers.syn-*` `base_url`s point at a
 pod-local relay — `hermes/stream-relay.yaml` (script) plus the `syn-stream-relay`
@@ -226,9 +230,9 @@ forwards the request to the very same agentgateway Service and returns the
 response **close-delimited** (no `Transfer-Encoding`, no `Content-Length`, one
 `Connection: close`) — the HTTP/1.0-equivalent shape that completes; everything
 else is untouched (same path, same `Authorization` JWT, same `stream: true`, SSE
-still arrives incrementally — a live syn-small turn streams in ~3 s). The P100
-provider keeps calling the gateway Service directly and still streams; the relay
-binds loopback only, so **no CNP, Service or gateway object changes with it**
+still arrives incrementally — a live syn-small turn streams in ~3 s). The
+chain provider keeps calling the gateway Service directly; the relay binds
+loopback only, so **no CNP, Service or gateway object changes with it**
 (the pod's existing `agentgateway` :80 egress rule carries the relay's
 forwarding, and a localhost listener needs no ingress rule). It logs
 `upstream body ended early (RemoteProtocolError) - closing body` once per
@@ -424,7 +428,7 @@ manual per the steps above.
 | Model calls fail ("offline" / "can't reach the model provider") | Check the *provider* first: `grep -E '^provider:' /opt/data/config.yaml` must say `custom:agentgateway` — with `auto` Hermes calls OpenRouter, which the egress allowlist blocks. Then the network path: the `agentgateway` namespace on :80 (`hermes/cilium-policy.yaml`) plus a valid `OPENAI_API_KEY` JWT; probe from the pod with `curl http://agentgateway.agentgateway.svc.cluster.local:80/v1/models` |
 | agentgateway rejects the call 401 "token header is malformed" | The `providers.agentgateway` entry lost its `key_env: OPENAI_API_KEY` (or the Secret's `OPENAI_API_KEY` is empty) — the provider then sends an empty bearer token |
 | Model turn interrupted ("waiting for model response") | The 600 s budget is gone: keep `providers.agentgateway.request_timeout_seconds: 600` **and** the `HERMES_API_TIMEOUT=600` env in the StatefulSet (a single call is ~125 s and tool turns take minutes; on v2026.9.7 the env is what the client actually reads for a named custom provider — see the Operation bullets) |
-| A Synthetic call behaves like the P100 (≈40 s, `qwen36-35b`-class answer) | The tier did not route and the request fell back to the global default. Check (a) the provider name matches the one the request/route sent (`custom:syn-small`/`-large`/`-deepseek`), (b) `providers.syn-*` still carries its own `base_url` **with the `/v1/synthetic-<tier>` suffix** — without it the call hits `/v1`, i.e. the P100 — plus `key_env: OPENAI_API_KEY` and an explicit `models:` list (Synthetic rejects `GET <tier>/models` with 400, so a missing list leaves the provider with no catalog), and (c) the pod actually restarted onto the new config: the same `config-rev`/annotation bump rule as above (`grep -A3 'syn-small:' /opt/data/config.yaml`). The tiers answer in single-digit seconds; the P100 id or ~40 s means fallback, not the tier |
+| A Synthetic call answers with the wrong model id / much slower than a tier should be | The tier did not route and the request fell back to the global default (the general-purpose chain). Check (a) the provider name matches the one the request/route sent (`custom:syn-small`/`-large`/`-deepseek`), (b) `providers.syn-*` still carries its own `base_url` **with the `/v1/synthetic-<tier>` suffix** — without it the call hits the chain route — plus `key_env: OPENAI_API_KEY` and an explicit `models:` list (Synthetic rejects `GET <tier>/models` with 400, so a missing list leaves the provider with no catalog), and (c) the pod actually restarted onto the new config: the same `config-rev`/annotation bump rule as above (`grep -A3 'syn-small:' /opt/data/config.yaml`). The tiers answer in single-digit seconds; the P100 id or ~40 s means fallback, not the tier |
 | A Synthetic turn returns "No visible answer was produced…" / `error_code: output_truncated` | Streaming defect: agentgateway never terminates the chunked body for a remote upstream (see Model choice → Streaming). Check the relay first: `kubectl -n hermes get pod hermes-0 -o jsonpath='{.spec.containers[*].name}'` must list `syn-stream-relay`; `kubectl -n hermes exec hermes-0 -c hermes -- curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8643/healthz` must print `200`; `kubectl -n hermes logs hermes-0 -c syn-stream-relay` must show the request (and `upstream body ended early (RemoteProtocolError) - closing body`); and `grep -A1 'syn-small:' /opt/data/config.yaml` must show `base_url: http://127.0.0.1:8643/v1/synthetic-small`. A pod with no `syn-stream-relay` container is still on the pre-relay config — `config-rev` and the pod annotation must both be at `7` |
 | Turn runs but no trace appears in Langfuse | In order: `hermes plugins list` shows `observability/langfuse` enabled (`plugins.enabled` in `hermes/configmap.yaml`, needs the `config-rev` bump); `/opt/hermes/.venv/bin/python -c "import langfuse"` prints a version (without the SDK the plugin fails open — rebuild the image); the pod log has no "credentials look like placeholders" warning (the pair must be `pk-lf-`/`sk-lf-`); `curl http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/health` answers from the pod (if it hangs, the Cilium pair is incomplete: egress in `hermes/cilium-policy.yaml` + ingress in `langfuse/cilium-allowlist.yaml`). **Do not poll `/api/public/traces`** — this deployment is Langfuse v4 *events_only*, where that endpoint 404s with an "events_only mode" message that parses as an empty result; read `/api/public/v2/observations` instead. Events are batched and the SDK sends no `x-langfuse-ingestion-version: 4`, so allow ~5 min before concluding anything |
 | Second concurrent session fails immediately | `agent_sandbox capacity: 1 active sandbox is supported on this node; retry after the running session finishes` — expected on a one-slot pool (`AGENT_SANDBOX_MAX_CONCURRENT`, default 1); serialize sessions or add real node headroom first (see Capacity) |
@@ -443,9 +447,9 @@ manual per the steps above.
 ## Capacity
 One warm + one active sandbox maximum, sized from the **shared** node's
 headroom rather than a dedicated VM: `wk-main-performance` (`talos-919-w9u`,
-16 CPU / 48 GiB VM, ~46.5 GiB allocatable) also carries qwen36-35b (4 CPU /
-8 GiB requests), nomic-embed-v15 (2 CPU / 4 GiB), buildkitd (12 CPU /
-20 GiB limits, mostly idle) and roughly three dozen other pods. Warm pool
+16 CPU / 48 GiB VM, ~46.5 GiB allocatable) also carries buildkitd (12 CPU /
+20 GiB limits, mostly idle) and roughly three dozen other pods. (It also ran
+the local-LLM lane's qwen36-35b and nomic-embed-v15 until 2026-09-22.) Warm pool
 `replicas: 1`; sandbox limits 4 CPU / 5 GiB.
 
 The node is deliberately mixed-use (operator decision 2026-09-17, replacing

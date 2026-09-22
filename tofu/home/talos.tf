@@ -252,8 +252,8 @@ data "talos_machine_configuration" "worker" {
             diskSelector = { size = ">= 10GB" }
             # Per-node Image Factory installer — see the control-plane install
             # block above for why this is load-bearing. Keyed by this worker's
-            # own resolved extension set, so the GPU worker gets the nvidia
-            # image and the others get the lean one.
+            # own resolved extension set, so each node gets the image its
+            # extensions require.
             image = data.talos_image_factory_urls.this[
               local.extension_set_keys[each.key]
             ].urls.installer
@@ -274,7 +274,10 @@ data "talos_machine_configuration" "worker" {
       }),
       local.csi_kubelet_extra_mounts,
     ],
-    each.value.gpu ? [
+    # The builder's node raises the user-namespace limit. This used to ride the
+    # `gpu` flag (the P100 node happened to be the builder's home); the GPU is
+    # gone, the builder is not, so it is keyed on its own flag now.
+    each.value.rootless_buildkit ? [
       yamlencode({
         machine = {
           # Talos ships with unprivileged user namespaces OFF as a
@@ -290,15 +293,6 @@ data "talos_machine_configuration" "worker" {
           sysctls = {
             "user.max_user_namespaces" = "15000"
           }
-          kernel = {
-            modules = [
-              { name = "nvidia" },
-              { name = "nvidia_uvm" },
-              { name = "nvidia_drm" },
-              { name = "nvidia_modeset" },
-            ]
-          }
-          nodeLabels = { "ai" = "true" }
         }
       }),
     ] : [],

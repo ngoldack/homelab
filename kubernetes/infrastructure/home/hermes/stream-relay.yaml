@@ -10,16 +10,15 @@
 # `RemoteProtocolError: peer closed connection without sending complete message
 # body` at the end of an otherwise complete SSE stream, which Hermes reports as
 # `hermes={completed:false, partial:true, error_code:'output_truncated'}`.
-# The local P100 route terminates its body correctly, and an HTTP/1.0 client —
-# whose body is delimited by connection close, not by chunked framing — completes
-# fine; that is the shape the relay re-creates: it forwards the request to the
-# gateway and returns the response close-delimited (no Transfer-Encoding, no
-# Content-Length, Connection: close), so the client reads to EOF and the SSE
-# stream ends cleanly at `data: [DONE]`.
+# An HTTP/1.0 client — whose body is delimited by connection close, not by
+# chunked framing — completes fine; that is the shape the relay re-creates: it
+# forwards the request to the gateway and returns the response close-delimited
+# (no Transfer-Encoding, no Content-Length, Connection: close), so the client
+# reads to EOF and the SSE stream ends cleanly at `data: [DONE]`.
 #
 # Scope: only `providers.syn-*` base_urls point at it (127.0.0.1:8643, same pod
-# network namespace). The P100 provider still talks to the agentgateway Service
-# directly and still streams.
+# network namespace). The chain provider still talks to the agentgateway Service
+# directly.
 #
 # Remove this ConfigMap, the container and the volume below once agentgateway
 # terminates chunked bodies for its remote upstreams — the check is
@@ -36,24 +35,23 @@ data:
     """Pod-local HTTP relay that repairs agentgateway's truncated chunked-body tail.
 
     agentgateway v1.5.0 never terminates the chunked body of a *streamed* response
-    whose upstream is remote (the Synthetic tiers on api.synthetic.new, and the same
-    path shape for OpenRouter): the terminating zero-length chunk (``0 CRLF CRLF``,
+    whose upstream is remote (the Synthetic tiers on api.synthetic.new): the
+    terminating zero-length chunk (``0 CRLF CRLF``,
     plus the final two body bytes) is missing, the gateway logs
 
         warn proxy::gateway proxy error: error from user's Body stream
 
     and httpx raises ``RemoteProtocolError('peer closed connection without sending
-    complete message body')`` at the end of an otherwise complete SSE stream. The
-    local P100 route terminates its body correctly, and an HTTP/1.0 client (whose
-    body is delimited by connection close rather than by chunked framing) completes
-    fine -- which is exactly the shape this relay re-creates for the three Synthetic
-    tiers: the request is forwarded to the gateway, and the response is returned to
-    the client close-delimited (no Transfer-Encoding, no Content-Length, one
-    ``Connection: close``), so the client reads to EOF and the SSE stream ends
-    cleanly at ``data: [DONE]``.
+    complete message body')`` at the end of an otherwise complete SSE stream. An
+    HTTP/1.0 client (whose body is delimited by connection close rather than by
+    chunked framing) completes fine -- which is exactly the shape this relay
+    re-creates for the three Synthetic tiers: the request is forwarded to the
+    gateway, and the response is returned to the client close-delimited (no
+    Transfer-Encoding, no Content-Length, one ``Connection: close``), so the client
+    reads to EOF and the SSE stream ends cleanly at ``data: [DONE]``.
 
-    Only the ``providers.syn-*`` base_urls point here; the P100 provider keeps
-    talking to the gateway directly and keeps streaming.
+    Only the ``providers.syn-*`` base_urls point here; the chain provider talks to
+    the gateway directly.
     """
 
     from __future__ import annotations

@@ -2,9 +2,9 @@
 # api.synthetic.new for the agentgateway data plane (sources:
 # image-builds/synthetic-proxy/go/, entrypoint cmd/synthetic-proxy).
 #
-# BUILD SHAPE — identical to hermes-egress-authorizer.yaml and
-# llama-kv-broker.yaml: the context is THIS REPO at the pinned commit and the
-# Dockerfile is fetched from that tree by repo-relative path:
+# BUILD SHAPE — identical to hermes-egress-authorizer.yaml: the context is
+# THIS REPO at the pinned commit and the Dockerfile is fetched from that tree by
+# repo-relative path:
 # `--opt=context=<repo>#<sha>` plus `--opt=filename=<repo-relative Dockerfile>`,
 # and the Dockerfile's COPY sources are repo-root-relative.
 #

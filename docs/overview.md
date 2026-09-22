@@ -31,10 +31,10 @@ architecture view does not.
 │                              # on the LAN VIP, `edge` on the Hetzner IP;
 │                              # LB-IPAM, L2 announcements), external-dns (two
 │                              # scoped instances),
-│                              # nvidia, truenas-csi, registry (Zot), buildkit,
+│                              # truenas-csi, registry (Zot), buildkit,
 │                              # image-builds, immich, cnpg-operator,
 │                              # valkey-operator, authentik (+ edge outpost),
-│                              # llmkube, monitoring, headlamp,
+│                              # monitoring, headlamp,
 │                              # talos-backup
 └── tofu/
     └── home/                  # Proxmox + Talos + Hetzner ingress, hand-rolled
@@ -109,15 +109,15 @@ network:
 
 `pmx-main` (i9-13900HX: 8 P-cores/16 threads = "performance", 16 E-cores =
 "efficiency", 96 GiB installed / 94 GiB usable) runs a **deliberately
-consolidated LAN fleet**: every VM that is not the P100 box shares one
-general-purpose worker; the P100 worker also hosts the Kata sandbox
-workloads (label-pinned, mixed use).
+consolidated LAN fleet**: every VM that is not the performance worker shares
+one general-purpose worker; the performance worker also hosts the Kata sandbox
+workloads and the rootless image builder (label-pinned, mixed use).
 
 | node | class | threads | RAM | passthrough | labels/taint |
 | --- | --- | --- | --- | --- | --- |
 | `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
 | `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | Intel UHD 770 iGPU | — (general node) |
-| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | Tesla P100, nested KVM (Kata) | no taint; `workload.hermes.io/sandbox=true`, `workload/ai-inference` labels |
+| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | nested KVM (Kata) | no taint; `workload.hermes.io/sandbox=true` label (+ the historical `instance-type=gpu-worker` BuildKit selects on) |
 
 Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
 82 GiB committed, so the host really keeps ~12 with ARC capped at
@@ -133,26 +133,26 @@ Design of the consolidation:
   PULL onto it by capability label — `hardware/igpu: Intel-UHD-Graphics-770`
   (derived by tofu from the `intel-igpu` hostpci mapping) plus
   `workload/media` — e.g. Immich's machine-learning component.
-* The P100 worker carries a label-only sandbox pin
+* The performance worker carries a label-only sandbox pin
   (`workload.hermes.io/sandbox=true`); since the 2026-09-16 merge of the
-  old dedicated sandbox worker it also runs the Kata
+  old dedicated sandbox worker it runs the Kata
   Hermes/Agent-Sandbox code-execution sandboxes — every sandbox a Kata QEMU
   microVM with its own guest kernel, needing nested hardware
   virtualization on pmx-main (`kvm_intel.nested=Y`, fleet CPU type is
   already `host`); `task sandbox:preflight` enforces that. The label only
-  ATTRACTS sandboxes; there is no sandbox taint, so general and GPU
-  workloads still schedule on the node. It is currently **untainted**: the
-  `dedicated=nvidia` taint was deleted live on 2026-09-15 so general pods
-  could spill onto this node, and the Flux node-taints Job that applied it
-  was retired entirely on 2026-09-16 — GPU placement now relies on the
-  `workload/ai-inference` label, the nvidia RuntimeClass, and admission
-  policies. It runs 48 GiB / 16 P-threads (pre-carve shape): llama.cpp
-  offload still fits (27B-Q4 weights ~17 GiB + KV) with headroom — see the
-  tfvars comment (the 48 GiB size was kept for proven boot reliability; 64
-  GiB starved the host).
-* BuildKit is rootless, so the P100 node's machine config raises
+  ATTRACTS sandboxes; there is no sandbox taint, so other workloads still
+  schedule on the node. It is **untainted**: the old `dedicated=nvidia`
+  taint was deleted live on 2026-09-15 and the Flux node-taints Job retired
+  entirely on 2026-09-16, so placement is label-based throughout. It runs
+  48 GiB / 16 P-threads (pre-carve shape), kept for proven boot reliability
+  — see the tfvars comment (64 GiB starved the host). It hosted the Tesla
+  P100 and the local-LLM lane until 2026-09-22; the card, its driver
+  extensions, the passthrough and llmkube are gone.
+* BuildKit is rootless, so the builder's node machine config raises
   `user.max_user_namespaces` via `machine.sysctls` (Talos ships it at 0 as
-  a hardening default; rootless buildkitd refuses to start otherwise).
+  a hardening default; rootless buildkitd refuses to start otherwise). The
+  patch is keyed on that node's `rootless_buildkit` flag, not on the removed
+  GPU flag.
 * VGA-arbitration hazard is handled by the vga rule in `main.tf`: any node
   with hostpci gets `serial0` (no emulated display) — the iGPU-passthrough
   guest once hung at boot with `std` + passed VGA decode concurrently.
@@ -497,13 +497,12 @@ KUBECONFIG=kubeconfig-home.yaml flux bootstrap github \
 
 Node taints: the old Flux-managed `node-taints` one-shot Job was retired on
 2026-09-16 (its last remaining taint, the sandbox pin, went away when the
-dedicated sandbox worker merged into `wk-main-performance`). The P100
+dedicated sandbox worker merged into `wk-main-performance`). The performance
 worker's `dedicated=nvidia` taint had already been deleted live on
 2026-09-15 so general workloads could spill onto it; today no node taint is
 applied by any in-repo mechanism — workload placement is purely
-label/selector based (`workload/ai-inference`, `workload.hermes.io/sandbox`,
-`hardware/igpu`), enforced by the nodeSelector admission policies rather
-than taints.
+label/selector based (`workload.hermes.io/sandbox`, `hardware/igpu`),
+enforced by the nodeSelector admission policies rather than taints.
 
 ## Minimal cluster contents
 
@@ -511,18 +510,17 @@ than taints.
   machine secrets/configs, an Image-Factory-built boot image per node's
   resolved extension set, the Gateway API CRDs, Cilium (see "Flux
   bootstrap"), and both Object Storage buckets (state + etcd backups).
-  Three distinct extension sets are in play — a shared base, base + `i915`
-  for the media worker, and base + the NVIDIA driver/toolkit for the AI
-  worker (the ingress worker adds nothing to the base) — so each node boots
-  the smallest image that serves it.
+  Three distinct extension sets are in play — a shared base (control plane),
+  base + `i915` for the efficiency worker's passed-through iGPU, and base +
+  `kata-containers` for the performance worker's sandboxes (the ingress
+  worker adds nothing to the base) — so each node boots the smallest image
+  that serves it.
 - **Flux-owned**: everything else — cert-manager + the Hetzner DNS webhook,
   the `network` namespace (public Gateway on the LAN VIP, LB-IPAM pool,
-  L2 announcements, wildcard Certificate), external-dns, the NVIDIA device
-  plugin (AI worker only),
+  L2 announcements, wildcard Certificate), external-dns,
   TrueNAS-CSI storage classes, Zot (the cluster's own OCI registry), an
   in-cluster BuildKit builder + image-builds, CNPG operator + Immich,
-  LLMKube (Qwen on the P100), the monitoring stack, Headlamp, and the
-  Talos etcd-backup CronJob.
+  the monitoring stack, Headlamp, and the Talos etcd-backup CronJob.
 
 ### System extensions: the ISO is not enough
 
@@ -540,8 +538,8 @@ The ISO's extensions live only in the live/maintenance boot. Whatever the
 the node installs and reboots. Nothing errors — the node comes up healthy and
 joins the cluster; it just has no `qemu-guest-agent` (so `wait_for_ip` in
 `main.tf` times out on every subsequent plan, adding ~10 min and eventually
-nulling out `current_ip`), no NVIDIA driver (`KernelModuleSpecController`
-retries `module not found` forever), and no `nfs-utils` for truenas-csi.
+nulling out `current_ip`), no `i915` on the iGPU node (so Immich's VAAPI path
+loses its device), and no `nfs-utils` for truenas-csi.
 `urls.installer` is also version-pinned, so it is what makes `talos_version`
 govern the installed OS rather than only the generated machine config.
 
@@ -566,8 +564,8 @@ The storage classes therefore use `reclaimPolicy: Retain` and `forceDelete: "fal
 
 One Talos cluster spanning two sites — not two clusters:
 
-- **home**: `pmx-main` (Proxmox, private IPs): control plane + three
-  workers (efficiency, media/iGPU, AI/P100)
+- **home**: `pmx-main` (Proxmox, private IPs): control plane + two
+  workers (efficiency/iGPU, performance)
 - **Hetzner site**: a single `cax11` worker with a public IP, joined to the
   LAN control plane over Talos KubeSpan. No control plane, no second etcd.
 

@@ -9,7 +9,7 @@
 # namespaces carry the actual pod-hardening enforcement in the meantime.
 #
 # Scope: the app namespaces (authentik, paperless, immich, langfuse, hindsight,
-# headlamp, hermes, agentgateway, aigateway, registry, llmkube-system,
+# headlamp, hermes, agentgateway, aigateway, registry,
 # talos-backup, unpoller, homelab-infra-metrics, …). The platform namespaces
 # below are excluded because they legitimately need what these policies
 # prohibit — the CNI/CSI/device-plugin plane uses host namespaces and hostPath
@@ -19,7 +19,7 @@
 #   kube-system, kube-node-lease, kube-public, cilium-secrets, flux-system,
 #   kyverno, monitoring, network, cert-manager, cnpg-system,
 #   clickhouse-operator, seaweedfs-operator, valkey-operator-system,
-#   truenas-csi, nvidia-device-plugin, buildkit, agent-sandbox-system,
+#   truenas-csi, buildkit, agent-sandbox-system,
 #   hermes-sandbox, media, tetragon, crowdsec
 ---
 # Explicit image tags (or digests) only. Two rules so the report distinguishes
@@ -62,7 +62,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -99,7 +98,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -153,7 +151,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -207,7 +204,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox
@@ -260,7 +256,6 @@ spec:
                 - seaweedfs-operator
                 - valkey-operator-system
                 - truenas-csi
-                - nvidia-device-plugin
                 - buildkit
                 - agent-sandbox-system
                 - hermes-sandbox

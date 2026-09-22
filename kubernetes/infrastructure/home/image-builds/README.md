@@ -58,9 +58,9 @@ while attempting it, worth keeping:
   output tag and (for repo-context Jobs) the context SHA together — Flux prunes
   the old Job. Editing `spec.template` in place leaves the Kustomization
   NotReady with `field is immutable`. A name bump forces a rebuild and a
-  re-pin, so land the harness + ONE pilot Job (llama-kv-broker is the
-  smallest), verify the pilot live, then fan out to the other seven — do not
-  mass-edit all eight blind.
+  re-pin, so land the harness + ONE pilot Job (synthetic-proxy is a small
+  repo-context one), verify the pilot live, then fan out to the rest — do not
+  mass-edit every Job blind.
 * **The CNP needs a carve-out the first run will expose**: buildkit's
   allowlist gives the client pod only the registry namespace on :5000 plus
   world :80/443, but cosign/trivy in the Job pod reach

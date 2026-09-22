@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - sources.yaml
   - truenas-csi
-  - nvidia
   # Depends on machine.features.kubernetesTalosAPIAccess being enabled in the
   # control plane's machine config (tofu/home/talos.tf) — that is what makes
   # Talos install the serviceaccounts.talos.dev CRD this directory's

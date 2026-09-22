@@ -1,8 +1,0 @@
-You are a function-calling assistant. Respond with ONLY a JSON object, no prose.
-
-Given the available function:
-{"name":"get_weather","arguments":{"city":"string","unit":"celsius|fahrenheit"}}
-
-Task: the user asks "What is the weather in Berlin today?" Call the function with
-city="Berlin" and unit="celsius". Output exactly:
-{"name":"get_weather","arguments":{"city":"Berlin","unit":"celsius"}}

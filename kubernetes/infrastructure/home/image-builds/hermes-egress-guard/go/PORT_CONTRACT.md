@@ -20,7 +20,8 @@ kubernetes/infrastructure/home/image-builds/hermes-egress-guard/
 
 ## Toolchain & build
 
-- Build with `golang:1.27-alpine` (the cluster image, kv-broker precedent). Go binary
+- Build with `golang:1.27-alpine` (the cluster image; synthetic-proxy is the same
+  precedent). Go binary
   lives at `cd go && go build -trimpath -ldflags="-s -w" -o /out/guard ./cmd/guard` (the
   go.mod is inside go/, so build from go/; the entrypoint is cmd/guard/main.go — a
   `package main` importing the root `package guard` library as `hermes-egress-guard`).
@@ -29,9 +30,10 @@ kubernetes/infrastructure/home/image-builds/hermes-egress-guard/
   `net/http` (server AND client), `net`, `net/url`, `strings`, `bytes`, `io`, `fmt`,
   `sort`, `strconv`, `sync`, `time`, `os`, `log`. NO `signal` package (not std).
 
-## VERIFIED stdlib idioms (from kv-broker main.go + probes; DO NOT guess)
+## VERIFIED stdlib idioms (from the synthetic-proxy main.go + probes; DO NOT guess)
 
-HTTP server (blocking, container SIGTERM terminates — kv-broker precedent, no signal hook):
+HTTP server (blocking, container SIGTERM terminates — synthetic-proxy precedent,
+no signal hook):
 ```go
 srv := &http.Server{
     Addr:    "0.0.0.0:8080",

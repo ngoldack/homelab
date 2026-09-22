@@ -231,7 +231,7 @@ spec:
     #   9402       cert-manager controller
     #   9428/9429  vlsingle / vlagent
     #   9962/9963  cilium agent / operator
-    #   8080       llmkube llama-server (--metrics)
+    #   8080       exporters with a /metrics on the app port (synthetic-proxy)
     #   10250      kubelet (node-level metrics)
     #   8427/8428/8429  vmauth / vmsingle query+insert (the stack's own
     #                   internal data path: vmagent writes, vmalert and grafana

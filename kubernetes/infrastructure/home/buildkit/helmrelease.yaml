@@ -82,7 +82,7 @@ spec:
     buildkitVolume:
       type: emptyDir
       emptyDir:
-        # Peak for the ik_llama CUDA build is roughly: 11 GiB extracted
+        # Peak for a CUDA-heavy build is roughly: 11 GiB extracted
         # nvidia/cuda devel image + ~3 GiB runtime image + source + ~5 GiB of
         # nvcc objects + exported layers and cache. 40 GiB is headroom on top
         # of that, and is what bounds the builder's impact on the node.
@@ -97,12 +97,13 @@ spec:
     # dedicated media worker this list used to carry is consolidated into
     # wk-main-efficiency.)
     #
-    # The honest cost: this is the P100 inference node (untainted since
-    # 2026-09-15; placement is by label only), so the builder lands there and
-    # a build WILL compete with llama.cpp for CPU. Builds are occasional and
-    # the resource limit caps the damage; run one when the model is idle. The
-    # CPU request is small so the pod is nearly free while idle — buildkitd
-    # uses almost nothing between builds.
+    # The honest cost: the node also hosts the Kata sandboxes (placement is by
+    # label only; it has been untainted since 2026-09-15), so a build competes
+    # with them for CPU. Builds are occasional and the resource limit caps the
+    # damage. The CPU request is small so the pod is nearly free while idle —
+    # buildkitd uses almost nothing between builds. Until 2026-09-22 the node
+    # also served the P100; that lane, and the llama.cpp process this comment
+    # used to warn about, is gone.
     nodeSelector:
       node.kubernetes.io/instance-type: gpu-worker
 
@@ -111,8 +112,9 @@ spec:
         cpu: 200m
         memory: 1Gi
       limits:
-        # 12 of the node's 16 P-threads, leaving 4 for inference during a
-        # build. Note what this does and does not bound: the whole compile is
+        # 12 of the node's 16 P-threads, leaving 4 for everything else on the
+        # node during a build. Note what this does and does not bound: the
+        # whole compile is
         # ONE Dockerfile RUN step, so ninja inside it sees the node's 16 CPUs
         # and spawns 16 nvcc jobs regardless — the cgroup then throttles them
         # to 12 cores' worth. That is throttling, not thrashing, and is the

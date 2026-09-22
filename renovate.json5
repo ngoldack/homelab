@@ -34,7 +34,6 @@
     "flux", // Flux GitOpsToolkit HelmRelease/HelmRepository/Kustomization resources
     "helmv3", // tofu/home/charts/gateway-api-crds/Chart.yaml
     "terraform", // tofu/home/providers.tf required_providers + .terraform.lock.hcl
-    "gomod", // kubernetes/infrastructure/home/image-builds/llama-kv-broker/go.mod
     "pep621" // kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/pyproject.toml
   ],
   // flux manager: default patterns only see gotk-components.y*ml; the repo's
@@ -54,7 +53,7 @@
   // kustomization.yaml are intentionally NOT listed — they belong to flux.
   kubernetes: {
     managerFilePatterns: [
-      "/(?:^|\\/)(?:deployment|statefulset|cronjob|multus-daemonset|envoy|authorizer|reaper|sandbox-template|postgres|valkey|clickhouse|keeper|blackbox-exporter|outpost|portal-bridge|oidc-meta-proxy|ldap-outpost|kv-broker|qwen|nomic-embed)[^/]*\\.ya?ml$/",
+      "/(?:^|\\/)(?:deployment|statefulset|cronjob|multus-daemonset|envoy|authorizer|reaper|sandbox-template|postgres|valkey|clickhouse|keeper|blackbox-exporter|outpost|portal-bridge|oidc-meta-proxy|ldap-outpost)[^/]*\\.ya?ml$/",
       "/image-builds/[^/]+\\.ya?ml$/" // build Jobs (moby/buildkit buildctl image)
     ]
   },

@@ -1,4 +1,5 @@
-# Hindsight agent memory: local LLM (qwen3-27b) + CNPG + pgvector, LAN-only.
+# Hindsight agent memory: CNPG/pgvector + the agentgateway's synthetic LLM
+# lane (the local P100 model it started on was removed 2026-09-22).
 # Depends on cnpg-operator for the Cluster/Database CRDs and on network for
 # the Gateway its routes attach to (same edges as immich/authentik).
 apiVersion: kustomize.toolkit.fluxcd.io/v1

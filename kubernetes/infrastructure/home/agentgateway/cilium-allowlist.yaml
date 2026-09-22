@@ -63,16 +63,6 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: agentgateway
-    # Model backends: the only in-cluster backend is the llmkube KV broker in
-    # front of the llama.cpp InferenceService (backends.yaml:
-    # llama-kv-broker.llmkube-system.svc:8080), so this is scoped to that
-    # namespace instead of every cluster endpoint.
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: llmkube-system
-      toPorts:
-        - ports:
-            - {port: "8080", protocol: TCP}
     # JWT validation: the gateway fetches the OIDC provider's JWKS from
     # authentik's server/portal ports in the authentik namespace (observed as
     # a sustained denied flow when this rule was missing).

@@ -90,7 +90,7 @@ mounted by the helmrelease sets `storage.gc: true`, `gcDelay: "1h"`,
 is v2.1.21): with no `retention` block, GC **deletes all untagged manifests
 not referenced by indexes or artifacts** after the delay. Verified live on
 2026-09-18: 21 GC log lines that day, including
-`gc successfully completed for /var/lib/registry/llama-p100` — the registry
+`gc successfully completed for /var/lib/registry/<repo>` — the registry
 reaps untagged manifests on its own schedule, no config change was needed
 and none was made.
 

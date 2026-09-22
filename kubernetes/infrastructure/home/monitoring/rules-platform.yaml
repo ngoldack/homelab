@@ -16,13 +16,12 @@
 # Deliberately absent (verified absent at implementation time — do not add
 # rules for these until the series exist):
 #
-#   GPU: `{__name__=~"nvidia_.*"}`, `{__name__=~".*gpu.*"}`,
+#   GPU: there is no GPU in this cluster any more (the P100, its device plugin
+#     and the llmkube lane were removed on 2026-09-22), so
+#     `{__name__=~"nvidia_.*"}`, `{__name__=~".*gpu.*"}`,
 #     `{__name__=~"llmkube_.*"}` and `{__name__=~"llama.*"}` all return zero
-#     series. The llmkube qwen3-27b VMServiceScrape in scrapes.yaml discovers
-#     no ready endpoints while no model pod is scheduled, and the nvidia
-#     device plugin exports no scraped metrics. A GPU alert would evaluate
-#     an empty vector forever, i.e. it could never fire — add GPU rules in
-#     the same change that deploys a scrapeable GPU workload.
+#     series. Add GPU rules in the same change that deploys a scrapeable GPU
+#     workload.
 #
 #   Host/infra (Proxmox host memory, TrueNAS pool health): the
 #     homelab-infra-metrics push path (PVE/PBS via InfluxDB line protocol,

@@ -41,9 +41,6 @@ ignore: |
   # above. The buildctl/registry-credentials wiring is what matters, not the
   # column count.
   kubernetes/infrastructure/home/image-builds/*.yaml
-  # llmkube model canary window toggles: JSON-ish one-line model specs (long
-  # lines by construction), toggled by git commits, never hand-formatted.
-  kubernetes/infrastructure/home/llmkube-models/canary-pxa-models.yaml
   # hermes-egress policy ConfigMap: the embedded CEL/OPA policy expressions
   # are one-liners; reflowing them would obscure the policy text.
   kubernetes/infrastructure/home/hermes-egress/policy-configmap.yaml

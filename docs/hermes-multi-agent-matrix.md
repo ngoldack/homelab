@@ -115,9 +115,17 @@ Two more mechanics belong to the same boundary:
   `kanban/kanban.db`. A per-pod volume cannot work: the dispatcher spawns each
   task's worker locally and resolves that worker's home as
   `<root>/profiles/<assignee>`.
-- **The board is SQLite on NFS**, so the profiles run
+- **The board is SQLite on NFS**, the profiles request
   `database.journal_mode: delete` (Hermes' documented NFS-safe mode) and all
-  four pods are pinned to one node: `nodeSelector: workload.hermes.io/sandbox=true`
+  four pods are pinned to one node. Note what that setting does and does not do
+  today: a database created BEFORE the setting went in is already WAL, and
+  Hermes refuses a live downgrade ("keeping WAL … a live downgrade under open
+  connections can corrupt the DB"), so the existing `state.db` files stay WAL
+  and the setting only takes effect for databases created afterwards. Making it
+  true for the existing ones is a deliberate offline step (stop the agents, run
+  `PRAGMA journal_mode=DELETE` on each DB file, start them again); the property
+  that actually keeps WAL safe here is the single-node pin plus the single
+  writer the dispatcher enforces: `nodeSelector: workload.hermes.io/sandbox=true`
   — the only node carrying that label, and the one the sandbox runtime and the
   parent gateway already use. A *preferred* pod affinity (weight 100, same
   hostname topology) is kept as belt-and-braces rather than as the primary
@@ -923,7 +931,10 @@ These are stated so nothing here implies support that does not exist.
   crash detection assumes host-local PIDs, so the four agents are pinned with
   `nodeSelector: workload.hermes.io/sandbox=true` (the only node with that
   label) plus a preferred pod affinity, and every profile runs
-  `database.journal_mode: delete` as the backstop. Consequence, stated plainly:
+  `database.journal_mode: delete` as the backstop (see the caveat earlier: for
+  databases created before that setting the files are already WAL and Hermes
+  keeps them that way rather than risk a live downgrade). Consequence, stated
+  plainly:
   that node is a single point of failure for the whole agent fleet, it also
   hosts `hermes-0`, the sandbox warm pool and the Kata runtime, and its CPU
   requests are close to the ceiling — the four profiles request 100m/256Mi each

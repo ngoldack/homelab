@@ -30,7 +30,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-llama-kv-broker-7
+# NOTE ON THE NAME: buildkit Jobs are IMMUTABLE, so editing this file (the
+# script below is the digest-extraction fix) requires a new Job name — Flux
+# cannot patch an existing Job's pod template and the whole image-builds
+# Kustomization then fails to apply. Bump the suffix when you change anything in
+# this file. The push TAG stays `7`, so a rebuild overwrites that tag and the
+# Deployment's digest pin must be refreshed from the new Job's log
+# (the extraction below now takes buildkit's own 'exporting manifest' line
+# instead of the last digest in the log, which is the cache manifest when a
+# registry cache is exported — that mistake pinned this image to a buildkit
+# CACHE manifest and left the real image unsigned).
+  name: build-llama-kv-broker-8
   namespace: buildkit
 spec:
   backoffLimit: 2

@@ -348,6 +348,11 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: hermes-agents-secret
+                  key: HINDSIGHT_C_API_KEY
+            - name: HINDSIGHT_M_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agents-secret
                   key: HINDSIGHT_M_API_KEY
             - name: HINDSIGHT_L_API_KEY
               valueFrom:

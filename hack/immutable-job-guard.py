@@ -62,10 +62,19 @@ def git(args, check=True):
 
 
 def resolve_base(arg):
-    """BASE_REF argument, else env BASE_REF, else origin/main, else origin/HEAD."""
-    for candidate in (arg, os.environ.get("BASE_REF")):
-        if candidate:
-            return candidate
+    """BASE_REF argument, else env BASE_REF, else origin/main, else origin/HEAD.
+
+    An explicitly named ref must resolve to a commit. Without this check a typo
+    (or a CI misconfiguration) degrades every `git show <base>:<path>` to a
+    failure, which the loop below would read as "new file" for every manifest —
+    reporting a clean pass while the gate is effectively switched off. A
+    fail-open gate is worse than no gate, so a bad ref is exit 2.
+    """
+    explicit = arg or os.environ.get("BASE_REF")
+    if explicit:
+        if not git(["rev-parse", "--verify", "--quiet", f"{explicit}^{{commit}}"], check=False):
+            die(f"base ref {explicit!r} does not resolve to a commit")
+        return explicit
     for ref in ("origin/main", "origin/HEAD"):
         if git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], check=False):
             return ref

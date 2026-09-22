@@ -244,19 +244,12 @@ variable "nodes" {
       memory     = 32768
       disk_size  = 48
       talos_role = "worker"
-      # QuickSync/VAAPI lives here (iGPU passthrough + i915 driver after the
-      # media-node consolidation). See terraform.tfvars for the full contract.
-      extensions = ["siderolabs/i915"]
-      hostpci = [
-        {
-          device = "intel-igpu"
-          pcie   = true
-          rombar = true
-        },
-      ]
+      # No passthrough device: the UHD 770 and its i915 driver moved to the
+      # performance worker on 2026-09-22. See terraform.tfvars for the full
+      # contract.
       node_labels = {
         "node.kubernetes.io/instance-type" = "worker"
-        "workload/media"                   = "true"
+        "node.homelab/class"               = "efficiency"
       }
     }
     wk-main-performance = {
@@ -267,10 +260,27 @@ variable "nodes" {
       disk_size         = 96
       talos_role        = "worker"
       rootless_buildkit = true
+      # kata + i915 together: a schematic no node has carried before, so this
+      # reaches the node only through a reinstall (install.image is keyed on
+      # the extension set). The iGPU arrived from the efficiency worker on
+      # 2026-09-22.
+      extensions = [
+        "siderolabs/kata-containers",
+        "siderolabs/i915",
+      ]
+      hostpci = [
+        {
+          device = "intel-igpu"
+          pcie   = true
+          rombar = true
+        },
+      ]
       node_labels = {
         # Historical value, kept because the BuildKit builder selects on it.
         "node.kubernetes.io/instance-type" = "gpu-worker"
         "workload.hermes.io/sandbox"       = "true"
+        "workload/media"                   = "true"
+        "node.homelab/class"               = "performance"
       }
     }
   }

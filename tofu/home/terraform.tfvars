@@ -102,19 +102,26 @@ nodes = {
   }
 
   # THE general worker: carries every workload that is not pinned to the
-  # performance worker or the control plane, and owns the Intel UHD 770 iGPU
-  # for QuickSync/VAAPI
+  # performance worker or the control plane
   # (consolidated here from the retired wk-main-media node — exactly two
   # workers now). All remaining E-class threads: 16 - 2 host - 4 cp = 10.
   #
   # It is deliberately NOT NoSchedule-tainted: it is the only node general
   # workloads can run on, and a taint here would force a toleration onto
   # every deployment in the cluster while isolating nothing (a taint is only
-  # meaningful when there is somewhere else to go). QuickSync workloads
-  # PULL themselves here via the labels instead — hardware/igpu is derived
-  # automatically from the hostpci mapping (see local.node_labels_derived in
-  # main.tf), so the scheduling contract is: selector hardware/igpu + the
-  # workload/media capability label, no toleration needed.
+  # meaningful when there is somewhere else to go).
+  #
+  # node.homelab/class=efficiency is the intended landing spot for ordinary
+  # workloads; the performance worker is reached by opt-in (its own class
+  # value, or the capability selectors Kata and BuildKit already use). The
+  # class is a separate key rather than a new value of topology.homelab/site
+  # because ~55 manifests select site=home and BOTH workers must keep
+  # matching it — the site label says which site a node is in, the class
+  # label says how it wants to be used.
+  #
+  # The iGPU and the workload/media capability label moved to the performance
+  # worker on 2026-09-22 (see that block): jellyfin, the only pod that mounts
+  # /dev/dri, must live on whichever node owns the card.
   wk-main-efficiency = {
     host      = "pmx-main"
     vm_id     = 104
@@ -132,40 +139,32 @@ nodes = {
 
     talos_role = "worker"
 
-    # i915 (kernel driver + firmware) for the passed-through UHD 770 — moved
-    # with the iGPU from wk-main-media. The VAAPI userspace (libva,
-    # intel-media-driver) belongs in whichever CONTAINER transcodes, mounted
-    # with /dev/dri; Talos has no host-side VAAPI extension (the old
-    # siderolabs/intel-vaapi was removed from the catalog entirely).
-    extensions = [
-      "siderolabs/i915",
-    ]
-
-    # The VGA-arbitration history matters here: an iGPU passthrough guest
-    # with an emulated display present can hang at boot (this bit
-    # wk-main-media exactly once). main.tf's vga rule — serial0 whenever
-    # hostpci is set — is what keeps this safe; do not re-add `std` to
-    # passthrough nodes.
-    hostpci = [
-      {
-        device = "intel-igpu"
-        pcie   = true
-        rombar = true
-      },
-    ]
+    # No extensions: this node carries no passthrough device. The i915 driver
+    # and firmware moved to wk-main-performance with the UHD 770, and the
+    # VAAPI userspace (libva, intel-media-driver) lives in whichever CONTAINER
+    # transcodes, mounted with /dev/dri; Talos has no host-side VAAPI
+    # extension (the old siderolabs/intel-vaapi was removed from the catalog
+    # entirely).
 
     node_labels = {
       "node.kubernetes.io/instance-type" = "worker"
-      "workload/media"                   = "true"
+      "node.homelab/class"               = "efficiency"
     }
   }
 
   # Performance worker — all 16 P-class threads and 48 GiB (the shape it kept
   # when the 2026-09-16 sandbox merge folded the dedicated sandbox worker in).
-  # Kata sandbox workloads land here (label-pinned) and so does the rootless
-  # BuildKit builder, which is why this node carries the user-namespace sysctl
-  # below. It hosted the Tesla P100 until 2026-09-22; the card, its NVIDIA
-  # driver extensions, the passthrough and the local-LLM lane are gone.
+  # Kata sandbox workloads land here (label-pinned, and the kata RuntimeClass
+  # itself carries that nodeSelector) and so does the rootless BuildKit
+  # builder, which is why this node carries the user-namespace sysctl below.
+  # It hosted the Tesla P100 until 2026-09-22; the local-LLM lane went with
+  # it, and the Intel UHD 770 iGPU passthrough arrived the same day.
+  #
+  # node.homelab/class=performance marks this node as opt-in: it is NOT the
+  # default landing spot (that is the efficiency worker), so a workload ends
+  # up here either because it selects a capability only this node has (Kata's
+  # workload.hermes.io/sandbox, BuildKit's instance-type, the iGPU) or
+  # because the efficiency node could not fit it.
   #
   # 48 GiB — at the top of the 88 GiB VM pool (94 usable - 6 host). Ballooning
   # is off (memory.dedicated), so allocated == committed; the ZFS ARC is shrunk
@@ -187,25 +186,67 @@ nodes = {
     # (user.max_user_namespaces=0); the builder lives on this node, so the
     # sysctl patch in talos.tf is keyed on this flag.
     rootless_buildkit = true
-    # Kata Containers — containerd runtime + QEMU microVM machinery, baked
-    # into the boot image via Image Factory (merged from the old dedicated
-    # sandbox worker on 2026-09-16; this node's extension list forms its own
-    # schematic/ISO in main.tf). No siderolabs/i915 here — the iGPU lives on
-    # the efficiency worker.
+    # Kata Containers — containerd runtime + QEMU microVM machinery — plus
+    # i915 (kernel driver + firmware) for the passed-through UHD 770. Both are
+    # baked into the boot image via Image Factory (this node's extension list
+    # forms its own schematic/ISO in main.tf).
+    #
+    # OPERATIONAL CONSEQUENCE, and the reason this is a maintenance-window
+    # change: `install.image` is keyed on the extension set, so a node that
+    # has never carried kata+i915 together gets a brand-new Image Factory
+    # schematic, and the swap only lands through a node REINSTALL (main.tf
+    # documents the schematic build and its download-timeout recovery).
     extensions = [
       "siderolabs/kata-containers",
+      "siderolabs/i915",
     ]
-    # No hostpci: this node's PCI passthrough was the Tesla P100, removed with
-    # the local-LLM lane. The iGPU passthrough stays on the efficiency worker.
+
+    # The UHD 770, moved here from the efficiency worker on 2026-09-22.
+    # intel-igpu is a host-level PCI resource mapping on pmx-main and a
+    # passthrough device can only be claimed by one guest at a time, so the
+    # two nodes must be changed in separate applies: remove it from the
+    # efficiency worker and let that VM stop so vfio releases the device,
+    # then add it here. A single apply writes both configs with whatever
+    # ordering the provider's parallelism gives it.
     #
+    # The VGA-arbitration history applies here now: an iGPU passthrough guest
+    # with an emulated display present can hang at boot (this bit
+    # wk-main-media exactly once). main.tf's vga rule — serial0 whenever
+    # hostpci is set — is what keeps this safe; do not re-add `std` to
+    # passthrough nodes.
+    hostpci = [
+      {
+        device = "intel-igpu"
+        pcie   = true
+        rombar = true
+      },
+    ]
+
     # Sandbox workloads pin via workload.hermes.io/sandbox=true. The
-    # `instance-type` value is historical — the node has no GPU any more — and
-    # is kept because the BuildKit builder selects on it
+    # `instance-type` value is historical — the node has no NVIDIA GPU any
+    # more — and is kept because the BuildKit builder selects on it
     # (kubernetes/infrastructure/home/buildkit/helmrelease.yaml); changing the
     # value would strand the builder until the node restart that applies it.
+    #
+    # workload/media is the iGPU's other half: jellyfin selects it and is the
+    # only pod in the cluster that mounts /dev/dri (media/helmrelease.yaml),
+    # so the capability label travels with the card. immich-machine-learning
+    # needs nothing here — it selects the derived hardware/igpu label (from
+    # the hostpci mapping above) and follows automatically.
+    #
+    # STALE LABELS to remove by hand after the next apply, because Talos's
+    # nodeLabels patch does not prune keys that are no longer declared:
+    # `ai=true` and `workload/ai-inference=true` (declared in no repo file,
+    # so they are hand-applied leftovers) and `hardware/gpu.model=Tesla-P100`
+    # / `hardware/gpu.count` / `hardware/gpu.vram_gb` (derived only when a
+    # node sets `gpu = true`, which no node does any more):
+    #   kubectl label node talos-919-w9u ai- workload/ai-inference- \
+    #     hardware/gpu.model- hardware/gpu.count- hardware/gpu.vram_gb-
     node_labels = {
       "node.kubernetes.io/instance-type" = "gpu-worker"
       "workload.hermes.io/sandbox"       = "true"
+      "workload/media"                   = "true"
+      "node.homelab/class"               = "performance"
     }
   }
 

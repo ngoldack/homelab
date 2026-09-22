@@ -254,15 +254,29 @@ deployment.
 
 Operationally:
 
-- The container root filesystem is read-only, so on first start Hermes mirrors
-  the bundled bridge into `$HERMES_HOME/scripts/whatsapp-bridge` and runs
-  `npm install` there. That install needs `registry.npmjs.org`; the Cilium
-  allowlist already carries the Fastly CIDRs. It can take minutes, and the
-  adapter waits up to its npm-install timeout before giving up.
-- Pairing is a QR code written to the bridge log. Pair with
-  `kubectl -n hermes logs -f dave-0` and scan from the phone's
-  *Linked Devices*. The session then persists on the shared PVC, so restarts
-  do not re-pair.
+- The container root filesystem is read-only, so Hermes mirrors the bundled
+  bridge into `$HERMES_HOME/scripts/whatsapp-bridge`. The bridge's node
+  dependencies are **baked into the image** (see the plugin Dockerfile): the
+  runtime `npm install` Hermes would otherwise run cannot work here, because
+  `registry.npmjs.org` is served by Cloudflare (104.16.0.0/12) and the pod's
+  egress allowlist carries only the Fastly anycast ranges. Baking them also
+  removes the multi-minute first-start install the adapter used to wait on.
+- **Pairing is interactive, and the QR only exists on a terminal.**
+  `kubectl -n hermes logs` shows the *running* bridge, not a pairing code. Pair
+  with:
+
+  ```bash
+  kubectl -n hermes exec -it dave-0 -c dave -- hermes whatsapp
+  ```
+
+  The wizard installs nothing (deps are present), runs the bridge with
+  `--pair-only`, and prints the QR: scan it from the phone's *Linked Devices*.
+  The `-c dave` matters — the pod has two containers, so a bare
+  `kubectl logs dave-0` errors out. The session then persists on the shared PVC
+  (`$HERMES_HOME/whatsapp/session/creds.json`), so restarts do not re-pair.
+  WhatsApp only enables itself after `creds.json` exists, and the adapter marks
+  an unpaired start non-retryable — so pair first, then roll the pod to pick the
+  session up.
 - `WHATSAPP_MODE=bot` — a dedicated WhatsApp account (a second number), not the
   operator's own chat: in `bot` mode inbound messages come from a different
   number, which is what makes an allowlist meaningful. DMs are answered without

@@ -29,9 +29,72 @@ USER root
 
 # ca-certificates: ensure the TLS trust store is present for the gateway's own
 # tooling (git/curl). No homelab CA is layered in here.
+# `upgrade` (not just `install`) is deliberate: the base image's Debian packages
+# drift behind the security archive, and the build's trivy gate
+# (--severity CRITICAL --exit-code 1) fails the whole build when they do. On
+# 2026-09-22 a rebuild was rejected on 18 inherited CRITICALs — perl/libxml2/
+# glib/mbedtls/openssh-client/linux-libc-dev — every one of them with a fixed
+# version available in the suite, and none of them anything to do with this
+# image's own content. Refreshing them here keeps the gate meaningful instead of
+# turning a DB refresh into a blocked build.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get -y --no-install-recommends upgrade \
     && rm -rf /var/lib/apt/lists/*
+
+# The WhatsApp bridge's node dependencies, baked in — because Hermes otherwise
+# installs them at first start (`npm install` in the bridge dir) and the
+# gateway's egress allowlist cannot reach npm's registry.
+#
+# registry.npmjs.org is served by Cloudflare (104.16.0.0/12, and 2606:4700::/32
+# over v6), while hermes-agents/cilium-policy.yaml carries only the Fastly
+# anycast ranges (151.101.0.0/16, 146.75.0.0/16, 199.232.0.0/16) plus GitHub.
+# Verified live 2026-09-22: DNS resolves 104.16.x.34 and every TCP connect to
+# :443 times out, so the install can never succeed — pairing could not complete,
+# and each gateway start paid the full npm-install timeout before giving up.
+#
+# Baking the tree removes the runtime network dependency entirely.
+# resolve_whatsapp_bridge_dir() mirrors this directory (node_modules included)
+# into $HERMES_HOME/scripts/whatsapp-bridge because the container rootfs is
+# read-only, and the mirror is reused once it exists.
+#
+# .hermes-pkg-hash is load-bearing: the adapter compares it against the first 16
+# hex chars of the SHA-256 of package.json (adapter._file_content_hash) and runs
+# `npm install` whenever it is missing or stale — which is exactly the failing
+# path this step removes. Keep the two computations identical.
+RUN set -eu; \
+    cd /opt/hermes/scripts/whatsapp-bridge; \
+    npm ci --omit=dev --silent; \
+    sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash; \
+    test "$(cat node_modules/.hermes-pkg-hash)" = "$(sha256sum package.json | cut -c1-16)"; \
+    node --input-type=module -e 'const m = await import("@whiskeysockets/baileys"); if (!m.makeWASocket && !m.default) throw new Error("baileys has no makeWASocket/default export"); console.log("whatsapp bridge: baileys resolves offline")'; \
+    node --input-type=module -e 'for (const d of ["express","qrcode-terminal","pino"]) await import(d); console.log("whatsapp bridge: express/qrcode-terminal/pino resolve offline")'
+
+
+# Two CRITICALs are inherited from the upstream base image, and this image's own
+# trivy gate (--severity CRITICAL --exit-code 1, like every build job here)
+# refuses to ship either. Both are in-place version bumps of the inherited copy
+# — the same shape as the base image nudging its own pins — and both are
+# asserted, because a silent failure here means shipping the vulnerable version:
+#
+#   * anyio 4.12.1 (CVE-2026-63374, IDNA-2003 host-name encoding in TLSStream)
+#     is the base image's uv-managed venv; >= 4.14.2 fixes it.
+#   * tar 7.5.16 (CVE-2026-59873, gzip-bomb DoS) is the copy npm bundles for
+#     ITSELF at /usr/local/lib/node_modules/npm/node_modules/tar. It is NOT the
+#     WhatsApp bridge's tree: that has no tar dependency at all (checked, which
+#     is why an override on the bridge does nothing).
+RUN set -eu; \
+    uv pip install --python /opt/hermes/.venv/bin/python3 --no-cache "anyio>=4.14.2"; \
+    test -z "$(ls -d /opt/hermes/.venv/lib/python3.13/site-packages/anyio-4.12.* 2>/dev/null)" || { echo "old anyio dist-info still present"; exit 1; }; \
+    /opt/hermes/.venv/bin/python3 -c 'import importlib.metadata as md; v=md.version("anyio"); assert tuple(int(x) for x in v.split(".")[:2]) >= (4,14), "anyio still vulnerable: "+v; print("base venv: anyio "+v+" >= 4.14.2")'; \
+    mkdir -p /tmp/tarfix; \
+    cd /tmp/tarfix; \
+    npm install --no-save --no-audit --no-fund "tar@>=7.5.19" >/dev/null; \
+    rm -rf /usr/local/lib/node_modules/npm/node_modules/tar; \
+    cp -r /tmp/tarfix/node_modules/tar /usr/local/lib/node_modules/npm/node_modules/tar; \
+    cd /; rm -rf /tmp/tarfix; \
+    node -e 'const p=require("/usr/local/lib/node_modules/npm/node_modules/tar/package.json"); const [a,b,c]=p.version.split(".").map(Number); if (a<7||(a===7&&b<5)||(a===7&&b===5&&c<19)) throw new Error("npm bundled tar still vulnerable: "+p.version); console.log("npm bundled tar: "+p.version+" >= 7.5.19")'; \
+    npm --version
 
 # Install the pinned agent-sandbox python SDK (with its grpc extra) and the
 # plugin package into a SEPARATE plain venv, NOT the base image's uv-managed

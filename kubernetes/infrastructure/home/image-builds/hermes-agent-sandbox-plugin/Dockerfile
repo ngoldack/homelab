@@ -61,35 +61,31 @@ RUN set -eu; \
     node --input-type=module -e 'const m = await import("@whiskeysockets/baileys"); if (!m.makeWASocket && !m.default) throw new Error("baileys has no makeWASocket/default export"); console.log("whatsapp bridge: baileys resolves offline")'; \
     node --input-type=module -e 'for (const d of ["express","qrcode-terminal","pino"]) await import(d); console.log("whatsapp bridge: express/qrcode-terminal/pino resolve offline")'
 
-# Pin the transitive `tar` and `anyio` installs past the two CRITICALs the build
-# gate fails on (same shape as the base image's own `uv pip install --upgrade`
-# lines above — an in-place version bump, not a dependency change):
-#   * tar CVE-2026-59873 (gzip-bomb DoS) arrives with the bridge tree above;
-#     fixed in 7.5.19; `npm install` re-resolves the tree and the version is
-#     asserted immediately after.
-#   * anyio CVE-2026-63374 (IDNA-2003 name encoding) is inherited from the
-#     upstream base image's uv-managed venv (4.12.1 < 4.14.2). That venv is out
-#     of this Dockerfile's control, so it is patched here; without it NO rebuild
-#     of this image can pass its own trivy gate.
+
+# Two CRITICALs are inherited from the upstream base image, and this image's own
+# trivy gate (--severity CRITICAL --exit-code 1, like every build job here)
+# refuses to ship either. Both are in-place version bumps of the inherited copy
+# — the same shape as the base image nudging its own pins — and both are
+# asserted, because a silent failure here means shipping the vulnerable version:
+#
+#   * anyio 4.12.1 (CVE-2026-63374, IDNA-2003 host-name encoding in TLSStream)
+#     is the base image's uv-managed venv; >= 4.14.2 fixes it.
+#   * tar 7.5.16 (CVE-2026-59873, gzip-bomb DoS) is the copy npm bundles for
+#     ITSELF at /usr/local/lib/node_modules/npm/node_modules/tar. It is NOT the
+#     WhatsApp bridge's tree: that has no tar dependency at all (checked, which
+#     is why an override on the bridge does nothing).
 RUN set -eu; \
-    cd /opt/hermes/scripts/whatsapp-bridge; \
-    npm pkg set 'overrides.tar=^7.5.19' >/dev/null; \
-    npm install --omit=dev --silent --no-audit --no-fund; \
-    node -e 'const FIXED=[7,5,19]; const lt=(a,b)=>a[0]!==b[0]?a[0]<b[0]:a[1]!==b[1]?a[1]<b[1]:a[2]<b[2]; \
-      const seen=[]; \
-      const lock=require("./package-lock.json"); \
-      for (const [k,v] of Object.entries(lock.packages||{})) if (k.endsWith("node_modules/tar") && v.version) seen.push(["lock:"+k, v.version]); \
-      const walk=(d)=>{for (const e of require("fs").readdirSync(d,{withFileTypes:true})) { const p=d+"/"+e.name; if (e.isDirectory()) { if (e.name==="tar" && require("fs").existsSync(p+"/package.json")) seen.push(["tree:"+p, require(p+"/package.json").version]); else walk(p); } }}; \
-      walk("./node_modules"); \
-      if (!seen.length) throw new Error("no tar copy found at all"); \
-      const bad=seen.filter(([w,v])=>lt(v.split(".").map(Number),FIXED)); \
-      if (bad.length) throw new Error("tar below 7.5.19: "+JSON.stringify(bad)); \
-      console.log("whatsapp bridge: tar "+seen.map(([w,v])=>v+" ("+w+")").join(", ")+" all >= 7.5.19")'; \
-    sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash; \
-    test "$(cat node_modules/.hermes-pkg-hash)" = "$(sha256sum package.json | cut -c1-16)"; \
     uv pip install --python /opt/hermes/.venv/bin/python3 --no-cache "anyio>=4.14.2"; \
     test -z "$(ls -d /opt/hermes/.venv/lib/python3.13/site-packages/anyio-4.12.* 2>/dev/null)" || { echo "old anyio dist-info still present"; exit 1; }; \
-    /opt/hermes/.venv/bin/python3 -c 'import importlib.metadata as md; v=md.version("anyio"); assert tuple(int(x) for x in v.split(".")[:2]) >= (4,14), "anyio still vulnerable: "+v; print("base venv: anyio "+v+" >= 4.14.2")'
+    /opt/hermes/.venv/bin/python3 -c 'import importlib.metadata as md; v=md.version("anyio"); assert tuple(int(x) for x in v.split(".")[:2]) >= (4,14), "anyio still vulnerable: "+v; print("base venv: anyio "+v+" >= 4.14.2")'; \
+    mkdir -p /tmp/tarfix; \
+    cd /tmp/tarfix; \
+    npm install --no-save --no-audit --no-fund "tar@>=7.5.19" >/dev/null; \
+    rm -rf /usr/local/lib/node_modules/npm/node_modules/tar; \
+    cp -r /tmp/tarfix/node_modules/tar /usr/local/lib/node_modules/npm/node_modules/tar; \
+    cd /; rm -rf /tmp/tarfix; \
+    node -e 'const p=require("/usr/local/lib/node_modules/npm/node_modules/tar/package.json"); const [a,b,c]=p.version.split(".").map(Number); if (a<7||(a===7&&b<5)||(a===7&&b===5&&c<19)) throw new Error("npm bundled tar still vulnerable: "+p.version); console.log("npm bundled tar: "+p.version+" >= 7.5.19")'; \
+    npm --version
 
 # Install the pinned agent-sandbox python SDK (with its grpc extra) and the
 # plugin package into a SEPARATE plain venv, NOT the base image's uv-managed

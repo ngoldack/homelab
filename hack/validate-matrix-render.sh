@@ -205,6 +205,32 @@ def pods_matching(selector):
     return [ports for labels, ports in rendered_pods
             if all(labels.get(k) == v for k, v in selector.items())]
 
+# The repo's OWN workloads in this namespace (the bootstrap Job) are not part of
+# the chart render, but their pods are policed by the same allowlist — include
+# them so a peer naming them is checked like any other.
+for f in sorted(glob.glob(os.path.join(repo, 'kubernetes/infrastructure/home/matrix/**/*.yaml'), recursive=True)) if repo else []:
+    if os.path.basename(f) == 'cilium-allowlist.yaml':
+        continue
+    try:
+        repo_docs = [d for d in yaml.safe_load_all(open(f)) if d]
+    except Exception:
+        continue
+    for d in repo_docs:
+        if d.get('kind') not in ('Deployment', 'StatefulSet', 'Job', 'CronJob'):
+            continue
+        tpl = (d.get('spec') or {}).get('template') or \
+              (d.get('spec') or {}).get('jobTemplate', {}).get('spec', {}).get('template') or {}
+        podspec = tpl.get('spec') or {}
+        labels = tpl.get('metadata', {}).get('labels') or {}
+        if not labels:
+            continue
+        ports = set()
+        for c in (podspec.get('containers') or []) + (podspec.get('initContainers') or []):
+            for p_ in c.get('ports') or []:
+                if p_.get('containerPort') is not None:
+                    ports.add(str(p_.get('containerPort')))
+        rendered_pods.append((labels, ports))
+
 skipped_selectors = []
 policies_checked = 0
 cilium_files = sorted(glob.glob(os.path.join(repo, 'kubernetes/infrastructure/home/matrix/cilium-*.yaml'))) if repo else []

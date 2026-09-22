@@ -1,0 +1,185 @@
+# The bootstrap logic, mounted into the Job at /scripts/bootstrap.sh.
+# Keeping it in a ConfigMap (not a container image) matches the restore
+# drills: the script is reviewable in git and the Job stays a thin runner.
+#
+# RE-RUNNING: the script lives here (ConfigMaps are mutable), so a fix does
+# not need a Job rename — delete the Job and re-apply and the next run
+# re-reads this script:  kubectl -n matrix delete job matrix-bots-bootstrap-s1
+# (only a SPEC change in job.yaml needs a new suffix, because Jobs are
+# immutable.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matrix-bots-bootstrap-script
+  namespace: matrix
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    # matrix-bots-bootstrap — configure the Hermes bot accounts in MAS, idempotently.
+    #
+    # Runs as a one-shot Job in the matrix namespace (see job.yaml). It is the
+    # executable form of the "Bot accounts (one-time)" runbook step:
+    #
+    #   * register dave/chad/lindner in MAS with a random password (skipped when the
+    #     localpart is already taken — checked through the client API, the only
+    #     non-interactive way to ask MAS "does this user exist": the CLI has no
+    #     user-listing command and the MAS image ships no shell, so the check goes
+    #     over HTTP from THIS pod and the mutations go through `kubectl exec` into
+    #     the running MAS pod, which is where the merged config and secrets live);
+    #   * mint one Matrix access token per bot with a stable device id, so the
+    #     Hermes adapters have a device identity that survives restarts;
+    #   * create the shared private room on the alias and record its IMMUTABLE room
+    #     id (the alias is a convenience; the id is what the agents are allowlisted
+    #     on), inviting the operator;
+    #   * publish everything as a Secret the operator copies into
+    #     hermes-agents/secret.sops.yaml. Nothing is printed: tokens are captured in
+    #     this shell and written straight to the Secret.
+    #
+    # Re-running is safe: an existing user is left alone, an existing token in the
+    # OUTPUT Secret is reused (set REISSUE=true to mint new ones, which invalidates
+    # the old tokens for the running agents until they are rolled).
+    set -eu
+
+    NS_MATRIX="${NS_MATRIX:-matrix}"
+    MAS_DEPLOY="${MAS_DEPLOY:-matrix-matrix-authentication-service}"
+    MAS_CFG="${MAS_CFG:-/conf/mas-config.yaml}"
+    SYNAPSE="${SYNAPSE:-http://matrix-synapse.matrix.svc.cluster.local:8008}"
+    BOTS="${BOTS:-dave chad lindner}"
+    OUTPUT_SECRET="${OUTPUT_SECRET:-matrix-bots-bootstrap}"
+    ROOM_ALIAS_LOCALPART="${ROOM_ALIAS_LOCALPART:-agent-hq}"
+    ROOM_NAME="${ROOM_NAME:-Agent HQ}"
+    SERVER_NAME="${SERVER_NAME:-matrix.ngoldack.de}"
+    OPERATOR_MXID="${OPERATOR_MXID:-}"
+    REISSUE="${REISSUE:-false}"
+
+    log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+
+    mas() {
+      kubectl -n "$NS_MATRIX" exec "deploy/$MAS_DEPLOY" -- \
+        mas-cli --config "$MAS_CFG" "$@"
+    }
+
+    # Existing values, so a re-run does not churn tokens.
+    existing_secret="$(kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o json 2>/dev/null || true)"
+    have_key() {
+      printf '%s' "$existing_secret" | grep -q "\"$1\":" 2>/dev/null || return 1
+    }
+    read_key() {
+      kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" -o "jsonpath={.data.$1}" \
+        | base64 -d
+    }
+
+    rand_pw() {
+      # 24 chars from urandom, base64-safe for the CLI (no shell metachars).
+      head -c 24 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-24
+    }
+
+    # 0 = free, 1 = taken, 2 = could not ask. An unreachable homeserver must NOT be
+    # read as "the account already exists": that is how a policy revert during a run
+    # turned into a silent skip (the run then failed later with "User not found"
+    # instead of saying the network was broken).
+    localpart_state() {
+      for _ in 1 2 3; do
+        if body="$(curl -fsS -m 5 "$SYNAPSE/_matrix/client/v3/register/available?username=$1" 2>/dev/null)"; then
+          case "$body" in
+            *'"available":true'*) return 0 ;;
+            *) return 1 ;;
+          esac
+        fi
+        sleep 2
+      done
+      return 2
+    }
+
+    out="$(mktemp)"
+    printf 'BOOTSTRAP_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$out"
+
+    log "target: $SYNAPSE (ns $NS_MATRIX), bots: $BOTS"
+
+    # ---------------------------------------------------------------- accounts ---
+    for bot in $BOTS; do
+      upper="$(printf '%s' "$bot" | tr '[:lower:]' '[:upper:]')"
+      state=2
+      localpart_state "$bot" || state=$?
+      case "$state" in
+        0)
+          log "$bot: registering (localpart free)"
+          if ! reg_out="$(mas manage register-user --yes --ignore-password-complexity \
+                            --no-admin --display-name "$bot" --password "$(rand_pw)" "$bot" 2>&1)"; then
+            log "FATAL: register-user failed for $bot:"; printf '%s\n' "$reg_out" | tail -5
+            exit 1
+          fi
+          printf 'MATRIX_%s_STATUS=created\n' "$upper" >> "$out"
+          ;;
+        1)
+          log "$bot: account already exists — leaving it alone"
+          printf 'MATRIX_%s_STATUS=existed\n' "$upper" >> "$out"
+          ;;
+        *)
+          log "FATAL: cannot ask $SYNAPSE whether $bot exists (client API unreachable)."
+          log "       Check the Cilium pair bootstrap -> haproxy:8008 before re-running."
+          exit 1
+          ;;
+      esac
+
+      # A stable device id keeps the bot's Matrix device (and its E2EE crypto store
+      # on the PVC) the same across token rotations.
+      device="hermes-$bot"
+      if [ "$REISSUE" = "true" ] || ! have_key "MATRIX_${upper}_ACCESS_TOKEN"; then
+        log "$bot: minting an access token (device $device)"
+        # Syntax is positional in MAS 1.24: <USERNAME> [DEVICE_ID] (the docs'
+        # --device-id flag does not exist in this build).
+        token="$(mas manage issue-compatibility-token "$bot" "$device" \
+          | tr -d '\r' | tail -1 | tr -d '[:space:]')"
+        case "$token" in
+          *" "*) log "FATAL: mas-cli output for $bot is not a bare token"; exit 1 ;;
+          "") log "FATAL: no token in mas-cli output for $bot - output format changed?"; exit 1 ;;
+        esac
+        [ "${#token}" -gt 20 ] || { log "FATAL: token for $bot looks too short"; exit 1; }
+        printf 'MATRIX_%s_ACCESS_TOKEN=%s\n' "$upper" "$token" >> "$out"
+        printf 'MATRIX_%s_DEVICE_ID=%s\n' "$upper" "$device" >> "$out"
+      else
+        log "$bot: reusing the token already recorded in $OUTPUT_SECRET"
+        printf 'MATRIX_%s_ACCESS_TOKEN=%s\n' "$upper" "$(read_key "MATRIX_${upper}_ACCESS_TOKEN")" >> "$out"
+        printf 'MATRIX_%s_DEVICE_ID=%s\n' "$upper" "$(read_key "MATRIX_${upper}_DEVICE_ID")" >> "$out"
+      fi
+    done
+
+    # ------------------------------------------------------------------- room ----
+    # The alias is the human-facing name; the room ID is what the allowlist needs.
+    room_id=""
+    alias_escaped="%23${ROOM_ALIAS_LOCALPART}:${SERVER_NAME}"
+    room_id="$(curl -fsS -m 10 "$SYNAPSE/_matrix/client/v3/directory/room/$alias_escaped" \
+      | jq -r '.room_id // empty' 2>/dev/null || true)"
+    if [ -n "$room_id" ]; then
+      log "room #$ROOM_ALIAS_LOCALPART already exists: reusing it"
+    else
+      dave_token="$(grep '^MATRIX_DAVE_ACCESS_TOKEN=' "$out" | cut -d= -f2-)"
+      [ -n "$dave_token" ] || { log "FATAL: dave's token is required to create the room"; exit 1; }
+      invite_json='[]'
+      [ -n "$OPERATOR_MXID" ] && invite_json="[\"$OPERATOR_MXID\"]"
+      log "creating room #$ROOM_ALIAS_LOCALPART ($ROOM_NAME)"
+      payload="{\"name\":\"$ROOM_NAME\",\"preset\":\"private_chat\","
+      payload="$payload\"visibility\":\"private\",\"invite\":$invite_json,"
+      payload="$payload\"room_alias_name\":\"$ROOM_ALIAS_LOCALPART\"}"
+      room_id="$(curl -fsS -m 20 -X POST \
+        -H "Authorization: Bearer $dave_token" -H 'Content-Type: application/json' \
+        -d "$payload" "$SYNAPSE/_matrix/client/v3/createRoom" \
+        | jq -r '.room_id // empty')"
+      [ -n "$room_id" ] || { log "FATAL: room creation returned no room_id"; exit 1; }
+    fi
+    log "room id: $room_id (this is what MATRIX_ALLOWED_ROOMS pins)"
+    printf 'MATRIX_ALLOWED_ROOMS=%s\n' "$room_id" >> "$out"
+
+    # --------------------------------------------------------------- publish -----
+    # The Job owns exactly one Secret; the operator copies these values into
+    # hermes-agents/secret.sops.yaml and can then delete it.
+    kubectl -n "$NS_MATRIX" create secret generic "$OUTPUT_SECRET" \
+      --from-env-file="$out" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    rm -f "$out"
+
+    count="$(kubectl -n "$NS_MATRIX" get secret "$OUTPUT_SECRET" \
+      -o jsonpath='{.data}' | tr ',' '\n' | wc -l | tr -d ' ')"
+    log "wrote $OUTPUT_SECRET ($count values)"
+    log "next: copy them into kubernetes/infrastructure/home/hermes-agents/secret.sops.yaml,"
+    log "      roll the agents, then delete $OUTPUT_SECRET."

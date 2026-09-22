@@ -1,0 +1,59 @@
+# The bootstrap Job's identity. It needs exactly three things: to find and exec
+# into the MAS pod (that is how `mas-cli` runs — the MAS image ships no shell and
+# its merged config/secrets only exist inside its own pod), to read the
+# deployment it addresses, and to own its one output Secret. It gets no cluster
+# scope and no other Secret.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: matrix-bots-bootstrap
+  namespace: matrix
+  labels:
+    app.kubernetes.io/name: matrix-bots-bootstrap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: matrix-bots-bootstrap
+  namespace: matrix
+  labels:
+    app.kubernetes.io/name: matrix-bots-bootstrap
+rules:
+  # `kubectl exec deploy/<mas>` resolves the deployment to a ready pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+  # The mutations (register-user, issue-compatibility-token) run inside the MAS
+  # pod. RBAC cannot scope `pods/exec` by resourceName (the verb is `create`),
+  # so this is namespace-wide exec — confined to the namespace that contains
+  # nothing but the ESS stack.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Its own output Secret, and only that one for reads/updates.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["matrix-bots-bootstrap"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: matrix-bots-bootstrap
+  namespace: matrix
+  labels:
+    app.kubernetes.io/name: matrix-bots-bootstrap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: matrix-bots-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: matrix-bots-bootstrap
+    namespace: matrix

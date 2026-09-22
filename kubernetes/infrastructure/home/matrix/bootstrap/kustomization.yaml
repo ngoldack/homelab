@@ -1,0 +1,10 @@
+# matrix/bootstrap — the one-shot Job that configures the Hermes bot accounts in
+# MAS (register-user / issue-compatibility-token) and creates the shared room.
+# Applied with the rest of the matrix namespace so the Job exists as soon as the
+# stack is up; it is idempotent, so a re-run is a no-op apart from the log.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rbac.yaml
+  - script-configmap.yaml
+  - job.yaml

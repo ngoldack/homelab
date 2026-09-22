@@ -533,53 +533,89 @@ complete the Authentik login. This creates the operator's Matrix account via
 MAS. Public registration is disabled, so this is the only self-service path;
 everything else is created by an administrator.
 
-### 4. Create the three bot accounts
+### 4. Create the three bot accounts — the bootstrap Job does it
+
+Steps 4-6 are one Job: `kubernetes/infrastructure/home/matrix/bootstrap/`
+registers the three accounts in MAS (skipping any that already exist, checked
+through the client API), mints one compatibility token each with a stable device
+id, creates the shared private room and records its immutable id. Flux applies
+it with the namespace; to run it deliberately, or to re-run it after a change:
 
 ```bash
-MAS_POD=$(kubectl -n matrix get pod \
-  -l app.kubernetes.io/name=matrix-authentication-service \
-  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n matrix apply -k kubernetes/infrastructure/home/matrix/bootstrap
+kubectl -n matrix logs job/matrix-bots-bootstrap-s1 -f        # watch it run
+# KEY NAMES only — never print the values into shared output:
+kubectl -n matrix get secret matrix-bots-bootstrap -o jsonpath='{.data}' \
+  | tr ',' '\n' | cut -d'"' -f2
+```
 
+It publishes `matrix-bots-bootstrap` rather than writing to
+`hermes-agents-secret`: that file is SOPS-managed in git, and a live write would
+silently drift from git. Copy the values in step 7, then delete the Job's Secret.
+
+Two operational notes: the script lives in a ConfigMap (mutable), so fixing it
+needs no new Job name — `kubectl -n matrix delete job matrix-bots-bootstrap-s1`
+then apply again; the *spec* is immutable, so a change to `job.yaml` does need a
+new suffix (`-s1` → `-s2`). And `REISSUE=true` on the Job mints fresh tokens,
+which invalidates the ones the running agents hold until they are rolled.
+
+The Job refuses to guess: if it cannot reach the client API to ask whether a
+localpart is free, it stops with an error instead of assuming the account exists
+(that failure mode already bit once, when a policy revert removed the
+`bootstrap -> haproxy:8008` pair mid-run).
+
+<details>
+<summary>Doing it by hand (fallback)</summary>
+
+```bash
 for u in dave chad lindner; do
-  kubectl -n matrix exec "$MAS_POD" -- \
-    mas-cli manage register-user --username "$u" \
-    --password "$(openssl rand -base64 24)" --yes --no-admin
+  kubectl -n matrix exec deploy/matrix-matrix-authentication-service -- \
+    mas-cli --config /conf/mas-config.yaml manage register-user --yes \
+      --ignore-password-complexity --no-admin --display-name "$u" \
+      --password "$(openssl rand -base64 24)" "$u"
 done
 ```
 
-Re-running for an existing user fails harmlessly (the account already exists);
-use `mas-cli manage set-password <user> <password>` to reset one. Do **not**
-pass `--yes-i-want-to-grant-synapse-admin-privileges`: these are unprivileged
-bot accounts.
+Do **not** pass `--yes-i-want-to-grant-synapse-admin-privileges`: these are
+unprivileged bot accounts. Reset a password with
+`mas-cli manage set-password <user> <password>`.
+</details>
 
 ### 5. Mint one compatibility token per bot
 
-Each bot is a legacy Matrix client that does not speak OAuth, so it needs a
-compatibility token. The device id is chosen here and must be recorded — it is
-the same value that goes into the Secret.
+The Job does this and writes the tokens straight into its Secret — they are
+never printed. Each bot gets a stable device id (`hermes-dave`, `hermes-chad`,
+`hermes-lindner`), which is what makes the Matrix device (and its E2EE crypto
+store on the PVC) survive a token rotation.
+
+By hand, note the **positional** argument order in MAS 1.24 (the docs mention a
+`--device-id` flag that this build does not have):
 
 ```bash
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token dave --device-id HERMES_DAVE
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token chad --device-id HERMES_CHAD
-kubectl -n matrix exec "$MAS_POD" -- \
-  mas-cli manage issue-compatibility-token lindner --device-id HERMES_LINDNER
+kubectl -n matrix exec deploy/matrix-matrix-authentication-service -- \
+  mas-cli --config /conf/mas-config.yaml \
+  manage issue-compatibility-token dave hermes-dave
 ```
 
 Each command prints a token **once**. Capture it straight into the SOPS editor
-(step 7) without echoing it to a shared terminal, and note the device id you
-passed. The three device ids must be distinct — a shared device id across
-accounts is a configuration error, not a shortcut.
+(step 7) rather than echoing it to a shared terminal. The three device ids must
+be distinct — a shared device id across accounts is a configuration error, not a
+shortcut.
 
 ### 6. Record the room id
 
-Create the shared room in Element Web (or accept an existing one), invite
-`@dave`, `@chad` and `@lindner`, then read the room's **internal id** from
-Room -> Settings -> Advanced. It starts with `!` and is *not* the alias
-(`#room:matrix.ngoldack.de`). Record the `!…:matrix.ngoldack.de` form — aliases
-can be re-pointed, ids cannot. This value is only needed if and when the room
-allowlist is enabled (see the gap in
+The Job creates the room (as dave, who is the only account that exists first)
+on the alias `#agent-hq:matrix.ngoldack.de`, invites the operator and records
+the **internal id** in its Secret as `MATRIX_ALLOWED_ROOMS`. It is the `!…` form
+on purpose: aliases can be re-pointed, ids cannot, and the allowlist wants the
+immutable one.
+
+Re-running adopts an existing alias instead of creating a second room, so the id
+is stable. To do it by hand: Room -> Settings -> Advanced in Element Web.
+
+If you would rather not pin the room allowlist yet, leave
+`MATRIX_ALLOWED_ROOMS` empty — the sender allowlist and the mention requirement
+still gate every turn (see the gap note in
 [Per-profile policy](#per-profile-policy-what-the-manifests-actually-set)).
 
 ### 7. Fill the SOPS secret

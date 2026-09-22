@@ -125,6 +125,15 @@ spec:
         - ports:
             - port: "8008"
               protocol: TCP
+    # The bootstrap Job registers users through this Service and creates the
+    # shared room, so it needs the client API too (see matrix-bots-bootstrap-*).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: matrix-bots-bootstrap
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
     # The Hermes bots' client-API path (see hermes/cilium-policy.yaml, whose
     # egress rule points at the matrix namespace on 8008).
     - fromEndpoints:
@@ -503,4 +512,56 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+---
+# The one-shot bot-bootstrap Job (matrix/bootstrap/). It reaches two things:
+# the client API (to ask whether a localpart is free, and to create the room as
+# dave) and the Kubernetes API (kubectl exec into the MAS pod, plus its own
+# output Secret). No ingress: nothing connects to it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: matrix-bots-bootstrap-allowlist
+  namespace: matrix
+spec:
+  description: >-
+    Egress for the bot-bootstrap Job: DNS, the homeserver client API and the
+    Kubernetes API.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: matrix-bots-bootstrap
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: haproxy
+      toPorts:
+        - ports:
+            - port: "8008"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 172.21.0.1/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP

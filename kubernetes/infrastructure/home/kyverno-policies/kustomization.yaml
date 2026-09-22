@@ -7,6 +7,13 @@ resources:
   # applied — the same CRD-before-CR split as monitoring-crds/monitoring and
   # agentgateway-crds/agentgateway.
   - policies.yaml
+  # The one MUTATING policy (the rest of policies.yaml is validate-only): a
+  # non-binding scheduler preference for the efficiency worker, which is how
+  # "ordinary workloads land on efficiency, the performance worker is opt-in"
+  # is expressed without editing the ~55 manifests that select the shared
+  # topology.homelab/site=home label. Rationale and the fallback argument live
+  # in the file.
+  - placement-default.yaml
   # ClusterRole/ClusterRoleBinding granting the policy engine get+list on
   # cilium.io/ciliumnetworkpolicies — the one API group Kyverno's shipped roles do
   # not cover, needed by the require-cilium-default-deny-floor policy. Rationale,

@@ -131,7 +131,14 @@ spec:
         # would otherwise use the 32-permit DEFAULT_LLM_MAX_CONCURRENT — enough on
         # its own to re-open the rate-limit window the workers are throttled to
         # avoid.
-        HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
+        # 2 -> 1 (2026-09-22) as part of the 5-worker trial: the ceiling is
+        # AGGREGATE, so this copy has to come down as the worker total goes up.
+        # 5 workers x 1 permit + this 1 = 6 worst case, ~5 sustained, which is
+        # the number under test. Leaving it at 2 would put the aggregate at 7 and
+        # make any 429 unattributable to the workers. Measured: the api issues no
+        # retain calls at all (WORKER_ENABLED=false), so in practice this pool is
+        # idle and only its maintenance loop ever touches it.
+        HINDSIGHT_API_LLM_MAX_CONCURRENT: "1"
         # Audit logging enabled so ingest paths are visible.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         # LLM request tracing back ON (2026-09-22). It was turned off on
@@ -206,7 +213,22 @@ spec:
       # footprint (multi-MB task_payloads folded 16 peers deep) per pod. Two
       # replicas also match podAntiAffinity's two home nodes exactly, so each
       # lands on its own node.
-      replicaCount: 2
+      # 2 -> 5 (2026-09-22), paired with LLM_MAX_CONCURRENT 2 -> 1, MAX_SLOTS
+      # 6 -> 3 and CONSOLIDATION_RESERVED_SLOTS 1 in the env block below, to test
+      # 5 concurrent LLM calls (5 x 1) instead of 4 (2 x 2). Throughput is
+      # permits / latency, so only the AGGREGATE matters; the point of more,
+      # smaller pods is not throughput but blast radius and per-pod memory:
+      # a killed worker resets only its own claims (a cluster blip at
+      # 12:23-12:28 reset 3 of the 8 in-flight giants and re-burned ~15 min of
+      # extraction each), and halving the claim width halves the hydration peak
+      # (a worker hit 9.4 GiB of its 12 Gi limit on 6 slots).
+      # 5 sits in the UNTESTED gap between 4 (clean for a 10-minute window) and
+      # 6 (a fresh upstream_429{reason="rate_limited"} plus 1,364 local refusals
+      # inside 6 minutes), so this is a measured trial with a revert gate: revert
+      # to 2 x 2 if synthetic_proxy_upstream_429_total{reason="rate_limited"}
+      # moves at all.
+      # All 5 land on the performance node — see the nodeAffinity above.
+      replicaCount: 5
       # Memory raised three times on 2026-09-18. Evidence, not estimation —
       # live VmRSS of a booting worker, sampled every 2s:
       #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)
@@ -270,13 +292,37 @@ spec:
         periodSeconds: 5
         timeoutSeconds: 3
         failureThreshold: 12
-      # Spread the 2 worker replicas across the two home nodes (podAntiAffinity):
-      # both can otherwise co-schedule on one 10-core node and, being burstable
-      # to 1000m each, compete for CPU during retain bursts — the exact
-      # contention that showed 212s/diff. Workers are I/O-bound on the LLM leg, so
-      # spreading only helps; preferred (not required) so placement still works if
-      # one home node is full.
+      # Pin the workers to the PERFORMANCE node (talos-919-w9u), and keep the
+      # spread term. Per docs/workload-placement.md the hindsight workers are the
+      # user-named performance opt-in: the efficiency node is the BUSY one (80%
+      # of 26.9 GiB, ~5 GiB free) and a worker hydrating multi-MB retains peaks
+      # at 9.4 GiB, so defaulting them there does not fit.
+      #
+      # A required nodeAffinity rather than a nodeSelector, because this chart
+      # has NO per-component nodeSelector: worker-statefulset.yaml reads the
+      # GLOBAL .Values.nodeSelector, which would pin the api and the control
+      # plane too. worker.affinity is the worker-only field.
+      #
+      # STOPGAP: the documented opt-in is `node.homelab/class: performance` as a
+      # nodeSelector (that is what satisfies the placement policy's precondition
+      # and skips its efficiency preference). The class label is declared in
+      # tofu/home/terraform.tfvars but is NOT on any node yet, so writing it now
+      # would leave every worker Pending. This uses the historical instance-type
+      # label instead — the same one BuildKit selects on — and should be swapped
+      # for the class opt-in once tofu applies the labels.
+      #
+      # podAntiAffinity is kept as the "own spread" the placement doc describes:
+      # with the pin above there is only one candidate node so it is inert, and
+      # it becomes meaningful again if the pin is ever widened.
       affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node.kubernetes.io/instance-type
+                    operator: In
+                    values:
+                      - gpu-worker
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
@@ -344,8 +390,18 @@ spec:
         # Keep 2, and only raise it against a clean
         # synthetic_proxy_upstream_429_total{reason="rate_limited"} window at the
         # new value — the throughput ceiling is Synthetic, not hindsight.
-        HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
-        # Tasks claimed per poll cycle to match 2 replica balance.
+        #
+        # 2 -> 1 (2026-09-22) with replicaCount 2 -> 5. The aggregate stays the
+        # number under test (5 workers x 1 = 5, vs 2 x 2 = 4); what changes is
+        # that each of 5 smaller pods now claims half as much (MAX_SLOTS below),
+        # so the hydration peak that reached 9.4 GiB on one pod is spread and
+        # halved — which is what makes 5 fit on the performance node.
+        # The gate above still applies, unchanged: revert to 2 x 2 on the first
+        # new rate_limited 429.
+        HINDSIGHT_API_LLM_MAX_CONCURRENT: "1"
+        # Tasks claimed per poll cycle. Was "to match 2 replica balance"; 5
+        # replicas since 2026-09-22, so this is now just the per-cycle claim
+        # batch (MAX_SLOTS above is the real claim width).
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
         # Retain/claim bounds. The claim query selects `task_payload` per
         # slot and each claimed retain folds up to 16 peers, also fetching
@@ -356,7 +412,21 @@ spec:
         # ~20MB retains and nothing bounds bytes at claim time.
         # RETAIN_MEMORY_BUDGET_MB=96 bounds extraction state
         # (memory_budget.py), which is a separate pool.
-        HINDSIGHT_API_WORKER_MAX_SLOTS: "6"
+        #
+        # 6 -> 3 (2026-09-22) with replicaCount 2 -> 5 and the performance-node
+        # pin. The claim width IS the hydration driver, and 5 pods x the old
+        # width would be 20 shared slots hydrating multi-MB payloads on one
+        # node: a single worker was measured at 9.4 GiB of its 12 Gi limit.
+        # 3 slots per pod (2 shared after the reservation below) keeps the
+        # cluster-wide claim width at 10 against the same 5 permits — 2x
+        # oversubscription, the same ratio as 2 x 2, which is what keeps permits
+        # busy while a claimed op is between phases.
+        HINDSIGHT_API_WORKER_MAX_SLOTS: "3"
+        # 2 -> 1 (2026-09-22): the consolidation reservation is PER WORKER, so at
+        # 5 replicas the default 2 would reserve 10 slots cluster-wide for the 13
+        # consolidation ops that exist. A reservation is a floor, not a cap — the
+        # shared pool remains usable by any type — so lowering it costs nothing.
+        HINDSIGHT_API_WORKER_CONSOLIDATION_RESERVED_SLOTS: "1"
         HINDSIGHT_API_RETAIN_MEMORY_BUDGET_MB: "96"
         # RETAIN_BATCH_TOKENS stays at the 10k default on purpose: it keeps
         # each extraction prompt far inside gpt-oss-120b's context window. The

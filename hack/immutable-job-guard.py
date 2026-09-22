@@ -116,7 +116,22 @@ def fingerprint(template):
     return yaml.safe_dump(template, sort_keys=True)
 
 
+def repo_root():
+    """Absolute path of the working tree, so paths never depend on the caller's cwd.
+
+    `git ls-files -- kubernetes/` and every manifest read are cwd-relative: run
+    from hack/ and this script would enumerate nothing and report a clean pass
+    while checking zero Jobs - the same fail-open shape as an unresolvable base
+    ref. Anchor to the toplevel and assert we are inside a work tree at all.
+    """
+    top = git(["rev-parse", "--show-toplevel"], check=False)
+    if not top:
+        die("not inside a git working tree")
+    return top.strip()
+
+
 def main():
+    os.chdir(repo_root())
     base = resolve_base(sys.argv[1] if len(sys.argv) > 1 else None)
     paths = [p for p in (git(["ls-files", "-z", "--", TREE]) or "").split("\0") if p]
     compared = violations = 0
@@ -154,6 +169,11 @@ def main():
                     "      remedy: rename the Job (bump the -sN suffix) and bump the"
                     " build tag + --opt=context=#<sha> in the same commit"
                 )
+    if compared == 0:
+        warn(
+            "nothing compared - no Job manifest was found at both HEAD and "
+            f"{base}; check the base ref has manifests, not that the change is clean"
+        )
     print(
         f"immutable-job-guard: {compared} job(s) compared against {base},"
         f" {violations} violation(s)"

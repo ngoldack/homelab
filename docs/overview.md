@@ -142,6 +142,18 @@ Design of the consolidation:
     what has to happen because efficiency is the *busy* node (`~15%` cpu,
     `~72%` memory, `~71%` cpu requests) and performance is the idle one
     (`~5%`, `~41%`).
+
+    **This policy is WITHDRAWN as of 2026-09-22** (see
+    `docs/workload-placement.md` for the full status note): it was removed from
+    `kyverno-policies/kustomization.yaml` the same day it landed because its
+    unconditional append had no dedupe precondition, so any controller that
+    continuously reconciles its own Deployment fought the mutation — measured on
+    `agentgateway/agentgateway` at 598 byte-identical terms, `generation` 700
+    climbing at ~1 write/s and 821 ReplicaSets. It was inert anyway, since no
+    node carries `node.homelab/class` yet, so withdrawing it changed no
+    placement: the default is once again whatever scheduler scoring decides.
+    Restore it once a dedupe precondition is fixture-measured and the class
+    labels are applied to the nodes.
   * A workload opts in to performance by naming it — either
     `node.homelab/class=performance` (read as an exemption by the same policy)
     or a capability selector only performance satisfies.

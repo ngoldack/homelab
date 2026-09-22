@@ -104,8 +104,10 @@ route and no OIDC dashboard. The allowlist
 reopens exactly: cluster DNS, the sandbox Router `:8080`, adopted sandbox pods
 `:9090`, the Kubernetes API (SandboxClaim lifecycle), `agentgateway:80`,
 `langfuse:3000`, `matrix:8008`, `hindsight:8888`, `authentik:9000/9443`, and the
-PyPI/GitHub CIDRs the Hermes runtime needs for lazy dependency installs
-(and, for dave, the `npm install` of the WhatsApp bridge).
+PyPI/GitHub CIDRs the Hermes runtime needs for lazy dependency installs.
+The WhatsApp bridge is NOT among them: its deps are baked into the image
+(see the plugin Dockerfile), because npm's registry is Cloudflare and the
+Fastly ranges below do not cover it.
 
 Two more mechanics belong to the same boundary:
 

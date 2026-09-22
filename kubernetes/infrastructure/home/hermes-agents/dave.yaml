@@ -203,7 +203,8 @@ spec:
             # the bundled Baileys bridge itself (WhatsApp Web transport, not the
             # Cloud API); `bot` mode = a dedicated number, so Nicolas DMing that
             # number reaches dave and nothing else. First start mirrors the bridge
-            # into $HERMES_HOME and npm-installs there (read-only rootfs).
+            # into $HERMES_HOME (read-only rootfs); its node deps are baked into the
+            # image, because npm's registry is unreachable from this pod.
             - name: WHATSAPP_ENABLED
               value: "true"
             - name: WHATSAPP_MODE

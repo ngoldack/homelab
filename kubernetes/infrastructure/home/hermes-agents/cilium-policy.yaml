@@ -176,7 +176,10 @@ spec:
               protocol: TCP
     # PyPI / Fastly anycast + GitHub raw (lazy dependency installs, model
     # catalogue), the same grants the parent hermes allowlist carries. The
-    # WhatsApp bridge's `npm install` (dave) also resolves through Fastly.
+    # NOT the WhatsApp bridge: its `npm install` would need registry.npmjs.org,
+    # which resolves to Cloudflare (104.16.0.0/12) and is NOT in these ranges —
+    # that is why the bridge's deps are baked into the image instead. See
+    # image-builds/hermes-agent-sandbox-plugin/Dockerfile.
     - toCIDRSet:
         - cidr: 151.101.0.0/16
         - cidr: 146.75.0.0/16

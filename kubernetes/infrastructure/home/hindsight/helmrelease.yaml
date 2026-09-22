@@ -295,21 +295,25 @@ spec:
       # Pin the workers to the PERFORMANCE node (talos-919-w9u), and keep the
       # spread term. Per docs/workload-placement.md the hindsight workers are the
       # user-named performance opt-in: the efficiency node is the BUSY one (80%
-      # of 26.9 GiB, ~5 GiB free) and a worker hydrating multi-MB retains peaks
-      # at 9.4 GiB, so defaulting them there does not fit.
+      # of 26.9 GiB before this change, ~5 GiB free) and a worker hydrating
+      # multi-MB retains peaks at 9.4 GiB, so defaulting them there does not fit.
       #
       # A required nodeAffinity rather than a nodeSelector, because this chart
       # has NO per-component nodeSelector: worker-statefulset.yaml reads the
       # GLOBAL .Values.nodeSelector, which would pin the api and the control
       # plane too. worker.affinity is the worker-only field.
       #
-      # STOPGAP: the documented opt-in is `node.homelab/class: performance` as a
-      # nodeSelector (that is what satisfies the placement policy's precondition
-      # and skips its efficiency preference). The class label is declared in
-      # tofu/home/terraform.tfvars but is NOT on any node yet, so writing it now
-      # would leave every worker Pending. This uses the historical instance-type
-      # label instead — the same one BuildKit selects on — and should be swapped
-      # for the class opt-in once tofu applies the labels.
+      # 2026-09-22: the key is now the DURABLE class label. It was a stopgap on
+      # the historical `node.kubernetes.io/instance-type=gpu-worker` (the label
+      # the placement doc calls stale) only because `node.homelab/class` was
+      # declared in tofu/home/terraform.tfvars but not yet applied to the nodes —
+      # writing it then would have left every worker Pending. The apply has since
+      # landed: 3bi carries `class=efficiency`, 919 `class=performance`, so this
+      # is the placement doc's own mechanism. Note it is a nodeAffinity, not the
+      # nodeSelector the Kyverno placement policy's precondition reads — that
+      # policy is withdrawn (see kyverno-policies/kustomization.yaml), and if it
+      # is restored it would merely append an efficiency *preference*, which a
+      # required nodeAffinity for the other node overrides.
       #
       # podAntiAffinity is kept as the "own spread" the placement doc describes:
       # with the pin above there is only one candidate node so it is inert, and
@@ -319,10 +323,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: node.kubernetes.io/instance-type
+                  - key: node.homelab/class
                     operator: In
                     values:
-                      - gpu-worker
+                      - performance
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100

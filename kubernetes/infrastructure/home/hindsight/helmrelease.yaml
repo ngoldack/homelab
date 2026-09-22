@@ -131,7 +131,7 @@ spec:
         # would otherwise use the 32-permit DEFAULT_LLM_MAX_CONCURRENT — enough on
         # its own to re-open the rate-limit window the workers are throttled to
         # avoid.
-        HINDSIGHT_API_LLM_MAX_CONCURRENT: "3"
+        HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
         # Audit logging enabled so ingest paths are visible.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
         # LLM request tracing back ON (2026-09-22). It was turned off on
@@ -313,25 +313,31 @@ spec:
         # for (a genuinely wedged task holding a slot forever, poller.py:65) while
         # removing the queue-time kills. Not 0: that deletes the backstop.
         HINDSIGHT_API_RETAIN_WALL_TIMEOUT: "14400"
-        # 96 -> 2 -> 3 (2026-09-22). The semaphore is per PROCESS
-        # (llm_wrapper.py:52), so 96 permits x 3 workers put up to ~288 concurrent
-        # calls on the Synthetic leg the instant a hold-off lapsed: measured on
-        # synthetic-proxy as 198 verdict=healthy vs 4,212 verdict=rate_limited
-        # refusals in 45 min, with 10 real upstream 429s, each of which opens the
-        # proxy's 5-minute HOLD_OFF_FAILOVER window (every call refused locally for
-        # those 5 minutes). That flood tripped Synthetic's rolling limit
-        # immediately, so the leg spent most of its time dark and every retain died
-        # after the gateway's 4 attempts (policy-retry.yaml) plus the client's own
-        # retries — the failed backlog was the residue.
-        # The allowance, read off the healthy windows: ~14 successful calls/min at
-        # ~20-30s per call, i.e. ~5-7 calls in flight across the cluster. 2 permits
-        # x 2 workers = 4 held a clean 10-minute window (zero new refusals, zero new
-        # 429s, 5 successful calls per worker, 0 HTTP 503) while draining the
-        # requeued backlog; 3 x 2 = 6 is the next step up inside that band.
-        # Raise further only against a clean
+        # 96 -> 2 (2026-09-22). A measured attempt at 3 was rolled back the same
+        # day; the ceiling note is below.
+        # The semaphore is per PROCESS (llm_wrapper.py:52), so 96 permits x 3
+        # workers put up to ~288 concurrent calls on the Synthetic leg the instant
+        # a hold-off lapsed: measured on synthetic-proxy as 198 verdict=healthy vs
+        # 4,212 verdict=rate_limited refusals in 45 min, with 10 real upstream
+        # 429s, each of which opens the proxy's 5-minute HOLD_OFF_FAILOVER window
+        # (every call refused locally for those 5 minutes). That flood tripped
+        # Synthetic's rolling limit immediately, so the leg spent most of its time
+        # dark and every retain died after the gateway's 4 attempts
+        # (policy-retry.yaml) plus the client's own retries — the failed backlog
+        # was the residue.
+        # THE CEILING IS 4 CONCURRENT, measured rather than derived. 2 permits x 2
+        # workers = 4 held a clean 10-minute window while the requeued backlog
+        # drained (zero new refusals, zero new 429s, +380 successful calls, ~38
+        # calls/min). 3 permits (6 concurrent) did NOT: within ~6 minutes of going
+        # live the proxy logged a fresh upstream_429{reason="rate_limited"} and
+        # 1,364 local refusals. One 429 opens the 5-minute hold-off, so 6
+        # concurrent is already over this key's allowance under drain — the ~5-7
+        # in-flight figure read off the pre-throttle healthy windows was measured
+        # with an EMPTY queue, and the effective ceiling is lower under load.
+        # Keep 2, and only raise it against a clean
         # synthetic_proxy_upstream_429_total{reason="rate_limited"} window at the
         # new value — the throughput ceiling is Synthetic, not hindsight.
-        HINDSIGHT_API_LLM_MAX_CONCURRENT: "3"
+        HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
         # Tasks claimed per poll cycle to match 2 replica balance.
         HINDSIGHT_API_WORKER_BATCH_SIZE: "20"
         # Retain/claim bounds. The claim query selects `task_payload` per

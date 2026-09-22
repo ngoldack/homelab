@@ -84,6 +84,30 @@ spec:
               value: "0.0.0.0"
             - name: HERMES_API_TIMEOUT
               value: "600"
+            # The image's entrypoint supervises the web dashboard as a child
+            # process and the dashboard REFUSES to bind on 0.0.0.0 unless an
+            # auth provider is registered — so without these it exits instantly
+            # and the supervision loop restarts it every ~2s, burning ~0.5 core
+            # per pod and flooding the log (measured: 560-630m per agent vs 8m
+            # for the parent gateway, which has this same env). The dashboard is
+            # inert here (no Service, no HTTPRoute, and the Cilium allowlist
+            # admits only the API ports from `health`), it simply has to be
+            # allowed to bind. Same three keys the parent gateway uses.
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+            - name: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
             - name: HERMES_LANGFUSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:

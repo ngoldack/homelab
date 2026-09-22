@@ -73,14 +73,17 @@ spec:
           # buildkit CACHE manifest — the build Job exported the registry cache
           # last and its naive `tail -1` extraction took that digest, which is
           # why the pod sat in CreateContainerError.
-          # Provenance is only HALF right on this digest: the SBOM was attached
-          # by tag (`cosign attach sbom … "$IMAGE"`), while the signature and the
-          # SLSA attestation went to the cache digest the Job wrongly extracted
-          # (`cosign attest/sign … @$DIGEST`), so registry tags
-          # sha256-b1b814cc….sig/.att belong to the cache manifest and this image
-          # currently carries no signature. The Kyverno first-party
-          # signature/provenance policy reports it (Audit today); the next build
-          # — which now extracts the manifest line correctly — signs the image.
+          # Provenance is now complete ON THIS DIGEST: a rebuild with the fixed
+          # extraction (build-llama-kv-broker-8) re-pushed tag 7 to the same
+          # digest and signed the manifest it actually pushed, so the registry
+          # serves sha256-f4a968a2….{sig,att,sbom} (all 200). The earlier
+          # sha256-b1b814cc….sig/.att tags still exist — they belong to the
+          # buildkit CACHE manifest that the old extraction mistook for the
+          # image, which is what the previous pin pointed at.
+          # Residual, pre-existing, unrelated to the pin: this pod runs as root
+          # (the image sets no USER) and names no serviceAccountName, so the
+          # Kyverno non-root and default-ServiceAccount policies report it in
+          # Audit mode. Fixing that means a non-root USER in the image.
           image: registry.ngoldack.de/llama-kv-broker@sha256:f4a968a2e86500099126a9a161afaaff158739d062ba3f52c07f831e17b7b0c1
           ports:
             - name: http

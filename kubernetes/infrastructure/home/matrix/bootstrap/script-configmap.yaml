@@ -1,9 +1,16 @@
-# The bootstrap logic, mounted into the Job at /scripts/bootstrap.sh.
+# The bootstrap script. `kustomize.toolkit.fluxcd.io/substitute: disabled` is
+# load-bearing, exactly as in image-scan/scan-config.yaml: the script is shell,
+# so it is full of ${upper}/${SERVER_NAME}/$VAR, and the matrix Kustomization's
+# strict postBuild envsubst fails the whole Kustomization on the first
+# unresolved variable ("variable not set (strict mode): upper" — observed. The
+# Flux way to say "this ConfigMap is not a template" is the annotation below.)
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: matrix-bots-bootstrap-script
   namespace: matrix
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   bootstrap.sh: |
     #!/bin/sh

@@ -94,6 +94,19 @@
     { matchManagers: ["gomod"], groupName: "Go dependencies" },
     { matchManagers: ["terraform"], groupName: "Terraform/OpenTofu providers" },
     // supply chain: pin actions to SHAs; after the first run they stay SHA-pinned
-    { matchManagers: ["github-actions"], pinDigests: true }
+    { matchManagers: ["github-actions"], pinDigests: true },
+    // The 10 buildkit build Jobs (kubernetes/infrastructure/home/image-builds/*.yaml,
+    // kind: Job) are IMMUTABLE: Flux cannot patch a Job's pod template, so any change
+    // Renovate makes to their `image:` line makes the server-side apply dry-run fail
+    // and freezes the whole image-builds Kustomization for every dependent — the
+    // #181 → #192 outage, re-proposed as digest pins in #184. Their images move only
+    // by hand, together with the Job name suffix, the build tag and the
+    // `--opt=context=…#<sha>` pin. Buildkit's own version stays tracked through the
+    // buildkit-service chart pin in buildkit/helmrelease.yaml, so nothing is lost.
+    {
+      matchFileNames: ["kubernetes/infrastructure/home/image-builds/*.yaml"],
+      matchDatasources: ["docker"],
+      enabled: false
+    }
   ]
 }

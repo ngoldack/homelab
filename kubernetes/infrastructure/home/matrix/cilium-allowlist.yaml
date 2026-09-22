@@ -35,8 +35,11 @@
 # default needs none). If workers/redis are later enabled, add a
 # synapse->valkey grant.
 ---
-# Element Web — static site on :80, reachable only through the gateway; it
-# talks to Synapse's client API outbound.
+# Element Web — static site, reachable only through the gateway; it talks to
+# Synapse's client API outbound. Its Service publishes port 80 and forwards to
+# the container's 8080 (named targetPort `element`), so the rule below names
+# 8080: Cilium matches the POD port, and naming the Service port silently
+# dropped every gateway request (503) while the pod stayed Ready.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

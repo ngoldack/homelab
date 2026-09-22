@@ -3,8 +3,10 @@
 # deploy mechanism.
 #
 # Deliberately split from flux-reconcile.yml, which is the *deploy* path:
-#   * this file  — static checks (YAML, tofu fmt, kustomize render, orphan refs)
-#                  on ubuntu-latest; `permissions: contents: read`, nothing else;
+#   * this file  — static checks (YAML, tofu fmt, kustomize render, orphan refs,
+#                  immutable-Job guard, Renovate config, shellcheck, offline
+#                  chain wiring) on ubuntu-latest; `permissions: contents: read`,
+#                  nothing else;
 #   * that file  — post-merge reconcile on the in-cluster self-hosted runner,
 #                  whose pod carries the ci-runner ServiceAccount that
 #                  kubernetes/infrastructure/home/github-runner/rbac.yaml binds
@@ -19,8 +21,8 @@
 # cluster was destroyed, with the note "nothing in CI decrypts anything any
 # more" — etcd backups run in-cluster as a CronJob under
 # kubernetes/infrastructure/home/talos-backup/, and Flux's own sops-age Secret
-# decrypts kubernetes/ secrets via kustomize-controller. The four lint targets
-# below are exactly the secret-free subset of `task check`: yamllint skips
+# decrypts kubernetes/ secrets via kustomize-controller. The lint targets below
+# are exactly the secret-free subset of `task check`: yamllint skips
 # **/*.sops.yaml (.yamllint ignore), `tofu fmt -check` never reads values, and
 # `kustomize build` emits the encrypted files verbatim because decryption is
 # kustomize-controller's job and not the CLI's. Adding an age key here would
@@ -66,9 +68,16 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # hack/immutable-job-guard.py compares each Job against `origin/main`'s
+          # copy of the same manifest, so it needs real history — the default
+          # single-commit shallow clone has no merge base to diff against.
+          fetch-depth: 0
 
-      - name: Install yamllint 1.38.0
-        run: python3 -m pip install yamllint==1.38.0
+      - name: Install yamllint 1.38.0 and PyYAML 6.0.3
+        # PyYAML is pinned explicitly rather than left implicit as yamllint's
+        # dependency: hack/immutable-job-guard.py parses manifests with it.
+        run: python3 -m pip install yamllint==1.38.0 pyyaml==6.0.3
 
       - name: Install Task 3.53.1
         uses: arduino/setup-task@v2
@@ -99,3 +108,37 @@ jobs:
       # excluded fifth target (see the header): CI holds no age identity.
       - name: Run the static lint targets
         run: task lint:yaml lint:tofu lint:kustomize lint:orphans
+
+      # The rest of the secret-free half of `task check`, plus the offline chain
+      # check. All of it is hermetic: no cluster, no age key, no credentials.
+      - name: Guard immutable Job pod templates
+        # A changed Job pod template is rejected by the API server and freezes
+        # the whole owning Kustomization — the #181/#192 outage, and what #184
+        # nearly re-created. Comparing against origin/main is the only way to
+        # see the edit before it lands.
+        run: |
+          # actions/checkout only fetches the ref being built, so for a PR the
+          # `origin/main` ref the guard diffs against does not exist yet. Fetch
+          # exactly that tip (cheap with fetch-depth: 0 above) rather than
+          # letting the guard fail an environment error on every PR.
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          task lint:immutable-jobs
+
+      - name: Validate the Renovate config
+        # renovate.json5 is JSON5, so yamllint never sees it (it is skipped by
+        # extension discovery) and nothing else validated it either: a typo would
+        # silently disable dependency updates instead of failing a build. The
+        # validator ships inside the `renovate` package (the package named
+        # `renovate-config-validator` is a 0.0.1 placeholder); npx/node are
+        # preinstalled on ubuntu-latest and the version is pinned in Taskfile.yml.
+        run: task lint:renovate
+
+      - name: Shellcheck the helper scripts
+        # Several of these run in CI itself or on the operator's machine; a
+        # shellcheck failure here is cheaper than debugging one mid-reconcile.
+        run: task lint:shell
+
+      - name: Verify the agent chain wiring
+        # Reads the agentgateway/hermes-agents manifests with python3 only (the
+        # --live mode, which needs kubectl, is deliberately not used here).
+        run: bash hack/verify-agent-chains.sh

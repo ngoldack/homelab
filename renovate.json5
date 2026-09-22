@@ -51,6 +51,19 @@
   // manifests (deployments, statefulsets, cronjobs, model manifests, hermes/
   // authentik/langfuse sidecar files). helmrelease.yaml / sources.yaml /
   // kustomization.yaml are intentionally NOT listed — they belong to flux.
+  //
+  // AUDITED 2026-09-22 against the whole tree, because a filename allow-list
+  // like this silently falls behind reality. Result: every file under
+  // kubernetes/ that carries an `image:` line but does NOT match below is
+  // either a HelmRelease (the flux manager handles its chart pin AND its
+  // values images), a Kyverno ClusterPolicy body (not a dependency surface), or
+  // carries only first-party registry.ngoldack.de@sha256 images, which the
+  // matchPackageNames rule below excludes anyway. So this list misses no
+  // updatable dependency today. Widening it to "/kubernetes/.*\.ya?ml$/" was
+  // measured and rejected: it adds ~172 junk `kubernetes-api` deps (the
+  // apiVersion of every CR) and zero real ones. Re-run the audit before adding
+  // a new raw workload: list the `image:` files, evaluate these regexes per
+  // path, then check the leftovers for PUBLIC, UNPINNED images.
   kubernetes: {
     managerFilePatterns: [
       "/(?:^|\\/)(?:deployment|statefulset|cronjob|multus-daemonset|envoy|authorizer|reaper|sandbox-template|postgres|valkey|clickhouse|keeper|blackbox-exporter|outpost|portal-bridge|oidc-meta-proxy|ldap-outpost)[^/]*\\.ya?ml$/",

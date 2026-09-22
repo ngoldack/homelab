@@ -60,7 +60,7 @@ spec:
           # registry no longer serves (404): the tag was re-pushed and the old
           # manifest garbage-collected, so only nodes that still had it cached
           # could start a pod. Same digest in hermes-agents/*.yaml.
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
           # No args: the image entrypoint owns the command line (it starts the
           # gateway and supervises the dashboard); declaring args here would be
           # silently ignored.
@@ -248,7 +248,7 @@ spec:
         # provider calls directly. Script + rationale: stream-relay.yaml;
         # removal condition: docs/hermes-agent-sandbox.md, "Model choice".
         - name: syn-stream-relay
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
           command: ["/opt/hermes/.venv/bin/python3", "-u", "/opt/relay/stream_relay.py"]
           env:
             - name: RELAY_UPSTREAM
@@ -292,7 +292,7 @@ spec:
               readOnly: true
       initContainers:
         - name: seed-config
-          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c6494090978f050c1d74294ef47b3597de6e4561088be6fcbb2b1087ba5
+          image: registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:cebe9a0c2b4198ac45db3d28bc6054498f377e1a31c355552a43447b23aa52cc
           command: ["/bin/sh", "-c"]
           env:
             - name: HERMES_CONFIG_REV

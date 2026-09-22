@@ -1,7 +1,13 @@
-# Key-authenticated variant of the chat chain: /v1/key/chat/completions
-# routes to the same chat-chain backend, but its route-scoped policy
-# (policy-apikey.yaml) accepts a static API key instead of an authentik JWT.
-# Used by CLI consumers (opencode) whose base URL ends in /v1/key.
+# Key-authenticated routes for the agentgateway data plane: the static-key
+# (/v1/key/*) scope, authenticated by policy-apikey.yaml from an
+# X-Api-Key instead of an authentik JWT. Used by CLI consumers (opencode) and
+# LibreChat.
+#
+# NO provider fallback (2026-09-22). Two rules that used to sit here pointed at
+# OpenRouter backends that NEVER EXISTED (dangling references, so both paths
+# were already failing). The coding path now walks the Synthetic DeepSeek
+# backend, which is the model the rule always named; the stealth-model rule
+# (no Synthetic equivalent) is deleted.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -12,7 +18,10 @@ spec:
     - name: agentgateway
       namespace: agentgateway
   rules:
-    # Coding model: DeepSeek V4.1 Flash (OpenRouter).
+    # Coding model: Synthetic DeepSeek V4.1 Flash
+    # (hf:deepseek-ai/DeepSeek-V4.1-Flash, backends.yaml). Single-provider
+    # backend, so the client's model id (`deepseek-v4.1-flash`) is replaced by
+    # the provider's pinned model.
     - matches:
         - path:
             type: PathPrefix
@@ -20,20 +29,9 @@ spec:
       backendRefs:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
-          name: openrouter-deepseek-v41-flash
-    # Free model: Union Alpha (OpenRouter stealth).
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1/key/free
-      backendRefs:
-        - group: agentgateway.dev
-          kind: AgentgatewayBackend
-          name: openrouter-union-alpha
+          name: synthetic-hf-deepseek
     # Synthetic gpt-oss-120b: hindsight's extraction/consolidation model.
-    # Walks the hindsight-chain backend (synthetic primary, OpenRouter
-    # fallback on 429/5xx eviction); the JWT path /v1/synthetic-gpt-oss in
-    # routes.yaml still pins the single synthetic backend.
+    # Walks hindsight-chain (hindsight-chain.yaml) -- Synthetic only.
     - matches:
         - path:
             type: PathPrefix
@@ -42,14 +40,11 @@ spec:
         - group: agentgateway.dev
           kind: AgentgatewayBackend
           name: hindsight-chain
-    # Agent chains: synthetic-first with OpenRouter fallback (see
-    # agent-chains.yaml). Each walks its own chain backend. The proxy in front
-    # of synthetic (see synthetic-proxy.yaml) owns the 429 decision: when it
-    # judges that leg unusable it answers 503, which evicts synthetic for 5m
-    # (policy-agent-chains-health.yaml) and keeps agents working through
-    # OpenRouter while synthetic cools down. Synthetic's transient
-    # parallel-limit 429 is deliberately passed through untouched and does NOT
-    # evict, so a concurrency blip never burns a failover.
+    # Agent chains: one Synthetic provider each (agent-chains.yaml). The proxy
+    # in front of synthetic (synthetic-proxy.yaml) owns the 429 decision: when
+    # it judges that leg unusable it answers 503, which evicts the provider for
+    # 5m (policy-agent-chains-health.yaml). There is no fallback group to move
+    # to, so that 503 reaches the client -- the proxy's own hold-off bounds it.
     - matches:
         - path:
             type: PathPrefix

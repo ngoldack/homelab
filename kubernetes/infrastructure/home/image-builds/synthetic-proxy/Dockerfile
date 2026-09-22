@@ -4,7 +4,7 @@
 # the Authorization header the gateway injects, keys per-caller state on a
 # SHA-256 of it (never the raw key), and answers 429/503 when Synthetic's
 # quota endpoint says the key is rate-limited or the upstream is down — which is
-# exactly what the gateway's eviction policy fails over to OpenRouter on.
+# exactly what the gateway's eviction policy acts on.
 #
 # WHY golang:1.27-alpine — same Go line and build flags as the sibling
 # hermes-egress-guard and llama-kv-broker builds. The module declares `go 1.27`;

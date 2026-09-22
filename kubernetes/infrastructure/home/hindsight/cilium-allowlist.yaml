@@ -9,7 +9,8 @@
 # namespace is migrated):
 #   monitoring -> api:8888, worker:8889, database:9187, pooler:9127   (scrapes)
 #   authentik  -> control-plane:3000                                  (outpost)
-#   world      -> api/worker:443 (OpenRouter), database:443 (S3)
+#   world      -> api/worker:443 (embedding-model download at pod boot),
+#                 database:443 (S3 backups/WAL)
 ---
 # The API. Published on the LAN Gateway (reserved `ingress` identity) and
 # scraped by vmagent on its own port; the control-plane talks to it in-cluster.

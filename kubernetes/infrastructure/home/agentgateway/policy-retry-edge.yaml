@@ -23,9 +23,12 @@ spec:
       # failover-worthy upstream answers AND its own local refusals to 503, and
       # the health policy evicts on `response.code >= 500`. So 503 MUST be
       # retried here, or the in-flight failover never happens and the client
-      # sees the 503 instead of the OpenRouter answer. 502/504 are the same
-      # class. 429 stays for a transient parallel-limit answer, which the proxy
-      # deliberately passes through untouched.
+      # sees the 503. 502/504 are the same class. 429 stays for a transient
+      # parallel-limit answer, which the proxy deliberately passes through
+      # untouched. NOTE (2026-09-22): the chains have a single Synthetic group
+      # now, so a retry lands on the SAME provider -- the retry still matters
+      # (it re-attempts once the eviction/hold-off state has moved on) but it
+      # no longer buys a different backend.
       codes:
         - 429
         - 500

@@ -8,13 +8,18 @@
 # UNHEALTHY (503) when it must not be used again. The body/header sniffing, and
 # the response-body buffering it required, are gone from this file.
 #
-# So the contract is one line: the proxy said the leg is unhealthy -> evict and
-# fail the chain over to the next priority group (OpenRouter). Anything that is
-# not a 5xx is left alone — including Synthetic's transient parallel-limit 429,
-# which the proxy deliberately passes through untouched.
+# So the contract is one line: the proxy said the leg is unhealthy -> evict the
+# provider. The chains in agent-chains.yaml each have ONE group now (the
+# OpenRouter fallback was removed 2026-09-22), so eviction no longer moves the
+# request to another provider; it just stops the gateway hammering this one
+# while the proxy holds its key off. The request that triggered it surfaces as
+# that 503. Anything that is not a 5xx is left alone — including Synthetic's
+# transient parallel-limit 429, which the proxy deliberately passes through
+# untouched.
 #
-# duration: 5m — short on purpose. The proxy holds a bad key off for its own
-# UNHEALTHY_AFTER window and answers 503 locally WITHOUT touching Synthetic, so
+# duration: 5m — deliberately matched to the proxy's HOLD_OFF_FAILOVER, so both
+# lapse together and the next request re-probes Synthetic. The proxy holds a bad
+# key off for its own window and answers 503 locally WITHOUT touching Synthetic, so
 # this eviction only has to stop the gateway hammering in the meantime. Traffic
 # returns to Synthetic within minutes of the proxy's hold-off lapsing instead of
 # waiting out a stale hour, and only one probe per eviction window reaches

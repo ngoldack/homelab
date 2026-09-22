@@ -102,7 +102,7 @@ paths via the `llm-edge` route, and gateway-scoped `AgentgatewayPolicy`
 | `/v1/synthetic-small` | `synthetic-small` | `api.synthetic.new`, model `syn:small:text` |
 | `/v1/synthetic-large` | `synthetic-large` | `api.synthetic.new`, model `syn:large:text` |
 | `/v1/synthetic-deepseek` | `synthetic-hf-deepseek` | `api.synthetic.new`, model `hf:deepseek-ai/DeepSeek-V4.1-Flash` |
-| `/v1/chat` | `chat-chain` | priority groups: `synthetic-small` → `synthetic-large` → `synthetic-hf-deepseek` → `openrouter-flash` |
+| `/v1/chat` | `chat-chain` | priority groups: `synthetic-small` → `synthetic-large` → `synthetic-hf-deepseek` (the `openrouter-flash` leg was removed 2026-09-22) |
 
 `/v1/chat` keeps the original tiered chain because existing clients depend on
 it; the three `/v1/synthetic-*` paths are the *same* providers with the
@@ -131,8 +131,11 @@ Two behaviours worth knowing before debugging a tier:
   `17726f8`, verified 2026-09-17: a JWT-authenticated `/v1/chat` call returned
   a real completion in ~1.8 s). Treat a Synthetic tier that answers with 401 as
   a bad key in that Secret, not as a chain problem.
+- **[2026-09-22] The OpenRouter fallback this section probes was removed from
+  every chain.** The group-advance semantics below still describe the
+  mechanism, which would apply again if a second group were added back.
 - **A 401 from Synthetic is non-retriable, so `chat-chain` does NOT fall
-  through to OpenRouter on it.** Priority groups advance on *unhealthy*
+  through to a later group on it.** Priority groups advance on *unhealthy*
   responses, and agentgateway's default `unhealthyCondition` is any 5xx or a
   connection failure — a 4xx auth rejection is neither, so the client gets the
   401 and the OpenRouter tier is never tried. A broken Synthetic key therefore

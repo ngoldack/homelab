@@ -1,5 +1,5 @@
 # hermes — the Hermes gateway namespace. PSA restricted is the floor: the
-# gateway holds the router token and the OpenRouter key, so only a hardened
+# gateway holds the router token and the model-gateway API key, so only a hardened
 # pod may run here. The derived image's ENTRYPOINT bypasses s6-overlay so the
 # gateway runs as the unprivileged hermes uid under restricted.
 apiVersion: v1

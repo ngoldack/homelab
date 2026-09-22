@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: build-hermes-agent-sandbox-plugin-s7
+  name: build-hermes-agent-sandbox-plugin-s8
   namespace: buildkit
 spec:
   backoffLimit: 2
@@ -48,9 +48,9 @@ spec:
 
           set +e && buildctl ''--addr=tcp://buildkitd:1234'' ''--tlscacert=/certs/ca.crt''
           ''--tlscert=/certs/tls.crt'' ''--tlskey=/certs/tls.key'' ''build'' ''--frontend=dockerfile.v0''
-          ''--opt=context=https://github.com/ngoldack/homelab.git#15a792b9e4e4d5f93cdd4e328b7e6a2cb8150103''
+          ''--opt=context=https://github.com/ngoldack/homelab.git#bde8ea0bfabd6d4bf220198fc09f951ff6a165e2''
           ''--opt=filename=kubernetes/infrastructure/home/image-builds/hermes-agent-sandbox-plugin/Dockerfile''
-          ''--output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-15a792b,push=true''
+          ''--output=type=image,name=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-bde8ea0,push=true''
           ''--export-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache,mode=max''
           ''--import-cache=type=registry,ref=registry.ngoldack.de/hermes-agent-sandbox-plugin:buildcache''
           ''--progress=plain'' > /tmp/build.log 2>&1; rc=$?; set -e;
@@ -59,11 +59,11 @@ spec:
 
           test $rc -eq 0 || { echo "BUILD FAILED rc=$rc"; exit $rc; };
 
-          DIGEST=$(sed -n ''s/.*pushing manifest for .*@\(sha256:[a-f0-9]\{64\}\).*/\1/p'' /tmp/build.log | tail -1); if [ -z "$DIGEST" ]; then echo "note: no pushing-manifest line; asking the registry"; DIGEST=$(curl -fsSI "https://registry.ngoldack.de/v2/hermes-agent-sandbox-plugin/manifests/0.1.0-15a792b" | sed -n ''s/^[Dd]ocker-[Cc]ontent-[Dd]igest: \(sha256:[a-f0-9]\{64\}\).*/\1/p''); fi; test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
+          DIGEST=$(sed -n ''s/.*pushing manifest for .*@\(sha256:[a-f0-9]\{64\}\).*/\1/p'' /tmp/build.log | tail -1); if [ -z "$DIGEST" ]; then echo "note: no pushing-manifest line; asking the registry"; DIGEST=$(curl -fsSI "https://registry.ngoldack.de/v2/hermes-agent-sandbox-plugin/manifests/0.1.0-bde8ea0" | sed -n ''s/^[Dd]ocker-[Cc]ontent-[Dd]igest: \(sha256:[a-f0-9]\{64\}\).*/\1/p''); fi; test -n "$DIGEST" || { echo "NO DIGEST in build log"; exit 1; };
 
           echo "DIGEST=$DIGEST";
 
-          IMAGE=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-15a792b;
+          IMAGE=registry.ngoldack.de/hermes-agent-sandbox-plugin:0.1.0-bde8ea0;
 
           echo "== trivy gate ==" &&
 
@@ -82,7 +82,7 @@ spec:
 
           echo "== provenance attest ==" &&
 
-          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"15a792b9e4e4d5f93cdd4e328b7e6a2cb8150103"}},"buildMetadata":{"reproducible":"false"}}''
+          printf ''{"builder":{"name":"https://github.com/ngoldack/homelab"},"buildType":"https://slsa.dev/provenance/v1.0","source":{"uri":"https://github.com/ngoldack/homelab","digest":{"sha1":"bde8ea0bfabd6d4bf220198fc09f951ff6a165e2"}},"buildMetadata":{"reproducible":"false"}}''
           > /tmp/prov.json &&
 
           DOCKER_CONFIG=/docker cosign attest --type slsaprovenance --predicate /tmp/prov.json

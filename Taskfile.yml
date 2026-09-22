@@ -544,6 +544,29 @@ tasks:
         fi
         echo "OK: every manifest under kubernetes/ is referenced by a kustomization"
 
+  lint:immutable-jobs:
+    desc: Fail when a Job's pod template is edited in place (Flux cannot apply that)
+    cmds:
+      - python3 hack/immutable-job-guard.py
+
+  lint:renovate:
+    desc: Validate renovate.json5 with the real Renovate validator
+    cmds:
+      # The npm package named `renovate-config-validator` is a 0.0.1 placeholder;
+      # the real binary ships inside the `renovate` package, hence --package.
+      # Pinned so the gate matches the version the config was proven against.
+      - npx --yes --package=renovate@44.106.0 renovate-config-validator renovate.json5
+
+  lint:shell:
+    desc: Shellcheck every helper script under hack/ (error+warning severity)
+    cmds:
+      # -S warning, not the default: shellcheck's style/info level flags the
+      # repo's existing scripts (e.g. SC2329 "function never invoked" for helpers
+      # kept for interactive use), and a gate that fails on style is a gate people
+      # learn to ignore. Errors and warnings are what matter for scripts that run
+      # in CI and on the operator's machine.
+      - shellcheck -S warning hack/*.sh
+
   check:
     desc: Run all local validations (yamllint, tofu fmt, kustomize builds, orphan check, sops decrypt)
     cmds:
@@ -551,4 +574,7 @@ tasks:
       - task: lint:tofu
       - task: lint:kustomize
       - task: lint:orphans
+      - task: lint:immutable-jobs
+      - task: lint:renovate
+      - task: lint:shell
       - task: sops:check:all

@@ -767,6 +767,58 @@ data:
           order: 100
           stage: !KeyOf mfa-login
           target: !KeyOf mfa-flow
+      # ---------- passwordless (passkey-only) login ----------
+      # Setting IdentificationStage.passwordless_flow makes the login page render a
+      # "Use a security key" button (2026.8.2 web bundle: renderPasswordlessUrl emits
+      # <a class="pf-c-button pf-m-secondary pf-m-block"
+      # data-ouia-component-id="passwordless">, href /if/flow/<slug>/ with the
+      # originating ?query preserved, so ?next still returns to the app). Clicking it
+      # runs THIS flow: no identification stage, no password stage. The validate stage
+      # sees an anonymous request, issues a user-less (discoverable-credential) WebAuthn
+      # challenge, resolves the account from the asserted credential, records
+      # auth_method=auth_webauthn_pwl, and the login stage opens the session. A passkey
+      # is possession + local user verification, so this alone is a complete login.
+      # ORDER MATTERS: declared before the identification-stage entry below, which
+      # !Finds this flow.
+      - id: passkey-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: passkey-login
+        attrs:
+          name: passkey-login
+          title: Sign in with passkey
+          designation: authentication
+      - id: passkey-validate
+        model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+        state: present
+        identifiers:
+          name: passkey-webauthn-validate
+        attrs:
+          # webauthn only: with no pending user the stage only ever issues the generic
+          # WebAuthn challenge; listing totp/static would advertise factors this flow
+          # cannot verify without an identified user. A user who has no passkey is
+          # denied here instead of being silently logged in.
+          device_classes: [webauthn]
+          webauthn_user_verification: required
+          not_configured_action: deny
+      - id: passkey-login-stage
+        model: authentik_stages_user_login.userloginstage
+        state: present
+        identifiers:
+          name: passkey-user-login
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 10
+          stage: !KeyOf passkey-validate
+          target: !KeyOf passkey-flow
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          order: 100
+          stage: !KeyOf passkey-login-stage
+          target: !KeyOf passkey-flow
       # ---- groups: akadmin (privileged) + users (zero default access) ----
       - id: akadmin-group
         model: authentik_core.group
@@ -971,6 +1023,10 @@ data:
           pretend_user_exists: true
           enable_remember_me: false
           enrollment_flow: !Find [authentik_flows.flow, [slug, home-registration]]
+          # One-tap passkey login: renders the "Use a security key" button that
+          # runs the passkey-login flow (declared above). The username/password/
+          # MFA path is untouched — this is an additional entry point.
+          passwordless_flow: !Find [authentik_flows.flow, [slug, passkey-login]]
       # ---- Phase 3a: gate every app to the akadmin group ----
       # Zero-default-access: a fresh registrant lands in the `users` group,
       # which binds to NOTHING here, so they see no app. Only akadmin

@@ -33,7 +33,20 @@ PHASES=(revision ready)
 now_ts() { date -u +%H:%M:%S; }
 
 json_snapshot() {
+  # SNAPSHOT_FILE is a test seam: point the gates at a captured payload instead
+  # of the live cluster so the reporting logic can be exercised offline.
+  if [ -n "${SNAPSHOT_FILE:-}" ]; then cat "$SNAPSHOT_FILE"; return 0; fi
   kubectl -n "$NS" get kustomizations -o json 2>/dev/null
+}
+
+suspended_names() {
+  # Kustomizations deliberately paused in-cluster (spec.suspend). A suspended
+  # Kustomization never applies a new revision, so the revision gate can never
+  # pass and its dependents sit on "dependency ... revision is not up to date".
+  # That is an operator maintenance window, not a failing merge — on 2026-09-22
+  # it held this gate red for hours while `matrix` was suspended, and the log
+  # gave no hint that the cause was a pause rather than a broken manifest.
+  jq -r '.items[] | select(.spec.suspend == true) | .metadata.name' <<<"$1" 2>/dev/null || true
 }
 
 revision_laggards() {
@@ -71,17 +84,34 @@ phase_done() {
 }
 
 log_laggards() {
-  local phase="$1" payload="$2" lines
+  local phase="$1" payload="$2" lines sus
   if [ "$phase" = revision ]; then
     lines=$(revision_laggards "$payload")
   else
     lines=$(ready_laggards "$payload")
   fi
   [ -z "$lines" ] && return 0
+  sus=$(suspended_names "$payload")
   printf '[%s] %s gate: still waiting on:\n' "$(now_ts)" "$phase"
   printf '%s\n' "$lines" | while IFS=$'\t' read -r name applied msg; do
+    if [ -n "$sus" ] && printf '%s\n' "$sus" | grep -qx -- "$name"; then
+      msg="$msg  [SUSPENDED in-cluster: a pause, not a failure]"
+    fi
     printf '   %-32s %-22s %s\n' "$name" "$applied" "$(printf '%s' "$msg" | head -c 200)"
   done
+}
+
+report_suspended() {
+  # Printed on the failure paths: name the pause and the exact way out, so the
+  # next operator does not have to reconstruct this from a revision mismatch.
+  local payload="$1" sus
+  sus=$(suspended_names "$payload")
+  [ -z "$sus" ] && return 0
+  echo "[$(now_ts)] NOTE: suspended in-cluster (spec.suspend=true): $(printf '%s' "$sus" | tr '\n' ' ')"
+  echo "      A suspended Kustomization never applies a new revision, so the revision gate cannot"
+  echo "      pass and its dependents report 'dependency ... revision is not up to date'. That is a"
+  echo "      deliberate in-cluster pause, not a defect in the merge under test. Resume it with"
+  echo "      'flux resume kustomization <name> -n $NS' (or drop the suspend) and re-run this workflow."
 }
 
 # Permanent vs transient: a dry-run failure is a declarative error in the
@@ -106,6 +136,7 @@ for phase in "${PHASES[@]}"; do
     if fatal_error "$payload"; then
       echo "[$(now_ts)] FATAL: a Kustomization reports a dry-run failure (declarative error, will not recover by itself)"
       log_laggards "$phase" "$payload"
+      report_suspended "$payload"
       echo "--- final kustomization state ---"
       flux get kustomizations -n "$NS" 2>/dev/null || kubectl -n "$NS" get kustomizations
       exit 1
@@ -117,6 +148,8 @@ for phase in "${PHASES[@]}"; do
     log_laggards "$phase" "$payload"
     if [ $((SECONDS - start)) -ge "$MAX_WAIT" ]; then
       echo "[$(now_ts)] ERROR: $phase gate timed out after ${MAX_WAIT}s"
+      log_laggards "$phase" "$payload"
+      report_suspended "$payload"
       echo "--- final kustomization state ---"
       flux get kustomizations -n "$NS" 2>/dev/null || kubectl -n "$NS" get kustomizations
       exit 1

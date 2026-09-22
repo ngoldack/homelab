@@ -33,6 +33,34 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# The WhatsApp bridge's node dependencies, baked in — because Hermes otherwise
+# installs them at first start (`npm install` in the bridge dir) and the
+# gateway's egress allowlist cannot reach npm's registry.
+#
+# registry.npmjs.org is served by Cloudflare (104.16.0.0/12, and 2606:4700::/32
+# over v6), while hermes-agents/cilium-policy.yaml carries only the Fastly
+# anycast ranges (151.101.0.0/16, 146.75.0.0/16, 199.232.0.0/16) plus GitHub.
+# Verified live 2026-09-22: DNS resolves 104.16.x.34 and every TCP connect to
+# :443 times out, so the install can never succeed — pairing could not complete,
+# and each gateway start paid the full npm-install timeout before giving up.
+#
+# Baking the tree removes the runtime network dependency entirely.
+# resolve_whatsapp_bridge_dir() mirrors this directory (node_modules included)
+# into $HERMES_HOME/scripts/whatsapp-bridge because the container rootfs is
+# read-only, and the mirror is reused once it exists.
+#
+# .hermes-pkg-hash is load-bearing: the adapter compares it against the first 16
+# hex chars of the SHA-256 of package.json (adapter._file_content_hash) and runs
+# `npm install` whenever it is missing or stale — which is exactly the failing
+# path this step removes. Keep the two computations identical.
+RUN set -eu; \
+    cd /opt/hermes/scripts/whatsapp-bridge; \
+    npm ci --omit=dev --silent; \
+    sha256sum package.json | cut -c1-16 > node_modules/.hermes-pkg-hash; \
+    test "$(cat node_modules/.hermes-pkg-hash)" = "$(sha256sum package.json | cut -c1-16)"; \
+    node --input-type=module -e 'const m = await import("@whiskeysockets/baileys"); if (!m.makeWASocket && !m.default) throw new Error("baileys has no makeWASocket/default export"); console.log("whatsapp bridge: baileys resolves offline")'; \
+    node --input-type=module -e 'for (const d of ["express","qrcode-terminal","pino"]) await import(d); console.log("whatsapp bridge: express/qrcode-terminal/pino resolve offline")'
+
 # Install the pinned agent-sandbox python SDK (with its grpc extra) and the
 # plugin package into a SEPARATE plain venv, NOT the base image's uv-managed
 # /opt/hermes/.venv: uv pip refuses to resolve against that venv (uv-managed

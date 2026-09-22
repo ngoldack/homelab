@@ -116,8 +116,8 @@ workloads and the rootless image builder (label-pinned, mixed use).
 | node | class | threads | RAM | passthrough | labels/taint |
 | --- | --- | --- | --- | --- | --- |
 | `cp-main` | efficiency | 4 | 6 GiB | — | control-plane |
-| `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | Intel UHD 770 iGPU | — (general node) |
-| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | nested KVM (Kata) | no taint; `workload.hermes.io/sandbox=true` label (+ the historical `instance-type=gpu-worker` BuildKit selects on) |
+| `wk-main-efficiency` | efficiency | 10 (all remaining E) | 28 GiB | — | `node.homelab/class=efficiency` (default landing spot) |
+| `wk-main-performance` | performance | 16 (0–15) | 48 GiB | nested KVM (Kata) + Intel UHD 770 iGPU | no taint; `node.homelab/class=performance` (opt-in) + `workload.hermes.io/sandbox=true` (+ the historical `instance-type=gpu-worker` BuildKit selects on) |
 
 Host reserve: 4 GiB RAM + 2 efficiency threads (floor; the fleet totals
 82 GiB committed, so the host really keeps ~12 with ARC capped at
@@ -127,12 +127,29 @@ taking capacity from an existing one.**
 
 Design of the consolidation:
 
-* The efficiency worker is **untainted on purpose**: it is the only node
-  general workloads can run on, so a NoSchedule there would demand a
-  toleration from every deployment and isolate nothing. QuickSync consumers
-  PULL onto it by capability label — `hardware/igpu: Intel-UHD-Graphics-770`
-  (derived by tofu from the `intel-igpu` hostpci mapping) plus
-  `workload/media` — e.g. Immich's machine-learning component.
+* **Placement is label-based, and the default is efficiency.** Neither worker
+  carries a taint, and neither ever should: both are legitimate targets, so a
+  taint would demand a toleration from every workload while isolating nothing.
+  The direction of the default is expressed two ways instead:
+
+  * `node.homelab/class` names the node's class (`efficiency` / `performance`),
+    and the cluster policy `prefer-efficiency-worker-placement` adds a
+    **non-binding** weight-100 preferred nodeAffinity for `class=efficiency`
+    to every workload in the app namespaces. Non-binding is the point: it
+    cannot override a hard constraint (a `nodeSelector`, or a capability
+    selector only one node satisfies), and it cannot strand a pod — a workload
+    that does not fit on efficiency still overflows onto performance, which is
+    what has to happen because efficiency is the *busy* node (`~15%` cpu,
+    `~72%` memory, `~71%` cpu requests) and performance is the idle one
+    (`~5%`, `~41%`).
+  * A workload opts in to performance by naming it — either
+    `node.homelab/class=performance` (read as an exemption by the same policy)
+    or a capability selector only performance satisfies.
+
+  QuickSync consumers are an example of the second kind: `hardware/igpu:
+  Intel-UHD-Graphics-770` is derived by tofu from the `intel-igpu` hostpci
+  mapping and therefore follows the card, so Immich's machine-learning
+  component needs no placement edit when the iGPU moves.
 * The performance worker carries a label-only sandbox pin
   (`workload.hermes.io/sandbox=true`); since the 2026-09-16 merge of the
   old dedicated sandbox worker it runs the Kata
@@ -147,7 +164,22 @@ Design of the consolidation:
   48 GiB / 16 P-threads (pre-carve shape), kept for proven boot reliability
   — see the tfvars comment (64 GiB starved the host). It hosted the Tesla
   P100 and the local-LLM lane until 2026-09-22; the card, its driver
-  extensions, the passthrough and llmkube are gone.
+  extensions, the passthrough and llmkube are gone. The Intel UHD 770 iGPU
+  moved here from the efficiency worker the same day, so the two heavy
+  passthroughs (nested KVM for Kata, and vfio for the iGPU) share one guest.
+
+  Moving it meant three things travelling together, and they are worth
+  recording because only the first is obvious: the `hostpci` mapping, the
+  `siderolabs/i915` extension (driver and firmware live in the boot image and
+  `install.image` is keyed on the extension set, so the resulting kata+i915
+  combination only arrived through a **reinstall**), and the `workload/media`
+  label, which `media-jellyfin` selects and which is the only pod in the
+  cluster that mounts `/dev/dri`. `intel-igpu` is an exclusive host-level PCI
+  resource mapping and both workers live on `pmx-main`, so the change was
+  applied in stages — performance's extensions first (while efficiency still
+  held the card, so nothing lost its device mid-flight), then the removal,
+  then the addition — never as one parallel apply.
+
 * BuildKit is rootless, so the builder's node machine config raises
   `user.max_user_namespaces` via `machine.sysctls` (Talos ships it at 0 as
   a hardening default; rootless buildkitd refuses to start otherwise). The
@@ -167,6 +199,60 @@ Design of the consolidation:
   The edge outpost reaches authentik through the same -local Service.
   Anything NEW that must speak cross-site from a gateway path follows this
   bridge pattern until mesh routing is properly fixed.
+
+### Workload placement policy
+
+Where a workload runs between the two home workers is decided by exactly one
+of four things, in decreasing order of force:
+
+1. **Volume topology.** Pods whose PVC uses an `nvmeof` storage class are
+   bound to `volumeBindingMode: WaitForFirstConsumer`, so their node is chosen
+   by whichever node first scheduled the pod — the volume decides, and the pod
+   follows it forever after. Every `nfs` class is `Immediate` and therefore
+   node-agnostic. This is why moving a CNPG instance is never just a pod
+   reschedule: flipping one of the two instances' affinity makes the other
+   `Pending` on Multi-Attach.
+2. **Single-node capability selectors.** BuildKit's
+   `instance-type=gpu-worker`, the kata RuntimeClass's
+   `workload.hermes.io/sandbox=true`, `workload/media=true` (jellyfin) and the
+   derived `hardware/igpu` (Immich ML). Each admits exactly one node, so
+   nothing can reorder them, and they stay declared next to the workload.
+3. **An explicit `node.homelab/class=performance`** — the escape hatch for a
+   workload that should *not* be on efficiency and has no other way to say so.
+   The placement policy reads this as an exemption and leaves the pod alone.
+4. **The default**, which is efficiency, via the policy's non-binding
+   preferred affinity. Everything not claimed by 1–3 ends up here, including
+   anything added later — which is the point of doing it in a policy rather
+   than in ~55 manifests that would pin today's workloads and nothing else.
+
+The policy itself is the one mutating policy in
+`kubernetes/infrastructure/home/kyverno-policies/`, and its shape is worth
+knowing before editing it, because two of its three natural formulations are
+silently broken:
+
+* The mutate field is `patchesJson6902`. `patchesJsonPatch` is not in the CRD,
+  and because Kyverno runs with `forceFailurePolicyIgnore` the parse failure
+  is invisible — the rule simply stops applying.
+* **Autogen does not carry this rule.** Kyverno excludes JSON-patch mutates
+  that match on Pod from rule auto-generation, so a Pod-only version reports
+  success on a Deployment while mutating nothing — and Flux applies
+  controllers, not Pods. The controller kinds are therefore written out
+  explicitly (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob), with
+  `pod-policies.kyverno.io/autogen-controllers: none` stating that this is
+  deliberate.
+* The patch is a single `add … /preferredDuringSchedulingIgnoredDuringExecution/-`.
+  That op appends to an existing term list and creates the missing
+  `/spec/affinity/nodeAffinity` levels on the way, so it works on a pod with
+  no affinity at all. `patchStrategicMerge` would be autogen-eligible but
+  *replaces* the array (dropping an existing preferred term), and `add` at
+  `/spec/affinity` replaces that member (dropping `podAntiAffinity` outright —
+  which is load-bearing, as authentik's one-server-per-node pin and the
+  hindsight workers' spread both are).
+
+Not placement-policy material, for the record: **DaemonSets**. The CNI, CSI,
+security and metrics agents must run on *both* workers, so they are outside
+the policy's scope — a class preference on them would skew the performance
+node's coverage rather than move a workload.
 
 Host prerequisites applied OUTSIDE this repo (recorded here so a rebuilt
 AR900i does not relearn them the hard way): `/etc/systemd/system.conf`

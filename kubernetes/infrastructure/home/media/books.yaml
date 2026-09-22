@@ -60,13 +60,12 @@ spec:
         pod:
           annotations:
             k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.206/24"]}]'
-          # 1000:1000, NOT the image default 65532: Bindery writes into
-          # /data/books/library, which Grimmory (USER_ID=1000) must also read
-          # and organise. BINDERY_PUID/PGID below are Bindery's startup sanity
-          # check and are only satisfied when they match the pod's uid/gid.
+          # fsGroup only: `runAsUser` at POD level would also apply to the
+          # vpn-routes init container, and a non-root process loses its added
+          # capabilities on execve (nothing sets ambient caps in the OCI config
+          # the CRI builds), so `ip` would die with "RTNETLINK answers:
+          # Operation not permitted". The uids are pinned per container below.
           securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
             fsGroup: 1000
         initContainers:
           vpn-routes:
@@ -75,6 +74,8 @@ spec:
               tag: v0.16
             command: ["sh", "/scripts/attach.sh"]
             securityContext:
+              # Must stay root for NET_ADMIN to survive execve of `ip`.
+              runAsUser: 0
               capabilities:
                 add: ["NET_ADMIN"]
           # Creates the shared library skeleton as uid 1000 so every writer
@@ -97,10 +98,14 @@ spec:
               repository: ghcr.io/vavallee/bindery
               tag: v1.37.0
               digest: sha256:704995e9286097c9ac6caedab6e3f45628a5c107ff13e5313404e987d757295a
-            # The image is distroless and needs nothing writable outside
-            # /config and /data, so the root filesystem stays read-only with an
-            # emptyDir at /tmp.
+            # 1000:1000, NOT the image default 65532: Bindery writes into
+            # /data/books/library, which Grimmory (USER_ID=1000) must also read
+            # and organise. BINDERY_PUID/PGID below are Bindery's startup sanity
+            # check and are only satisfied when they match the container's
+            # uid/gid.
             securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
               capabilities:
@@ -260,6 +265,9 @@ spec:
               tag: v0.16
             command: ["sh", "/scripts/attach.sh"]
             securityContext:
+              # Explicit, not incidental: NET_ADMIN only survives the execve of
+              # `ip` for a root process.
+              runAsUser: 0
               capabilities:
                 add: ["NET_ADMIN"]
           book-dirs:

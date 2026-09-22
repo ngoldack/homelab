@@ -45,6 +45,7 @@ The root README is deliberately an index; the detail lives in `docs/`.
 | [`docs/hermes-agent-sandbox.md`](docs/hermes-agent-sandbox.md) | The Kata-isolated agent execution boundary and its capability model |
 | [`docs/llm-gateway-evaluation.md`](docs/llm-gateway-evaluation.md) | The LLM gateway options that were evaluated and why one was picked |
 | [`docs/policy-exceptions.md`](docs/policy-exceptions.md) | Every deliberate Kyverno/admission-policy exception, with owner and review date |
+| [`docs/workload-placement.md`](docs/workload-placement.md) | Which home worker each workload lands on, the four mechanisms that decide it, and the per-workload verdicts behind the efficiency-by-default policy |
 
 Deep links into the walkthrough, since they are the sections people arrive for:
 

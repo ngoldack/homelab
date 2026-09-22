@@ -620,3 +620,105 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# Books stack (../media/books.yaml): Bindery's /config. Holds the SQLite
+# database (authors, monitored books, indexers, download clients, grab
+# history), its logs and its image cache — small, precious and rewritten on
+# every sweep, so the fast pool and the same 6h/14d schedule as the media
+# config class.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-media-bindery
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/media/bindery"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Books stack (../media/books.yaml): Grimmory's /app/data — the Spring Boot
+# application's own state (logs, cover cache, generated artefacts). The book
+# library itself is NOT here: it lives on the shared media library volume so
+# Bindery can hardlink imports into it (see truenas-tank-nfs-media-library).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-media-grimmory
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/media/grimmory"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+---
+# Books stack (../media/mariadb.yaml): MariaDB's data directory for Grimmory's
+# catalogue. Block storage for the same reason the other databases use it —
+# InnoDB wants block semantics (fsync latency, no NFS attribute cache or
+# locking layer) — and the zvol's parent dataset carries the 6h/14d snapshots.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-media-grimmory-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof/media/grimmory-database"
+  compression: "LZ4"
+  volblocksize: "16K"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# Books stack (../media/books.yaml): pyLoad's /config — plugin settings,
+# accounts, the download queue and its accounts.conf.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nfs-media-pyload
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nfs"
+  pool: "fast"
+  datasetPath: "k8s/nfs/media/pyload"
+  compression: "LZ4"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  nfs.mountOptions: "hard,nfsvers=4.1"
+  nfs.rootSquash: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

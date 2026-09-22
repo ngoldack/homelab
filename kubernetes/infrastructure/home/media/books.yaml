@@ -1,0 +1,398 @@
+# The books stack: Grimmory (library server) + Bindery (Readarr replacement) +
+# pyLoad (file-host download manager), on the same app-template pattern as the
+# media chain (releaseName `books`, hence Services `books-bindery`,
+# `books-grimmory`, `books-pyload`). MariaDB for Grimmory is hand-declared in
+# mariadb.yaml — see the note there.
+#
+# Why this lives in namespace `media` rather than one of its own: Bindery must
+# hardlink finished Usenet downloads into the library, and PVCs are
+# namespace-scoped — only a pod in `media` can mount `media-library`, where
+# SABnzbd writes /data/usenet/complete. Reusing the namespace also reuses the
+# media VPN egress gateway, the `*.media.svc` Gateway listener, the
+# truenas-fast-nfs-media-* config classes and the authentik proxy wiring.
+#
+# Layout on the shared library volume (media-library, storage.yaml):
+#
+#   /data/usenet/complete      SABnzbd's finished downloads (already exists)
+#   /data/books/library        Bindery imports here; Grimmory serves it
+#   /data/books/audiobooks     Bindery's audiobook root
+#   /data/books/bookdrop       Grimmory's BookDrop inbox
+#   /data/pyload               pyLoad's download directory
+#
+# bindery and pyload carry a macvlan interface on VLAN 2080 and the vpn-routes
+# init container, exactly like sonarr/radarr/sabnzbd/prowlarr: their default
+# route points at the vpn-gateway pod (10.20.80.200), so indexer queries and
+# file-host downloads leave through the stack's single WireGuard tunnel while
+# cluster traffic (SABnzbd, Prowlarr, MariaDB, DNS) stays on eth0.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: books
+  namespace: flux-system
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: media
+      interval: 1h
+  targetNamespace: media
+  releaseName: books
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Everything reads/writes TrueNAS NFS, which only the LAN workers reach.
+    defaultPodOptions:
+      nodeSelector:
+        topology.homelab/site: home
+    controllers:
+      bindery:
+        type: deployment
+        pod:
+          annotations:
+            k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.206/24"]}]'
+          # 1000:1000, NOT the image default 65532: Bindery writes into
+          # /data/books/library, which Grimmory (USER_ID=1000) must also read
+          # and organise. BINDERY_PUID/PGID below are Bindery's startup sanity
+          # check and are only satisfied when they match the pod's uid/gid.
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+        initContainers:
+          vpn-routes:
+            image:
+              repository: ghcr.io/nicolaka/netshoot
+              tag: v0.16
+            command: ["sh", "/scripts/attach.sh"]
+            securityContext:
+              capabilities:
+                add: ["NET_ADMIN"]
+          # Creates the shared library skeleton as uid 1000 so every writer
+          # (Bindery, Grimmory, pyLoad) can write it. Idempotent, and also run
+          # by pyLoad, so neither pod depends on the other's start order.
+          book-dirs:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            command:
+              - sh
+              - -c
+              - mkdir -p /data/books/library /data/books/audiobooks /data/books/bookdrop /data/pyload
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+        containers:
+          main:
+            image:
+              repository: ghcr.io/vavallee/bindery
+              tag: v1.37.0
+              digest: sha256:704995e9286097c9ac6caedab6e3f45628a5c107ff13e5313404e987d757295a
+            # The image is distroless and needs nothing writable outside
+            # /config and /data, so the root filesystem stays read-only with an
+            # emptyDir at /tmp.
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            env:
+              TZ: Europe/Berlin
+              BINDERY_PORT: "8787"
+              BINDERY_DB_PATH: /config/bindery.db
+              BINDERY_DATA_DIR: /config
+              BINDERY_LOG_LEVEL: info
+              BINDERY_DOWNLOAD_DIR: /data/usenet/complete
+              BINDERY_LIBRARY_DIR: /data/books/library
+              BINDERY_AUDIOBOOK_DIR: /data/books/audiobooks
+              BINDERY_PUID: "1000"
+              BINDERY_PGID: "1000"
+              # The authentik outpost is the only client that may forge
+              # X-Authentik-Username, and Cilium restricts ingress on 8787 to
+              # the authentik namespace — the same trust the media stack's
+              # AuthenticationMethod=External apps already place in it.
+              BINDERY_TRUSTED_PROXY: 172.20.0.0/16
+              BINDERY_PROXY_AUTH_HEADER: X-Authentik-Username
+              BINDERY_PROXY_AUTO_PROVISION: "true"
+            ports:
+              - name: http
+                containerPort: 8787
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: http
+                  periodSeconds: 5
+                  failureThreshold: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/health
+                    port: http
+                  periodSeconds: 10
+                  failureThreshold: 3
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/health
+                    port: http
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  failureThreshold: 5
+      grimmory:
+        type: deployment
+        initContainers:
+          # Grimmory runs its Liquibase migrations at boot; without a reachable
+          # database it crash-loops rather than waits. Same guard the app's own
+          # Helm chart ships.
+          wait-for-db:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            command:
+              - sh
+              - -c
+              - until nc -z grimmory-db 3306; do echo "waiting for grimmory-db"; sleep 2; done
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 32Mi
+        containers:
+          main:
+            image:
+              repository: docker.io/grimmory/grimmory
+              tag: v3.5.0
+              digest: sha256:bf6fe21c6e247597f7869664a440b5a34242e2d2940575cae39c17bfaa66dc0b
+            # No container securityContext on purpose: the image's entrypoint
+            # runs as root and su-execs down to USER_ID/GROUP_ID, so it needs
+            # SETUID/SETGID — dropping capabilities here would break the drop.
+            env:
+              - name: TZ
+                value: Europe/Berlin
+              - name: USER_ID
+                value: "1000"
+              - name: GROUP_ID
+                value: "1000"
+              - name: SERVER_PORT
+                value: "6060"
+              - name: DATABASE_HOST
+                value: grimmory-db
+              - name: DATABASE_PORT
+                value: "3306"
+              - name: DATABASE_NAME
+                value: grimmory
+              - name: DATABASE_USERNAME
+                value: grimmory
+              - name: DATABASE_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: books-secrets
+                    key: mariadb-password
+            ports:
+              - name: http
+                containerPort: 6060
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                memory: 2Gi
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/healthcheck
+                    port: http
+                  periodSeconds: 10
+                  failureThreshold: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/healthcheck
+                    port: http
+                  periodSeconds: 15
+                  failureThreshold: 6
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/healthcheck
+                    port: http
+                  periodSeconds: 15
+                  failureThreshold: 6
+      pyload:
+        type: deployment
+        pod:
+          annotations:
+            k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.207/24"]}]'
+        initContainers:
+          vpn-routes:
+            image:
+              repository: ghcr.io/nicolaka/netshoot
+              tag: v0.16
+            command: ["sh", "/scripts/attach.sh"]
+            securityContext:
+              capabilities:
+                add: ["NET_ADMIN"]
+          book-dirs:
+            image:
+              repository: docker.io/library/busybox
+              tag: "1.36"
+            command:
+              - sh
+              - -c
+              - mkdir -p /data/books/library /data/books/audiobooks /data/books/bookdrop /data/pyload
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+        containers:
+          main:
+            image:
+              repository: docker.io/linuxserver/pyload-ng
+              tag: "0.5.0"
+              digest: sha256:5161f354a2a5d995f87c8cdf4e2d24ed58cdadb14d0fc4deee466ff03cab8755
+            env:
+              PUID: "1000"
+              PGID: "1000"
+              UMASK: "002"
+              TZ: Europe/Berlin
+            ports:
+              - name: http
+                containerPort: 8000
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  periodSeconds: 10
+                  failureThreshold: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  periodSeconds: 15
+                  failureThreshold: 6
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: http
+                  periodSeconds: 15
+                  failureThreshold: 6
+    service:
+      bindery:
+        controller: bindery
+        ports:
+          http:
+            port: 8787
+      grimmory:
+        controller: grimmory
+        ports:
+          http:
+            port: 6060
+      pyload:
+        controller: pyload
+        ports:
+          http:
+            port: 8000
+    persistence:
+      # The VLAN route script, mounted into the two download pods' init
+      # container only (nothing else needs it).
+      vpn-routes:
+        type: configMap
+        name: vpn-routes
+        advancedMounts:
+          bindery:
+            vpn-routes:
+              - path: /scripts
+          pyload:
+            vpn-routes:
+              - path: /scripts
+      # The shared book workspace on the media library volume.
+      library:
+        type: persistentVolumeClaim
+        existingClaim: media-library
+        advancedMounts:
+          bindery:
+            main:
+              - path: /data
+            book-dirs:
+              - path: /data
+          grimmory:
+            main:
+              - path: /data
+          pyload:
+            main:
+              - path: /data
+            book-dirs:
+              - path: /data
+      bindery-config:
+        type: persistentVolumeClaim
+        existingClaim: bindery-config
+        advancedMounts:
+          bindery:
+            main:
+              - path: /config
+      # Bindery's root filesystem is read-only; its scratch space is not.
+      bindery-tmp:
+        type: emptyDir
+        advancedMounts:
+          bindery:
+            main:
+              - path: /tmp
+      grimmory-data:
+        type: persistentVolumeClaim
+        existingClaim: grimmory-data
+        advancedMounts:
+          grimmory:
+            main:
+              - path: /app/data
+      pyload-config:
+        type: persistentVolumeClaim
+        existingClaim: pyload-config
+        advancedMounts:
+          pyload:
+            main:
+              - path: /config

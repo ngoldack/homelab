@@ -22,9 +22,10 @@ spec:
     # for media, so it only opened every port to the monitoring namespace for
     # nothing — re-add the rule together with the scrape object if one appears.
     # This namespace's SSO-gated UIs are reached through the authentik proxy
-    # outpost, which only fronts the six backends httproutes.yaml sends to
+    # outpost, which only fronts the backends httproutes.yaml sends to
     # authentik-proxy: seerr:80 (container 5055), sabnzbd:8080, sonarr:8989,
-    # radarr:7878, prowlarr:9696, bazarr:6767 (jellyfin stays direct on 8096).
+    # radarr:7878, prowlarr:9696, bazarr:6767 (jellyfin stays direct on 8096),
+    # plus the books stack's bindery:8787, grimmory:6060 and pyload:8000.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: authentik
@@ -41,6 +42,12 @@ spec:
             - port: "9696"
               protocol: TCP
             - port: "6767"
+              protocol: TCP
+            - port: "8787"
+              protocol: TCP
+            - port: "6060"
+              protocol: TCP
+            - port: "8000"
               protocol: TCP
   egress:
     - toEndpoints:

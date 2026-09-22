@@ -5,6 +5,23 @@ the record behind the placement default: *everything lands on the efficiency wor
 the performance worker is opt-in.* Volatile live numbers (pod counts, memory) are
 recorded where they are evidence; the **labels and selectors are the durable part**.
 
+> **STATUS 2026-09-22: the policy is WITHDRAWN.** Everything below is the design record,
+> not the live state. `placement-default.yaml` was removed from
+> `kyverno-policies/kustomization.yaml` the same day it landed, because it ran away: its
+> JSON-6902 patch is an unconditional **append** to
+> `preferredDuringSchedulingIgnoredDuringExecution` with no precondition that the term is
+> already present, so any controller that continuously reconciles its own Deployment
+> fights the mutation — it writes its desired spec, admission appends a term, the stored
+> object no longer matches, it writes again. Measured on `agentgateway/agentgateway`:
+> **598 byte-identical terms**, `metadata.generation` **700** and climbing at ~1 write/s,
+> and **821 ReplicaSets** in the namespace (~1 new RS every 2s). The same object also
+> showed the controller rule and the Pod rule *both* firing, so a pod built from a 1-term
+> template carried 2. It was **inert** on top of that: the preference targets
+> `node.homelab/class=efficiency`, and no node carries that label yet, so it matched no
+> node and placed nothing — which is why withdrawing it changed no placement. Restore it
+> once (a) a dedupe precondition is fixture-measured with the Kyverno CLI the way every
+> other shape in that file was, and (b) the class labels are applied to the nodes.
+
 ## The two home workers
 
 Roles are **inverted** from what the historical `instance-type` label suggests, which
@@ -72,5 +89,6 @@ cluster's Kyverno CLI (v1.19.1) against fixtures, not inferred — including the
 silently-broken formulations that were rejected (`patchesJsonPatch` is not a CRD field;
 autogen excludes JSON-patch mutates matching on Pod). See
 `docs/overview.md` § "Workload placement policy" for the mechanism and
-`kubernetes/infrastructure/home/kyverno-policies/placement-default.yaml` for the
-annotated policy.
+`kubernetes/infrastructure/home/kyverno-policies/placement-default.yaml` — **withdrawn
+2026-09-22, see the status note above** — for the annotated policy, which is recoverable
+from git history (`git show 61c2916:kubernetes/infrastructure/home/kyverno-policies/placement-default.yaml`).

@@ -7,13 +7,30 @@ resources:
   # applied — the same CRD-before-CR split as monitoring-crds/monitoring and
   # agentgateway-crds/agentgateway.
   - policies.yaml
-  # The one MUTATING policy (the rest of policies.yaml is validate-only): a
-  # non-binding scheduler preference for the efficiency worker, which is how
-  # "ordinary workloads land on efficiency, the performance worker is opt-in"
-  # is expressed without editing the ~55 manifests that select the shared
-  # topology.homelab/site=home label. Rationale and the fallback argument live
-  # in the file.
-  - placement-default.yaml
+  # WITHDRAWN 2026-09-22: placement-default.yaml (the only MUTATING policy in
+  # this directory) is removed, because it ran away:
+  #
+  #   1. Its JSON-6902 patch is an unconditional APPEND to
+  #      preferredDuringSchedulingIgnoredDuringExecution with no precondition
+  #      that the term is already present. Any controller that continuously
+  #      reconciles its own Deployment therefore fights the mutation — it writes
+  #      its desired spec, admission appends a term, the stored object no longer
+  #      matches, so it writes again. Measured on agentgateway/agentgateway:
+  #      598 byte-identical terms, metadata.generation 700 and climbing at ~1
+  #      write/s, and 821 ReplicaSets in the namespace (~1 new RS every 2s).
+  #      That object also showed the controller rule and the Pod rule BOTH
+  #      firing — a pod built from a 1-term template carried 2 — which is the
+  #      double-apply hazard the file's own header says it avoided.
+  #   2. It was inert regardless: the preference targets
+  #      node.homelab/class=efficiency, and NO node carries that label yet (it is
+  #      declared in tofu/home/terraform.tfvars but not applied), so it matched
+  #      no node and placed nothing.
+  #
+  # So nothing that runs today was placed by it, and removing it costs nothing:
+  # placement falls back to scheduler scoring, exactly as before 61c2916.
+  # Restore the file once (a) a dedupe precondition is fixture-measured with the
+  # Kyverno CLI the way every other shape in that file was, and (b) the class
+  # labels are on the nodes. See docs/workload-placement.md.
   # ClusterRole/ClusterRoleBinding granting the policy engine get+list on
   # cilium.io/ciliumnetworkpolicies — the one API group Kyverno's shipped roles do
   # not cover, needed by the require-cilium-default-deny-floor policy. Rationale,

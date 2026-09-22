@@ -140,7 +140,7 @@ fi
 # ------------------------------------------------------------------- live ----
 if [ "$LIVE" -eq 1 ]; then
   command -v kubectl >/dev/null || { echo "--live needs kubectl" >&2; exit 2; }
-  for agent in dave chad lindner; do
+  for agent in dave chad lindner marius; do
     pod="$(kubectl -n "$NS" get pod -l "app.kubernetes.io/instance=$agent" \
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -z "$pod" ]; then

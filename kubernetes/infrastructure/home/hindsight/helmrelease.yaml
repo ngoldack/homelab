@@ -134,19 +134,23 @@ spec:
         HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
         # Audit logging enabled so ingest paths are visible.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
-        # LLM request tracing OFF for the bulk-ingest window (2026-09-21). The
-        # tracer wrote one llm_requests row per LLM call — success AND failure —
-        # WITH the full prompt jsonb: 460k rows/24h = 9.15 GB, 74.5% of them
-        # error rows (403 budget / 429), 99.8% scope=retain_extract_facts, plus
-        # ~460k pooled-connection acquires/day competing for max_connections.
-        # Nothing in the ingest path reads traces (debugging surface only, the
-        # UI's list_llm_requests endpoint). Re-enable to debug extraction
-        # quality; retention pinned so the table cannot silently grow when it
-        # is switched back on. NOTE: the maintenance sweep is gated on this
-        # flag (maintenance.py: llm_on = sweep_on and cfg.llm_trace_enabled …),
-        # so switching it off also stops the purge — the pre-existing rows were
-        # truncated once, and new ones stop accumulating entirely.
-        HINDSIGHT_API_LLM_TRACE_ENABLED: "false"
+        # LLM request tracing back ON (2026-09-22). It was turned off on
+        # 2026-09-21 for the bulk-ingest window, when the tracer wrote one
+        # llm_requests row per LLM call — success AND failure — WITH the full
+        # prompt jsonb: 460k rows/24h = 9.15 GB, 74.5% of them error rows
+        # (403 budget / 429), plus ~460k pooled-connection acquires/day
+        # competing for max_connections. Those were the numbers of an
+        # UNTHROTTLED drain; the offer is now capped at 2 concurrent calls per
+        # process (see HINDSIGHT_API_LLM_MAX_CONCURRENT below) and the failed
+        # backlog is being requeued, so the volume is a small fraction of that —
+        # and this is the surface that shows WHY an extraction call failed while
+        # the backlog is worked through (UI's list_llm_requests endpoint).
+        # Retention stays pinned at 1 day, and the hourly maintenance sweep that
+        # enforces it is gated on this same flag (maintenance.py:
+        # llm_on = sweep_on and cfg.llm_trace_enabled …), so the table is pruned
+        # for as long as it is written to. Watch llm_requests' size while the
+        # requeued backlog drains; switch back off if the row rate surprises.
+        HINDSIGHT_API_LLM_TRACE_ENABLED: "true"
         HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS: "1"
         # Retention (verified against hindsight_api/config.py in the shipped
         # image: these feed the hourly maintenance sweep in
@@ -194,7 +198,15 @@ spec:
       # leg is gone (2026-09-22), so the ceiling is now Synthetic's capacity
       # plus the proxy's hold-off window. Extra replicas still add concurrency
       # rather than throughput while the provider is the constraint.
-      replicaCount: 3
+      # 3 -> 2 (2026-09-22). With the LLM offer throttled to 2 concurrent calls
+      # per process (HINDSIGHT_API_LLM_MAX_CONCURRENT in the env block below),
+      # the total in flight is 2 workers x 2 = 4, which is the ~4-5 concurrent
+      # calls the Synthetic leg was measured sustaining — the third replica
+      # added nothing the provider would serve and cost a claim-path memory
+      # footprint (multi-MB task_payloads folded 16 peers deep) per pod. Two
+      # replicas also match podAntiAffinity's two home nodes exactly, so each
+      # lands on its own node.
+      replicaCount: 2
       # Memory raised three times on 2026-09-18. Evidence, not estimation —
       # live VmRSS of a booting worker, sampled every 2s:
       #   306MB -> 535 -> 631 -> 740 -> 841MB (steady, ~30s of startup)
@@ -338,8 +350,8 @@ spec:
         # to fix at the source, not something to widen batches for.
         # Audit logging enabled for the worker too.
         HINDSIGHT_API_AUDIT_LOG_ENABLED: "true"
-        # Same trace-off + pinned retention as the api (see the api env block).
-        HINDSIGHT_API_LLM_TRACE_ENABLED: "false"
+        # Same trace-on + pinned retention as the api (see the api env block).
+        HINDSIGHT_API_LLM_TRACE_ENABLED: "true"
         HINDSIGHT_API_LLM_TRACE_RETENTION_DAYS: "1"
         # Same retention window as the api (the chart does not merge api.env
         # into the worker — the env above is deliberately written out in

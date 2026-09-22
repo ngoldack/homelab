@@ -229,7 +229,103 @@ for f in cilium_files:
                              f"no containerPort of the pods its selector matches {sorted(allowed)} "
                              f"(Cilium matches the POD port; a Service port like 80 is not it)")
 
-# 9. ingress CR count is the known 3 (inert orphans)
+# 9. every pod-to-pod egress peer in the repo-authored matrix allowlist must
+#    have a matching INGRESS rule on the target pods. Cilium requires both
+#    halves, and the ESS components reach each other through Services — so a
+#    peer list naming `synapse-main` while the caller dials the `matrix-synapse`
+#    Service (whose endpoints are the haproxy pods) silently breaks the flow
+#    (found twice: MAS -> homeserver and Synapse -> MAS, both reported by
+#    `mas-cli doctor`). Peers granted by `fromEntities` are treated as covered
+#    on the target side; a namespace-scoped ingress peer covers every pod in
+#    that namespace.
+cilium_all = []
+for f in cilium_files:
+    for d in [x for x in yaml.safe_load_all(open(f)) if x]:
+        if d.get('kind') == 'CiliumNetworkPolicy':
+            cilium_all.append(d)
+
+def pod_namespace(labels):
+    return labels.get('k8s:io.kubernetes.pod.namespace') or labels.get('io.kubernetes.pod.namespace')
+
+# Only these Cilium entities cover arbitrary PODS. `ingress` and `health` are
+# specific non-pod identities (the Gateway's envoy, the kubelet), so a rule that
+# admits them does NOT satisfy a pod-to-pod flow — treating them as broad is how
+# this check first passed while the MAS -> haproxy flow was broken.
+BROAD_ENTITIES = {'all', 'cluster', 'world', 'host', 'remote-node', 'init', 'kube-apiserver'}
+
+def peer_covers(ingress_rule, src_labels, src_ns):
+    """Does this ingress rule admit a call from a pod with src_labels in src_ns?"""
+    for peer in ingress_rule.get('fromEndpoints') or []:
+        ml = peer.get('matchLabels') or {}
+        if ml and all(src_labels.get(kk) == vv for kk, vv in ml.items()):
+            return True                          # exact pod match
+        ns = pod_namespace(ml)
+        if ns and len(ml) == 1 and ns == src_ns:
+            return True                          # namespace-wide peer
+    for ent in ingress_rule.get('fromEntities') or []:
+        if isinstance(ent, str) and ent in BROAD_ENTITIES:
+            return True                          # entity that spans pods
+    return False
+
+
+unpaired = []
+checked_pairs = 0
+for src in cilium_all:
+    src_sel = ((src['spec'].get('endpointSelector') or {}).get('matchLabels') or {})
+    src_pods = pods_matching(src_sel)
+    if not src_pods:
+        continue
+    src_labels = next(labels for labels, _ in rendered_pods
+                      if all(labels.get(k) == v for k, v in src_sel.items()))
+    src_ns = pod_namespace(src_labels) or 'matrix'
+    for rule in src['spec'].get('egress') or []:
+        ports = [str(pp.get('port')) for tp in (rule.get('toPorts') or []) for pp in tp.get('ports', [])]
+        ports_ = ports
+        for peer in rule.get('toEndpoints') or []:
+            ml = peer.get('matchLabels') or {}
+            if not ml or peer.get('matchExpressions'):
+                continue
+            # A namespace-only peer addresses every pod the chart renders here
+            # (Cilium's own namespace label is not in a pod template), so the
+            # target set is the whole render for that peer shape.
+            rest = {k: v for k, v in ml.items() if 'kubernetes.pod.namespace' not in k}
+            if not rest:
+                # Namespace-wide peer: the meaningful targets are the pods that
+                # actually SERVE that port (the peer means "any pod in the ns may
+                # dial", not "every pod must admit it").
+                targets = [labels for labels, ports in rendered_pods
+                           if any(pt in ports for pt in ports_)]
+            else:
+                targets = [labels for labels, _ in rendered_pods
+                           if all(labels.get(k) == v for k, v in rest.items())]
+            if not targets:
+                continue                          # not render-checkable (CNPG pod)
+            checked_pairs += 1
+            ns_wide = False          # egress peers are precise; strict per-target
+            admitted_any = False
+            for tgt in targets:
+                tgt_policies = [q for q in cilium_all
+                                if all(tgt.get(k) == v for k, v in
+                                       ((q['spec'].get('endpointSelector') or {}).get('matchLabels') or {}).items())]
+                ok = False
+                for q in tgt_policies:
+                    for ir in q['spec'].get('ingress') or []:
+                        ir_ports = [str(pp.get('port')) for tp in (ir.get('toPorts') or []) for pp in tp.get('ports', [])]
+                        if any(pt in ir_ports for pt in ports) and peer_covers(ir, src_labels, src_ns):
+                            ok = True
+                admitted_any = admitted_any or ok
+                # A namespace-wide peer means "any pod in that namespace may
+                # dial", so at least one serving pod must admit it; a peer that
+                # names specific pods must be admitted by THOSE pods.
+                if not ok and not ns_wide:
+                    unpaired.append(f"{src['metadata']['name']} -> {ml} on {ports} has no matching ingress on "
+                                    f"{tgt.get('app.kubernetes.io/name') or tgt}")
+            if ns_wide and not admitted_any:
+                unpaired.append(f"{src['metadata']['name']} -> {ml} on {ports}: no pod serving that port admits it")
+if unpaired:
+    fail("unpaired pod-to-pod egress peers (Cilium needs both halves): " + "; ".join(sorted(set(unpaired))))
+
+# 10. ingress CR count is the known 3 (inert orphans)
 ing = sum(1 for d in docs if d.get('kind') == 'Ingress')
 if ing != 3:
     fail(f"expected 3 inert Ingress CRs, got {ing}")
@@ -239,5 +335,6 @@ print("PASS: matrix render invariants hold (0 admin/rtc/livekit/pg/hookshot; "
       "ingress hosts exactly {matrix,element,matrix-auth}.ngoldack.de; "
       "0 ServiceMonitors; element-web base_url=local; resources set; "
       f"{routed} route backendRefs all resolve; {policies_checked} cilium ingress ports are pod ports; "
+      f"{checked_pairs} peer pairs both halves; "
       "3 inert Ingress CRs)" + (f"; not render-checkable: {[s[1] for s in skipped_selectors]}" if skipped_selectors else ""))
 PY

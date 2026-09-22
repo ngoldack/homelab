@@ -174,7 +174,54 @@ if repo:
 if routed == 0:
     fail("no HTTPRoute backendRefs were checked (routes missing?)")
 
-# 8. ingress CR count is the known 3 (inert orphans)
+# 8. every Cilium INGRESS port named by the repo-authored matrix allowlist must
+#    be a CONTAINER port of a pod the chart renders. Cilium matches the pod port,
+#    while a Service can map a different service port onto it (matrix-element-web:
+#    80 -> named targetPort "element" = 8080) — naming the Service port there
+#    silently drops gateway traffic (503) with a healthy-looking pod. Selectors
+#    that match no rendered pod (the CNPG operator's own pod) are reported, not
+#    asserted.
+container_ports = set()
+for d in docs:
+    if d.get('kind') not in ('Deployment', 'StatefulSet', 'Job', 'DaemonSet'):
+        continue
+    podspec = (d.get('spec') or {}).get('template', {}).get('spec') or {}
+    for c in (podspec.get('containers') or []) + (podspec.get('initContainers') or []):
+        for p_ in c.get('ports') or []:
+            if p_.get('containerPort') is not None:
+                container_ports.add(str(p_.get('containerPort')))
+skipped_selectors = []
+cilium_files = sorted(glob.glob(os.path.join(repo, 'kubernetes/infrastructure/home/matrix/cilium-*.yaml'))) if repo else []
+policies_checked = 0
+for f in cilium_files:
+    for d in [x for x in yaml.safe_load_all(open(f)) if x]:
+        if d.get('kind') != 'CiliumNetworkPolicy' or not d['spec'].get('ingress'):
+            continue
+        selector = ((d['spec'].get('endpointSelector') or {}).get('matchLabels') or {})
+        matched = False
+        for r in d['spec']['ingress']:
+            for tp in r.get('toPorts') or []:
+                for p_ in tp.get('ports') or []:
+                    port = str(p_.get('port'))
+                    if port not in container_ports:
+                        # is the selector one we cannot see in the render at all?
+                        matched = matched or False
+                    else:
+                        matched = True
+        if not matched:
+            skipped_selectors.append((os.path.basename(f), d['metadata']['name'], selector))
+        else:
+            for r in d['spec']['ingress']:
+                for tp in r.get('toPorts') or []:
+                    for p_ in tp.get('ports') or []:
+                        port = str(p_.get('port'))
+                        policies_checked += 1
+                        if port not in container_ports:
+                            fail(f"{os.path.basename(f)}: {d['metadata']['name']} admits ingress on "
+                                 f"pod port {port}, which is no rendered containerPort "
+                                 f"(Cilium matches the POD port; a Service port like 80 is not it)")
+
+# 9. ingress CR count is the known 3 (inert orphans)
 ing = sum(1 for d in docs if d.get('kind') == 'Ingress')
 if ing != 3:
     fail(f"expected 3 inert Ingress CRs, got {ing}")
@@ -183,5 +230,6 @@ print("PASS: matrix render invariants hold (0 admin/rtc/livekit/pg/hookshot; "
       "1 synapse StatefulSet + 1 MAS + 1 element-web + 1 haproxy; "
       "ingress hosts exactly {matrix,element,matrix-auth}.ngoldack.de; "
       "0 ServiceMonitors; element-web base_url=local; resources set; "
-      f"{routed} route backendRefs all resolve; 3 inert Ingress CRs)")
+      f"{routed} route backendRefs all resolve; {policies_checked} cilium ingress ports are pod ports; "
+      "3 inert Ingress CRs)" + (f"; not render-checkable: {[s[1] for s in skipped_selectors]}" if skipped_selectors else ""))
 PY

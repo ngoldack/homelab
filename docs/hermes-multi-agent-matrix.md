@@ -79,7 +79,7 @@ Three properties the diagram encodes:
 ## Trust boundaries and per-profile capability
 
 The four processes run the same image
-(`registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:0a37a017…`) with the
+(`registry.ngoldack.de/hermes-agent-sandbox-plugin@sha256:6fc70c64…`) with the
 same pod hardening (non-root 10000, `RuntimeDefault` seccomp, all capabilities
 dropped, read-only root filesystem) and the same ServiceAccount (`hermes`).
 What differs is the profile config, and that config is the security boundary:

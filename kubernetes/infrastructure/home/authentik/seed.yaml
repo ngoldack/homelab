@@ -175,6 +175,7 @@ data:
           internal_host: http://hindsight-control-plane.hindsight.svc.cluster.local:3000/
           external_host: https://hindsight-ui.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -196,6 +197,7 @@ data:
           internal_host: http://monitoring-victoria-metrics-k8s-stack-grafana.monitoring.svc.cluster.local/
           external_host: https://grafana.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -330,6 +332,7 @@ data:
           internal_host: http://media-sonarr.media.svc.cluster.local:8989/
           external_host: https://sonarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -355,6 +358,7 @@ data:
           internal_host: http://media-radarr.media.svc.cluster.local:7878/
           external_host: https://radarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -380,6 +384,7 @@ data:
           internal_host: http://media-prowlarr.media.svc.cluster.local:9696/
           external_host: https://prowlarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -405,6 +410,7 @@ data:
           internal_host: http://media-bazarr.media.svc.cluster.local:6767/
           external_host: https://bazarr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -430,6 +436,7 @@ data:
           internal_host: http://media-sabnzbd.media.svc.cluster.local:8080/
           external_host: https://sabnzbd.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -455,6 +462,7 @@ data:
           internal_host: http://seerr.media.svc.cluster.local:80/
           external_host: https://seerr.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -485,6 +493,7 @@ data:
           internal_host: http://books-bindery.media.svc.cluster.local:8787/
           external_host: https://bindery.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -511,6 +520,7 @@ data:
           internal_host: http://books-grimmory.media.svc.cluster.local:6060/
           external_host: https://grimmory.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -534,6 +544,7 @@ data:
           internal_host: http://books-pyload.media.svc.cluster.local:8000/
           external_host: https://pyload.media.svc.ngoldack.de/
           cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
           authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -1404,3 +1415,88 @@ data:
         attrs:
           group: !Find [authentik_core.group, [name, jellyfin_users]]
           negate: false
+
+      # ---------- providers that existed only in the UI until 2026-09-23 ----------
+      # These five were created by hand in the authentik UI and never declared here,
+      # so nothing pinned their configuration and a rebuild would have lost them.
+      # Every value below was read back from the live rows, not invented. Same
+      # access_token_validity rationale as the rest of this file: the 1h default sent
+      # each outpost back through the SSO start URL hourly, re-prompting the browser
+      # on every app; access_code_validity stays at its 1m default (it is the
+      # single-use round-trip ticket, not the session).
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: agentgateway-ui-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://agentgateway-ui.agentgateway.svc.cluster.local:15000/
+          external_host: https://agentgateway.ngoldack.de/
+          cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: headlamp-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://headlamp-headlamp.headlamp.svc.cluster.local/
+          external_host: https://headlamp.ngoldack.de/
+          cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: jellyseerr-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://media-jellyseerr.media.svc.cluster.local:5055/
+          external_host: https://jellyseerr.media.svc.ngoldack.de/
+          cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
+          # its API is key-based: skip auth there, as the *arr providers do.
+          skip_path_regex: ^/api
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: local-llm-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://qwen36-35b.llmkube-system.svc.cluster.local:8080/
+          external_host: https://llm.ngoldack.de/
+          cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
+          # NOTE: live this provider has basic_auth_enabled=True with
+          # outpost-held credentials. The provider serializer rejects that
+          # combination without user/password ("User and password attributes
+          # must be set when basic auth is enabled"), and no secret material
+          # belongs in this blueprint, so the flag is deliberately NOT
+          # declared. Omitting it leaves the live value alone - blueprint attrs
+          # are not a full replace - while still pinning the host, cookie
+          # domain and token TTL. Re-declare the flag alongside a secret-backed
+          # user/password reference if that ever needs to come from git.
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: phoenix-proxy
+        attrs:
+          mode: proxy
+          internal_host: http://phoenix-svc.phoenix.svc.cluster.local:6006/
+          external_host: https://phoenix.ngoldack.de/
+          cookie_domain: ngoldack.de
+          access_token_validity: "hours=168"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]

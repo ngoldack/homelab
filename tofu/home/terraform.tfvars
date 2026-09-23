@@ -126,15 +126,25 @@ nodes = {
     host      = "pmx-main"
     vm_id     = 104
     cpu_cores = 10
-    # 32 GiB: the general worker carries everything that is not
-    # performance-pinned or control-plane, plus the media role and the iGPU.
-    # Sized to fill the VM pool (88 GiB) under
+    # 30 GiB (2026-09-22, from 32): the general worker carries everything that
+    # is not performance-pinned or control-plane, plus the media role and the
+    # iGPU. Sized to leave the host real slack under
     # the 6 GiB host floor: ballooning is off (memory.dedicated), so the only
     # cap that matters is allocated <= (max_memory_gb - reserved.memory) — ARC
     # is shrunk so ZFS cannot grow into this. Raised back to 32 on 2026-09-20
     # after an earlier OOM-driven trim to 24 proved unnecessary once the ARC cap
     # (not VM size) was the true pressure valve.
-    memory    = 32768
+    # 32 -> 30 on 2026-09-22: that reversal does not hold at the CEILING. At 32
+    # the fleet commits exactly 88 GiB — the whole pool — and the host OOM-killed
+    # BOTH workers on 2026-09-23 (qemu 105 at 50 GiB RSS, 104 at 33 GiB; "Failed
+    # with result 'oom-kill'"), which is what actually stopped those VMs, not the
+    # Talos upgrade running at the time. The ARC cap is what protects the floor,
+    # but it cannot create slack that 88 GiB of dedicated VMs has already spent:
+    # measured live at 94 GiB total with MemAvailable 1.9 GiB, Cached 203 MiB and
+    # zero swap, so nothing was reclaimable. 86 GiB leaves ~2 GiB more than the
+    # host's own footprint needs. Trim further (or from wk-main-performance)
+    # rather than raising this back if the OOM killer returns.
+    memory    = 30720
     disk_size = 48
 
     talos_role = "worker"

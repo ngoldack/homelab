@@ -1,0 +1,16 @@
+# browserless default-deny — same semantics as the headlamp/paperless pilots.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: browserless-default-deny
+  namespace: browserless
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in browserless. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

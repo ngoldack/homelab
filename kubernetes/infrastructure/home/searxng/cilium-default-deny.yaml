@@ -1,0 +1,17 @@
+# searxng default-deny — same semantics as the headlamp/paperless pilots. One
+# pod, one allowlist file beside this one.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: searxng-default-deny
+  namespace: searxng
+spec:
+  description: >-
+    Deny-all ingress and egress for every endpoint in searxng. The allowlist
+    in cilium-allowlist.yaml is the only exception.
+  endpointSelector:
+    matchLabels: {}
+  ingress:
+    - {}
+  egress:
+    - {}

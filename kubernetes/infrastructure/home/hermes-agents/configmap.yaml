@@ -31,7 +31,7 @@ metadata:
   namespace: hermes
 data:
   # Bump to re-seed EVERY profile's config.yaml + SOUL.md on the next start.
-  config-rev: "3"
+  config-rev: "5"
   marius.yaml: |
     provider: custom:agentgateway
     model: local
@@ -74,6 +74,34 @@ data:
       persistent_shell: false
     database:
       journal_mode: delete
+    # Web search: SearXNG, the in-cluster metasearch Service. Declared per
+    # profile because a profile config with NO `web:` selection autodetects, and
+    # that ladder walks paid vendors (firecrawl, exa, …) whose hosts this
+    # namespace's Cilium allowlist does not carry — a search would then fail
+    # against an unreachable vendor instead of using the local instance.
+    # `safe` bundles `web`, which is how Lindner keeps web_search while staying
+    # without a terminal, sandbox or browser.
+    #
+    # web_extract is deliberately left unwired. SearXNG is search-only
+    # (supports_extract() == False) and no self-hosted extract provider exists in
+    # this image. Measured 2026-09-23: with only search_backend set,
+    # _get_extract_backend() resolves to firecrawl (a per-capability key makes
+    # selection_exists("web") true, ending the autodetect ladder there) - an
+    # unreachable vendor for this namespace, so web_extract is effectively
+    # unusable by design rather than by accident.
+    web:
+      search_backend: searxng
+    agent:
+      # The `browser` bundle is withheld on this profile. The shared image has
+      # the agent-browser CLI baked in and these pods carry no BROWSER_CDP_URL
+      # (only the gateway does), so a browser tool call would fall into local
+      # mode, try to launch Chromium inside the pod, then have every navigation
+      # dropped by this namespace's Cilium allowlist - one 30 s command_timeout
+      # per call with no result. Browsing is a gateway capability here: the
+      # gateway holds the CDP endpoint into the Browserless pool.
+      disabled_toolsets:
+        - browser
+
   marius.soul.md: |
     # Marius — security operations
 
@@ -144,6 +172,34 @@ data:
       reconcile_orphans: true
     database:
       journal_mode: delete
+    # Web search: SearXNG, the in-cluster metasearch Service. Declared per
+    # profile because a profile config with NO `web:` selection autodetects, and
+    # that ladder walks paid vendors (firecrawl, exa, …) whose hosts this
+    # namespace's Cilium allowlist does not carry — a search would then fail
+    # against an unreachable vendor instead of using the local instance.
+    # `safe` bundles `web`, which is how Lindner keeps web_search while staying
+    # without a terminal, sandbox or browser.
+    #
+    # web_extract is deliberately left unwired. SearXNG is search-only
+    # (supports_extract() == False) and no self-hosted extract provider exists in
+    # this image. Measured 2026-09-23: with only search_backend set,
+    # _get_extract_backend() resolves to firecrawl (a per-capability key makes
+    # selection_exists("web") true, ending the autodetect ladder there) - an
+    # unreachable vendor for this namespace, so web_extract is effectively
+    # unusable by design rather than by accident.
+    web:
+      search_backend: searxng
+    agent:
+      # The `browser` bundle is withheld on this profile. The shared image has
+      # the agent-browser CLI baked in and these pods carry no BROWSER_CDP_URL
+      # (only the gateway does), so a browser tool call would fall into local
+      # mode, try to launch Chromium inside the pod, then have every navigation
+      # dropped by this namespace's Cilium allowlist - one 30 s command_timeout
+      # per call with no result. Browsing is a gateway capability here: the
+      # gateway holds the CDP endpoint into the Browserless pool.
+      disabled_toolsets:
+        - browser
+
   orchestrator.soul.md: |
     # Orchestrator (Kanban dispatcher)
 
@@ -208,6 +264,34 @@ data:
       persistent_shell: false
     database:
       journal_mode: delete
+    # Web search: SearXNG, the in-cluster metasearch Service. Declared per
+    # profile because a profile config with NO `web:` selection autodetects, and
+    # that ladder walks paid vendors (firecrawl, exa, …) whose hosts this
+    # namespace's Cilium allowlist does not carry — a search would then fail
+    # against an unreachable vendor instead of using the local instance.
+    # `safe` bundles `web`, which is how Lindner keeps web_search while staying
+    # without a terminal, sandbox or browser.
+    #
+    # web_extract is deliberately left unwired. SearXNG is search-only
+    # (supports_extract() == False) and no self-hosted extract provider exists in
+    # this image. Measured 2026-09-23: with only search_backend set,
+    # _get_extract_backend() resolves to firecrawl (a per-capability key makes
+    # selection_exists("web") true, ending the autodetect ladder there) - an
+    # unreachable vendor for this namespace, so web_extract is effectively
+    # unusable by design rather than by accident.
+    web:
+      search_backend: searxng
+    agent:
+      # The `browser` bundle is withheld on this profile. The shared image has
+      # the agent-browser CLI baked in and these pods carry no BROWSER_CDP_URL
+      # (only the gateway does), so a browser tool call would fall into local
+      # mode, try to launch Chromium inside the pod, then have every navigation
+      # dropped by this namespace's Cilium allowlist - one 30 s command_timeout
+      # per call with no result. Browsing is a gateway capability here: the
+      # gateway holds the CDP endpoint into the Browserless pool.
+      disabled_toolsets:
+        - browser
+
   dave.soul.md: |
     # Dave — primary coordinator
 
@@ -297,6 +381,34 @@ data:
       persistent_shell: false
     database:
       journal_mode: delete
+    # Web search: SearXNG, the in-cluster metasearch Service. Declared per
+    # profile because a profile config with NO `web:` selection autodetects, and
+    # that ladder walks paid vendors (firecrawl, exa, …) whose hosts this
+    # namespace's Cilium allowlist does not carry — a search would then fail
+    # against an unreachable vendor instead of using the local instance.
+    # `safe` bundles `web`, which is how Lindner keeps web_search while staying
+    # without a terminal, sandbox or browser.
+    #
+    # web_extract is deliberately left unwired. SearXNG is search-only
+    # (supports_extract() == False) and no self-hosted extract provider exists in
+    # this image. Measured 2026-09-23: with only search_backend set,
+    # _get_extract_backend() resolves to firecrawl (a per-capability key makes
+    # selection_exists("web") true, ending the autodetect ladder there) - an
+    # unreachable vendor for this namespace, so web_extract is effectively
+    # unusable by design rather than by accident.
+    web:
+      search_backend: searxng
+    agent:
+      # The `browser` bundle is withheld on this profile. The shared image has
+      # the agent-browser CLI baked in and these pods carry no BROWSER_CDP_URL
+      # (only the gateway does), so a browser tool call would fall into local
+      # mode, try to launch Chromium inside the pod, then have every navigation
+      # dropped by this namespace's Cilium allowlist - one 30 s command_timeout
+      # per call with no result. Browsing is a gateway capability here: the
+      # gateway holds the CDP endpoint into the Browserless pool.
+      disabled_toolsets:
+        - browser
+
   chad.soul.md: |
     # Chad — coding engineer
 
@@ -363,6 +475,34 @@ data:
       default_assignee: lindner
     database:
       journal_mode: delete
+    # Web search: SearXNG, the in-cluster metasearch Service. Declared per
+    # profile because a profile config with NO `web:` selection autodetects, and
+    # that ladder walks paid vendors (firecrawl, exa, …) whose hosts this
+    # namespace's Cilium allowlist does not carry — a search would then fail
+    # against an unreachable vendor instead of using the local instance.
+    # `safe` bundles `web`, which is how Lindner keeps web_search while staying
+    # without a terminal, sandbox or browser.
+    #
+    # web_extract is deliberately left unwired. SearXNG is search-only
+    # (supports_extract() == False) and no self-hosted extract provider exists in
+    # this image. Measured 2026-09-23: with only search_backend set,
+    # _get_extract_backend() resolves to firecrawl (a per-capability key makes
+    # selection_exists("web") true, ending the autodetect ladder there) - an
+    # unreachable vendor for this namespace, so web_extract is effectively
+    # unusable by design rather than by accident.
+    web:
+      search_backend: searxng
+    agent:
+      # The `browser` bundle is withheld on this profile. The shared image has
+      # the agent-browser CLI baked in and these pods carry no BROWSER_CDP_URL
+      # (only the gateway does), so a browser tool call would fall into local
+      # mode, try to launch Chromium inside the pod, then have every navigation
+      # dropped by this namespace's Cilium allowlist - one 30 s command_timeout
+      # per call with no result. Browsing is a gateway capability here: the
+      # gateway holds the CDP endpoint into the Browserless pool.
+      disabled_toolsets:
+        - browser
+
   lindner.soul.md: |
     # Lindner — read-only financial analyst
 

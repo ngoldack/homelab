@@ -1,0 +1,39 @@
+# SearXNG settings. `use_default_settings: true` is REQUIRED: searx/
+# settings_loader.py replaces the whole configuration with this file when the key
+# is absent (`cfg = user_cfg`), which would leave SearXNG with zero engines. The
+# upstream container template is exactly this shape — a `use_default_settings`
+# key plus the overrides that matter to us.
+#
+# search.formats MUST include `json`: Hermes' SearXNG provider calls
+# GET /search?q=…&format=json (plugins/web/searxng/provider.py) and SearXNG
+# answers 403 for a format that is not enabled here.
+#
+# server.limiter is off because this instance is reachable only from the Hermes
+# gateway inside the cluster and is never internet-facing; the limiter exists to
+# protect public instances from bots.
+#
+# The secret key is NOT here: searx/settings_defaults.py binds
+# `server.secret_key` to the SEARXNG_SECRET env var, which the Deployment feeds
+# from the SOPS secret, so no credential is written into a ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-config
+  namespace: searxng
+data:
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: "searxng"
+      # No outbound usage reporting/metrics endpoint: this is a private
+      # instance and nothing here should emit telemetry.
+      enable_metrics: false
+    search:
+      safe_search: 0
+      formats:
+        - html
+        - json
+    server:
+      bind_address: "0.0.0.0"
+      limiter: false
+      public_instance: false

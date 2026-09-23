@@ -1,0 +1,109 @@
+# searxng — SearXNG on the pinned upstream image, reached only by the Hermes
+# gateway (see cilium-allowlist.yaml) as its `web_search` backend.
+#
+# Verified live 2026-09-23 against this exact digest in a local container:
+#   * the entrypoint runs fine as uid 977 with a READ-ONLY rootfs when
+#     /var/cache/searxng and /tmp are writable, and without root it merely WARNS
+#     that the mounted settings dir is root-owned (no chown attempt, no failure);
+#   * GET /healthz returns 200 unauthenticated (so an httpGet probe is correct —
+#     no token dance like Browserless);
+#   * GET /search?q=…&format=json returns 200 with a `results` array, with
+#     `server.secret_key` supplied purely via the SEARXNG_SECRET env var.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: searxng
+  labels:
+    app.kubernetes.io/name: searxng
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge 0 (repo convention: no surge slot on the mixed worker) forces
+      # maxUnavailable >= 1 — k8s rejects maxUnavailable 0 with maxSurge 0
+      # ("may not be 0 when maxSurge is 0"). Same pair as hermes-egress/envoy.yaml.
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: searxng
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: searxng
+    spec:
+      serviceAccountName: searxng
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's own `searxng` user (getent passwd searxng -> uid 977).
+        runAsUser: 977
+        runAsGroup: 977
+        fsGroup: 977
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: searxng
+          # Pinned: docker.io/searxng/searxng:2026.9.22-b3c389529
+          image: docker.io/searxng/searxng@sha256:1facb91cd292d4f2bd8b1618aab7de0403d2fb9de1545f4dc6caf5d20da2d376
+          env:
+            # searx/settings_defaults.py binds server.secret_key to this env var
+            # (environ_name='SEARXNG_SECRET'), so the key stays in the Secret and
+            # never appears in the settings ConfigMap.
+            - name: SEARXNG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: searxng-secret
+                  key: SEARXNG_SECRET
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Verified: the entrypoint boots read-only as long as the cache and
+            # /tmp are writable (it only warns when it cannot chown the mounted
+            # settings directory, which is exactly the non-root case here).
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # /healthz is served unauthenticated (measured 200) and does not touch
+          # the search engines, so it is a true liveness signal.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            # SearXNG writes its cache here and the entrypoint insists the path
+            # is a directory; the image declares it a VOLUME, which Kubernetes
+            # does not create for us, so it is an explicit emptyDir.
+            - name: cache
+              mountPath: /var/cache/searxng
+            - name: tmp
+              mountPath: /tmp
+            - name: settings
+              mountPath: /etc/searxng
+              readOnly: true
+      volumes:
+        - name: settings
+          configMap:
+            name: searxng-config
+        - name: cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - cilium-default-deny.yaml
+  - cilium-allowlist.yaml
+  - configmap.yaml
+  - secret.sops.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml

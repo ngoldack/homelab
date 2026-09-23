@@ -34,7 +34,7 @@ spec:
       annotations:
         # Bump together with the hermes-config key config-rev: a change here
         # rolls the pod and re-seeds /opt/data/config.yaml.
-        hermes.ngoldack.de/config-rev: "8"
+        hermes.ngoldack.de/config-rev: "9"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 300
@@ -190,6 +190,22 @@ spec:
             # .cluster.local).
             - name: HERMES_API_TIMEOUT
               value: "600"
+            # Web search backend address for the SearXNG provider (config.yaml
+            # web.search_backend: searxng; plugins/web/searxng reads SEARXNG_URL).
+            # In-cluster ClusterIP Service — the paired Cilium rule is in
+            # ../searxng/cilium-allowlist.yaml.
+            - name: SEARXNG_URL
+              value: http://searxng.searxng.svc.cluster.local:8080
+            # Browser CDP endpoint for Browserless. The value carries the TOKEN,
+            # so it comes from the Secret and never appears in a ConfigMap or in
+            # the pod spec's plain env. BROWSER_CDP_URL takes precedence over
+            # browser.cdp_url (tools/browser_tool_cdp._get_cdp_override_raw),
+            # and a full ws://…/devtools-style URL is passed through verbatim.
+            - name: BROWSER_CDP_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secret
+                  key: BROWSER_CDP_URL
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

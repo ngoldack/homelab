@@ -20,7 +20,7 @@ spec:
       # marker on the volume, so the annotation is what makes a ConfigMap edit
       # take effect. Same mechanism as ../hermes/statefulset.yaml.
       annotations:
-        hermes.ngoldack.de/config-rev: "3"
+        hermes.ngoldack.de/config-rev: "5"
       labels:
         app.kubernetes.io/name: hermes-agents
         app.kubernetes.io/instance: chad
@@ -390,6 +390,7 @@ spec:
                   printf 'HERMES_LANGFUSE_PUBLIC_KEY=%s\n' "$HERMES_LANGFUSE_PUBLIC_KEY"
                   printf 'HERMES_LANGFUSE_SECRET_KEY=%s\n' "$HERMES_LANGFUSE_SECRET_KEY"
                   printf 'HERMES_LANGFUSE_BASE_URL=http://langfuse-web.langfuse.svc.cluster.local:3000\n'
+                  printf 'SEARXNG_URL=http://searxng.searxng.svc.cluster.local:8080\n'
                   printf 'HERMES_LANGFUSE_CAPTURE=sanitized\n'
                   printf 'HERMES_LANGFUSE_MAX_CHARS=12000\n'
                   printf 'HINDSIGHT_MODE=local_external\n'

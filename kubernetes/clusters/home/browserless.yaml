@@ -1,0 +1,33 @@
+# browserless — self-hosted Browserless OSS Chromium serving CDP to the Hermes
+# gateway, one replica with CONCURRENT=3. Cluster-internal only: ClusterIP
+# Service, no HTTPRoute, no edge label (the debugger UI is token-gated at best
+# and must never be internet-facing).
+#
+# dependsOn network only: no CRDs, no certificate. Its own Kustomization so the
+# hermes Kustomization can wait on it and so its rollout cannot hold up the
+# catch-all infrastructure reconcile.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: browserless
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/browserless
+  prune: true
+  wait: true
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

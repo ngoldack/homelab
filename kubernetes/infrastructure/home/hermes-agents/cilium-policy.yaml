@@ -123,6 +123,21 @@ spec:
               protocol: TCP
             - port: "9443"
               protocol: TCP
+    # Web search — SearXNG (ns searxng), the `web.search_backend: searxng`
+    # provider every profile declares (see configmap.yaml). All five profiles
+    # carry the `web` bundle, so all five get this route: search is a read-only
+    # HTTP call to a metasearch service and does not widen what an agent can
+    # execute. It is deliberately NOT gated on hermes.ngoldack.de/sandbox, since
+    # Lindner keeps web_search (its `safe` bundle includes `web`) while still
+    # having no terminal, no sandbox and no browser. Both Cilium halves are
+    # required: the matching ingress rule is in ../../searxng/cilium-allowlist.yaml.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: searxng
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

@@ -1,0 +1,18 @@
+# searxng — ClusterIP only. No HTTPRoute and no edge Gateway attachment: this is
+# a private metasearch backend for the in-cluster Hermes gateway.
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  namespace: searxng
+  labels:
+    app.kubernetes.io/name: searxng
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: searxng
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

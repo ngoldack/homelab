@@ -70,6 +70,30 @@ RUN set -eu; \
     node --input-type=module -e 'const m = await import("@whiskeysockets/baileys"); if (!m.makeWASocket && !m.default) throw new Error("baileys has no makeWASocket/default export"); console.log("whatsapp bridge: baileys resolves offline")'; \
     node --input-type=module -e 'for (const d of ["express","qrcode-terminal","pino"]) await import(d); console.log("whatsapp bridge: express/qrcode-terminal/pino resolve offline")'
 
+# agent-browser CLI, baked in for the same reason as the WhatsApp bridge above:
+# Hermes' browser tools resolve it through tools/browser_tool_install.py, and
+# without a real install that helper falls back to `npx agent-browser@^0.26.0`,
+# which fetches from registry.npmjs.org — served by Cloudflare
+# (104.16.0.0/12), which this namespace's egress allowlist deliberately does NOT
+# carry. With a CDP endpoint configured the CLI is still required for every
+# browser command (it is the process that speaks CDP to Browserless), so the
+# fallback would fail on every call.
+#
+# Version, not range: the runtime fallback floats (^0.26.0), but a baked tree
+# must be reproducible to match this image's digest pin. 0.26.0 is the release
+# the base image's AGENT_BROWSER_NPX_SPEC range resolves to.
+#
+# Installed to the npm global prefix (/usr/local), which is already on PATH and
+# is where _find_agent_browser() looks first; the binary symlink points at the
+# prebuilt native CLI, so no postinstall download is needed. The build-time gate
+# below runs the helper Hermes itself uses, so a rename or a broken native
+# payload fails the build instead of silently disabling browser tools.
+RUN set -eu; \
+    npm install --global --no-audit --no-fund agent-browser@0.26.0; \
+    command -v agent-browser; \
+    agent-browser --version; \
+    /opt/hermes/.venv/bin/python3 -c 'import sys; sys.path.insert(0, "/opt/hermes"); from tools.browser_tool_install import _find_agent_browser; from hermes_constants import agent_browser_runnable; p = _find_agent_browser(); assert p and p != "npx agent-browser", "agent-browser resolved to the npx fallback: %r" % p; assert agent_browser_runnable(p), "agent-browser not runnable: %r" % p; print("agent-browser: %s (resolved by the gateway interpreter)" % p)'
+
 
 # Two CRITICALs are inherited from the upstream base image, and this image's own
 # trivy gate (--severity CRITICAL --exit-code 1, like every build job here)

@@ -1,0 +1,32 @@
+# searxng — self-hosted metasearch, the Hermes gateway's `web_search` backend.
+# Cluster-internal only: ClusterIP Service, no HTTPRoute, no edge label. Its own
+# Kustomization (not the catch-all `infrastructure` one) for the same grain as
+# paperless/hermes, and so the hermes Kustomization can wait on it.
+#
+# dependsOn network only: no CRDs to install, and no certificate is issued (the
+# Service is plain HTTP inside the cluster), so there is no cert-manager edge.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: searxng
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/infrastructure/home/searxng
+  prune: true
+  wait: true
+  timeout: 10m
+  retryInterval: 2m
+  dependsOn:
+    - name: network
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

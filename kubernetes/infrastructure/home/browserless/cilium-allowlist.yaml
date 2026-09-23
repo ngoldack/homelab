@@ -1,0 +1,69 @@
+# browserless allowlist — the only traffic that may cross the default-deny
+# baseline.
+#
+# Ingress (two rules, both on the container port):
+#   * fromEndpoints ns=hermes AND app.kubernetes.io/name=hermes — the gateway pod
+#     that holds the CDP connection. BOTH labels are required: every Hermes agent
+#     pod also lives in the `hermes` namespace (they carry
+#     app.kubernetes.io/name=hermes-agents), so a namespace-only rule would give
+#     Lindner — the read-only profile — a route to Chromium and quietly defeat
+#     the posture ../hermes-agents/cilium-policy.yaml documents. agent pods are
+#     expected to browse THROUGH the gateway, not to open CDP themselves.
+#   * fromEntities health — the kubelet's exec probes. Cilium polices probe
+#     traffic as the reserved `health` identity; without this rule the pod never
+#     becomes Ready and, with `wait: true` on the Flux Kustomization, the
+#     reconcile hangs NotReady.
+#
+# Egress: cluster DNS plus port-scoped `world` on 443 and 80 — Chromium must
+# reach arbitrary public sites. `toEntities: world` rather than toFQDNs is the
+# repo's established shape (../image-scan, ../paperless): FQDN rules are INERT on
+# this cluster because dnsproxy transparent mode is off.
+#
+# Deliberately ABSENT: the Kubernetes API server and any Talos/Proxmox/
+# management or RFC1918 range. Note the trade-off this encodes: Chromium will
+# also be unable to reach in-cluster HTTP services from the guest's perspective
+# beyond what this rule allows, which is intended — the browser is for the public
+# web, not for probing the cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: browserless-allowlist
+  namespace: browserless
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: browserless
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+            app.kubernetes.io/name: hermes
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP

@@ -1,6 +1,8 @@
 # hermes — the Hermes gateway. Applies only after the sandbox stack
-# (controller/router) and the warm pool namespace are healthy; the gateway
-# needs both to run its first command.
+# (controller/router) and the warm pool namespace are healthy (the gateway needs
+# both to run its first command), and after the gateway's two tool backends
+# (SearXNG for web_search, Browserless for browser/CDP) so it never comes up
+# pointing at a Service whose DNS does not resolve yet.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -17,6 +19,8 @@ spec:
     - name: hermes-sandbox
     - name: agent-sandbox
     - name: network
+    - name: searxng
+    - name: browserless
   sourceRef:
     kind: GitRepository
     name: flux-system

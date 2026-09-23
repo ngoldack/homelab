@@ -118,3 +118,10 @@ resources:
   # route on 2026-09-17 and was rolled back; see
   # infrastructure/home/security-baseline/kustomization.yaml for the evidence.
   - security-baseline.yaml
+  # SearXNG (Hermes web_search backend) and Browserless (Hermes browser/CDP
+  # backend): both cluster-internal, ClusterIP only, no HTTPRoute. Two
+  # Kustomizations for the same grain as hermes/paperless, and so the hermes
+  # Kustomization can express a dependsOn edge on each — the gateway must not
+  # come up pointing at a Service whose DNS does not resolve yet.
+  - searxng.yaml
+  - browserless.yaml

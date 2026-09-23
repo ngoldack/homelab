@@ -1,0 +1,83 @@
+# searxng allowlist — the only traffic that may cross the default-deny baseline.
+#
+# Ingress (three rules, all on the container port):
+#   * fromEndpoints ns=hermes AND app.kubernetes.io/name=hermes — the gateway pod,
+#     the primary caller.
+#   * fromEndpoints ns=hermes AND app.kubernetes.io/name=hermes-agents — the five
+#     agent profiles, which declare `web.search_backend: searxng` in their own
+#     configs and reach this Service directly (the orchestrator spawns workers
+#     inside the agent pods, so those turns do not pass through the gateway).
+#     Search is a read-only HTTP call, so every profile is admitted, including
+#     Lindner — its read-only posture is about code execution and browser
+#     automation, both of which stay cut off. Matching egress halves live in
+#     ../../hermes/cilium-policy.yaml and ../../hermes-agents/cilium-policy.yaml.
+#   * fromEntities health — kubelet readiness/liveness probes on /healthz. Cilium
+#     polices probe traffic as the reserved `health` identity; without this rule
+#     the pod never becomes Ready and, with `wait: true` on the Flux
+#     Kustomization, the reconcile hangs NotReady.
+#
+# Both Hermes selectors name the namespace AND the pod label: every gateway and
+# agent pod shares the `hermes` namespace, so a namespace-only rule would be
+# broader than the intent and would silently admit any future pod landing there.
+#
+# Egress: cluster DNS plus port-scoped `world` on 443 AND 80. SearXNG's upstream
+# engines are arbitrary public hosts and some still answer on plaintext 80, so a
+# 443-only rule would silently drop those engines. `toEntities: world` rather
+# than toFQDNs is the repo's established shape (see ../image-scan, ../paperless):
+# an empirical test on 2026-09-17 showed FQDN rules are INERT on this cluster
+# because dnsproxy transparent mode is off.
+#
+# Deliberately ABSENT, which is what satisfies the brief's deny half: the
+# Kubernetes API server, and any Talos/Proxmox/management or RFC1918 range. This
+# pod talks to DNS and the public internet and to nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: searxng-allowlist
+  namespace: searxng
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: searxng
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+            app.kubernetes.io/name: hermes
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: hermes
+            app.kubernetes.io/name: hermes-agents
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEntities:
+        - health
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP

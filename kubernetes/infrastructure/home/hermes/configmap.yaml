@@ -19,7 +19,7 @@ data:
   # onto the data PVC only when this value differs from the revision recorded
   # at /opt/data/.config-rev; bump it together with the pod-template
   # annotation hermes.ngoldack.de/config-rev to roll the pod.
-  config-rev: "8"
+  config-rev: "9"
   config.yaml: |
     # LLM via the agentgateway (agentgateway.dev data plane, ns agentgateway):
     # custom OpenAI-compatible provider, base_url at the in-cluster Service.
@@ -146,3 +146,45 @@ data:
       cwd: /workspace
       timeout: 300
       persistent_shell: false
+    # Web search: SearXNG, a keyless self-hosted provider bundled in the base
+    # image (plugins/web/searxng, KEY_ENV=SEARXNG_URL). Bundled web providers
+    # register through the plugin registry and need NO plugins.enabled entry —
+    # measured 2026-09-23 in this pod: _disabled_web_plugin_for("searxng",
+    # "search") is None and _resolve("searxng", capability="search") returns the
+    # provider. Declared explicitly because autodetection runs only for a
+    # never-configured install, and that ladder walks keyless/paid vendors (exa,
+    # parallel, firecrawl) this namespace's egress allowlist does not carry. The
+    # instance address arrives as the SEARXNG_URL env var (StatefulSet), so no
+    # endpoint is hardcoded here.
+    #
+    # web_extract is deliberately left unwired, and the MEASURED consequence is
+    # recorded rather than assumed: with search_backend set and extract_backend
+    # unset, _get_extract_backend() resolves to firecrawl (2026-09-23, in-pod,
+    # against a config carrying exactly this key) — because setting a
+    # per-capability key makes selection_exists("web") true, which ends the
+    # autodetect ladder AT firecrawl instead of walking it. SearXNG is
+    # search-only (supports_extract() is False) and no self-hosted extract
+    # provider exists in this image, so there is no local target for that key;
+    # web_extract therefore stays unusable here, which is what the brief's "do
+    # not set a Firecrawl extract backend" requires. Making extraction work
+    # needs a real in-cluster backend, not a config key.
+    web:
+      search_backend: searxng
+    # Browser tools: built-in browser_* driven over CDP by Browserless.
+    #   backend "off"      — force the built-in tools rather than the
+    #                        browser-use CLI (which is not installed here and
+    #                        would need npm egress this namespace lacks).
+    #   inactivity_timeout — 120 s, matching Browserless' TIMEOUT=120000 ms so a
+    #                        session is not reaped on one side while the other
+    #                        still holds it.
+    # The CDP endpoint itself is NOT written here: it carries the token, so it
+    # arrives as the BROWSER_CDP_URL env var from hermes-secret. Note that
+    # BROWSER_CDP_URL takes precedence over any browser.cdp_url set here, which
+    # is why only the timeout is declared.
+    #
+    # One long-lived CDP URL means ONE Chromium for the whole gateway process,
+    # even though Browserless runs CONCURRENT=3 — see
+    # ../browserless/deployment.yaml for the full session semantics.
+    browser:
+      backend: "off"
+      inactivity_timeout: 120

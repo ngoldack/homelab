@@ -1,0 +1,164 @@
+# browserless — one replica of Browserless OSS Chromium, serving CDP to the
+# Hermes gateway.
+#
+# SESSION SEMANTICS (the part that is easy to get wrong):
+#   * A new Chrome per WebSocket/CDP connect: Browserless launches a NEW Chromium
+#     process for each new connect, up to CONCURRENT=3 of them at once. Further
+#     connects WAIT in a queue of QUEUED=6 rather than sharing a running browser.
+#   * Hermes is configured with a single, long-lived `browser.cdp_url`
+#     (BROWSER_CDP_URL on the gateway pod, from hermes-secret). Because
+#     tools/browser_tool_cdp.py treats that override as authoritative, every
+#     browser command from the gateway process drives ONE Chromium for the whole
+#     process — so in practice the gateway uses 1 of the 3 slots, and CONCURRENT=3
+#     is pool capacity for reconnects, a future per-task browser provider, and
+#     any REST caller, NOT three isolated Chromes per agent turn.
+#   * Do not "fix" that by raising replicas: replicas scale slots linearly
+#     (2 replicas = 6 Chromes) and the CDP URL only ever reaches one of them.
+#     Per-task isolation would need a custom browser provider, which this change
+#     deliberately does not build.
+#
+# HARDENING — every one of these was measured live 2026-09-23 against this exact
+# digest, in a native container with --read-only, --tmpfs /tmp, --shm-size=3g,
+# --cap-drop ALL and --security-opt no-new-privileges:
+#   * the image's documented run needs NO --privileged, NO --cap-add SYS_ADMIN
+#     and NO seccomp=unconfined. Chromium launches and answers CDP
+#     (Browser.getVersion -> Chrome/153.0.8010.12) with every capability dropped.
+#   * the container's own start.sh runs `Xvfb :99 … -nolisten unix` and Chrome
+#     uses `--user-data-dir=/tmp/browserless-data-dirs/…`, so /tmp must be
+#     writable; a read-only rootfs is fine once it is an emptyDir.
+#   * Chromium shm: without a real /dev/shm it degrades at Docker's 64Mi default.
+#     3Gi is an explicit memory-backed emptyDir below.
+#   * RuntimeClass is deliberately absent: this runs on the default runc handler.
+#     It must never be scheduled onto the Kata runtime — Chromium is not a
+#     microVM workload, the sandbox runtime is reserved for shell/code execution,
+#     and the Hermes Agent Sandbox stays exactly that.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browserless
+  namespace: browserless
+  labels:
+    app.kubernetes.io/name: browserless
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge 0 (repo convention: no surge slot on the mixed worker) forces
+      # maxUnavailable >= 1 — k8s rejects maxUnavailable 0 with maxSurge 0.
+      # Same pair as hermes-egress/envoy.yaml.
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: browserless
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: browserless
+    spec:
+      serviceAccountName: browserless
+      automountServiceAccountToken: false
+      # Chrome sessions are long-lived; give the queue time to drain on a
+      # rollout instead of SIGKILLing an in-flight CDP connection.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # The image's own unprivileged user (getent passwd blessuser -> uid 999).
+        runAsUser: 999
+        runAsGroup: 999
+        # Owns the two memory/emptyDir volumes so the non-root user can write.
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: browserless
+          # Pinned: ghcr.io/browserless/chromium:v2.56.7
+          image: ghcr.io/browserless/chromium@sha256:b1ba7b054af2891a8199f884d4bd249cf8c3bd2fa8a97b339077e40f92803ba8
+          env:
+            # Required: no tokenless listen. Also gates every management route
+            # (/pressure, /config, /json/version) — see the probe below.
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: browserless-secret
+                  key: TOKEN
+            # Exactly three concurrent Chrome processes; extra connects queue.
+            - name: CONCURRENT
+              value: "3"
+            - name: QUEUED
+              value: "6"
+            # Milliseconds. 120000 = the gateway's browser.inactivity_timeout
+            # (120 seconds) in the hermes ConfigMap; keep the two in step so a
+            # session is not reaped on one side while the other still holds it.
+            - name: TIMEOUT
+              value: "120000"
+            - name: PORT
+              value: "3000"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            # No additions: the documented run needs none (see the header).
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          resources:
+            # requests fit the performance worker; limits bound three Chromes.
+            requests:
+              cpu: "2"
+              memory: 6Gi
+            limits:
+              cpu: "4"
+              memory: 9Gi
+          # /pressure is the image's health endpoint, but it is AUTHENTICATED:
+          # a bare httpGet returns 401 (measured), so the kubelet can never turn
+          # the pod Ready with an httpGet probe. The token must ride the request,
+          # and a probe cannot reference a Secret — so it reads TOKEN from the
+          # container's own environment. curl ships in this image (/usr/bin/curl),
+          # verified. `-f` makes a non-2xx a probe failure.
+          #
+          # $${TOKEN} is escaped because this Kustomization runs
+          # postBuild.substituteFrom cluster-vars in Flux's default STRICT mode
+          # and TOKEN is not a cluster-var: a bare ${TOKEN} aborts the whole
+          # Kustomization ("variable not set"). The $$ form reaches the container
+          # as a literal ${TOKEN} for the probe's shell to expand. Same escape as
+          # agentgateway/otel-collector.yaml and langfuse/clickhouse-backup.yaml.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  curl -sf --max-time 5
+                  "http://127.0.0.1:3000/pressure?token=$${TOKEN}" -o /dev/null
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  curl -sf --max-time 5
+                  "http://127.0.0.1:3000/pressure?token=$${TOKEN}" -o /dev/null
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            # Chrome's scratch: start.sh writes /tmp/.X99-lock and Chrome its
+            # user-data-dir under /tmp. Required for the read-only rootfs.
+            - name: tmp
+              mountPath: /tmp
+            # Chromium's shared-memory arena. Docker's 64Mi default breaks
+            # Chrome; 3Gi is memory-backed and lazily allocated.
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 3Gi

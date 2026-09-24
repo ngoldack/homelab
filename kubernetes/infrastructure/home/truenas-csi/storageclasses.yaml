@@ -703,3 +703,28 @@ parameters:
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 volumeBindingMode: Immediate
+---
+# Media stack (../media/postgres.yaml): the media-database CNPG cluster's
+# data directory. Block storage for the same reason as the other databases —
+# Postgres wants block semantics (fsync latency, no NFS attribute cache or
+# locking layer) — and the zvol's parent dataset carries the 6h/14d snapshots.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-fast-nvmeof-media-database
+provisioner: csi.truenas.io
+parameters:
+  protocol: "nvmeof"
+  pool: "fast"
+  datasetPath: "k8s/nvmeof/media/database"
+  compression: "LZ4"
+  volblocksize: "16K"
+  snapshot.schedule: "0 */6 * * *"
+  snapshot.naming: "auto-%Y-%m-%d_%H-%M"
+  snapshot.retention: "14"
+  snapshot.retentionUnit: "DAY"
+  snapshot.recursive: "false"
+  forceDelete: "false"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer

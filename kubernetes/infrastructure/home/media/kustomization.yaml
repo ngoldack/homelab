@@ -4,6 +4,7 @@ resources:
   - cilium-default-deny.yaml
   - cilium-allowlist.yaml
   - namespace.yaml
+  - cilium-database-allowlist.yaml
   - nad-vlan-2080.yaml
   - vpn-routes-configmap.yaml
   - vpn-gateway-configmap.yaml
@@ -14,5 +15,11 @@ resources:
   - helmrelease.yaml
   - books.yaml
   - mariadb.yaml
+  - postgres-credentials.sops.yaml
+  - media-backup-s3-credentials.sops.yaml
+  - postgres.yaml
+  - database.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
   - books-secrets.sops.yaml
   - httproutes.yaml

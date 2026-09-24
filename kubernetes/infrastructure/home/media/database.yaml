@@ -1,0 +1,64 @@
+# The five databases initdb does NOT create. CNPG's bootstrap can only make
+# one (radarr-main, the owner's initial database), so each app's log database
+# and the other apps' pairs are declared here. Same pattern as
+# hindsight/database.yaml: the operator applies these as the postgres
+# superuser into the owning cluster.
+#
+# Database CRs are the reason `wait: true` on the Cluster's initdb matters:
+# until the cluster is Ready there is no database to create, and the operator
+# retries until there is.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: media-radarr-log
+  namespace: media
+spec:
+  name: radarr-log
+  owner: media
+  cluster:
+    name: media-database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: media-sonarr-main
+  namespace: media
+spec:
+  name: sonarr-main
+  owner: media
+  cluster:
+    name: media-database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: media-sonarr-log
+  namespace: media
+spec:
+  name: sonarr-log
+  owner: media
+  cluster:
+    name: media-database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: media-prowlarr-main
+  namespace: media
+spec:
+  name: prowlarr-main
+  owner: media
+  cluster:
+    name: media-database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: media-prowlarr-log
+  namespace: media
+spec:
+  name: prowlarr-log
+  owner: media
+  cluster:
+    name: media-database

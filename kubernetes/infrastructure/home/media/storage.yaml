@@ -87,18 +87,6 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: bazarr-config
-  namespace: media
-spec:
-  accessModes: [ReadWriteMany]
-  storageClassName: truenas-fast-nfs-media-config
-  resources:
-    requests:
-      storage: 5Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
   name: sabnzbd-config
   namespace: media
 spec:

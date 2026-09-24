@@ -9,8 +9,8 @@
 # policy on this network is the tunnel's outer UDP to the peer endpoint.
 # See vpn-routes-configmap.yaml and vpn-gateway-configmap.yaml.
 #
-# SABnzbd/Prowlarr/Sonarr/Radarr/Bazarr and the gateway pod are attached;
-# Jellyfin is not.
+# SABnzbd/Prowlarr/Sonarr/Radarr and the gateway pod are attached; Jellyfin is
+# not.
 #
 # Per-pod addressing comes from the pod annotation, not from this spec:
 #   k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.201/24"]}]'

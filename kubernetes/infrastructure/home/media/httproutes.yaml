@@ -132,26 +132,6 @@ spec:
           namespace: authentik
           port: 9000
 ---
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: bazarr
-  namespace: media
-  labels:
-    dns.ngoldack.de/publish: lan
-spec:
-  parentRefs:
-    - name: public
-      namespace: network
-      sectionName: https-media-svc
-  hostnames:
-    - bazarr.media.svc.${CLUSTER_DOMAIN}
-  rules:
-    - backendRefs:
-        - name: authentik-proxy
-          namespace: authentik
-          port: 9000
----
 # Books stack (books.yaml): the three UIs behind the same authentik proxy
 # outpost as the *arr chain. Bindery runs in proxy auth mode, so its outpost
 # session IS its login; Grimmory and pyLoad keep their own login behind the

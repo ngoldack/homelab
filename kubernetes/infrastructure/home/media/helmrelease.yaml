@@ -11,7 +11,7 @@
 #   gateway    vpn-gateway — the stack's single WireGuard tunnel, on VLAN 2080.
 #              It is what makes the download chain's egress obfuscated: see the
 #              controller below and vpn-gateway-configmap.yaml.
-#   automation sabnzbd, prowlarr, sonarr, radarr, bazarr — the download chain.
+#   automation sabnzbd, prowlarr, sonarr, radarr — the download chain.
 #              Every one of these carries a macvlan interface on VLAN 2080
 #              (UniFi "Obfuscated") and a vpn-routes init container that moves
 #              the pod's default route onto it, pointing at the vpn-gateway
@@ -237,7 +237,7 @@ spec:
             image:
               repository: docker.io/library/busybox
               tag: "1.36"
-            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
             # file is missing (very first boot) the app creates it with its
@@ -273,6 +273,22 @@ spec:
               PGID: "1000"
               UMASK: "002"
               TZ: Europe/Berlin
+              # PostgreSQL (media-database, see postgres.yaml). By default the
+              # *arr apps keep everything in SQLite on the config PVC; these
+              # vars switch them to the shared cluster, where the state is
+              # snapshotted and backed up with the rest of the platform. The
+              # password comes from the SOPS secret, never a literal here.
+              # `-rw` is CNPG's primary Service (the cluster is single-instance).
+              SONARR__POSTGRES__HOST: media-database-rw.media.svc.cluster.local
+              SONARR__POSTGRES__PORT: "5432"
+              SONARR__POSTGRES__USER: media
+              SONARR__POSTGRES__PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: media-database-credentials
+                    key: password
+              SONARR__POSTGRES__MAINDB: sonarr-main
+              SONARR__POSTGRES__LOGDB: sonarr-log
             ports:
               - name: http
                 containerPort: 8989
@@ -331,7 +347,7 @@ spec:
             image:
               repository: docker.io/library/busybox
               tag: "1.36"
-            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
             # file is missing (very first boot) the app creates it with its
@@ -367,6 +383,18 @@ spec:
               PGID: "1000"
               UMASK: "002"
               TZ: Europe/Berlin
+              # PostgreSQL (media-database) — see the sonarr block above for
+              # why, and postgres.yaml/database.yaml for the databases.
+              RADARR__POSTGRES__HOST: media-database-rw.media.svc.cluster.local
+              RADARR__POSTGRES__PORT: "5432"
+              RADARR__POSTGRES__USER: media
+              RADARR__POSTGRES__PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: media-database-credentials
+                    key: password
+              RADARR__POSTGRES__MAINDB: radarr-main
+              RADARR__POSTGRES__LOGDB: radarr-log
             ports:
               - name: http
                 containerPort: 7878
@@ -425,7 +453,7 @@ spec:
             image:
               repository: docker.io/library/busybox
               tag: "1.36"
-            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
+            # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
             # file is missing (very first boot) the app creates it with its
@@ -461,103 +489,21 @@ spec:
               PGID: "1000"
               UMASK: "002"
               TZ: Europe/Berlin
+              # PostgreSQL (media-database) — see the sonarr block above for
+              # why, and postgres.yaml/database.yaml for the databases.
+              PROWLARR__POSTGRES__HOST: media-database-rw.media.svc.cluster.local
+              PROWLARR__POSTGRES__PORT: "5432"
+              PROWLARR__POSTGRES__USER: media
+              PROWLARR__POSTGRES__PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: media-database-credentials
+                    key: password
+              PROWLARR__POSTGRES__MAINDB: prowlarr-main
+              PROWLARR__POSTGRES__LOGDB: prowlarr-log
             ports:
               - name: http
                 containerPort: 9696
-            resources:
-              requests:
-                cpu: 100m
-                memory: 256Mi
-              limits:
-                memory: 1Gi
-            probes:
-              liveness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /
-                    port: http
-                  periodSeconds: 15
-                  timeoutSeconds: 10
-                  failureThreshold: 6
-              readiness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /
-                    port: http
-                  periodSeconds: 15
-                  timeoutSeconds: 10
-                  failureThreshold: 6
-              startup:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /
-                    port: http
-                  periodSeconds: 10
-                  timeoutSeconds: 10
-                  failureThreshold: 30
-      bazarr:
-        type: deployment
-        pod:
-          annotations:
-            k8s.v1.cni.cncf.io/networks: '[{"name":"vlan-2080","ips":["10.20.80.204/24"]}]'
-        initContainers:
-          vpn-routes:
-            image:
-              repository: ghcr.io/nicolaka/netshoot
-              tag: v0.16
-            command: ["sh", "/scripts/attach.sh"]
-            securityContext:
-              capabilities:
-                add: ["NET_ADMIN"]
-          external-auth:
-            image:
-              repository: docker.io/library/busybox
-              tag: "1.36"
-            # Sonarr/Radarr/Prowlarr/Bazarr "trust the external authentication
-            # layer" (goauthentik sonarr integration): set
-            # AuthenticationMethod=External in config.xml. Idempotent; if the
-            # file is missing (very first boot) the app creates it with its
-            # default and the next restart external-izes it.
-            command:
-              - sh
-              - -c
-              - |
-                echo "external-auth init"
-                # strip trailing whitespace from the image lines
-                sed -i 's#<AuthenticationMethod>[^<]*#<AuthenticationMethod>External#' /config/config.xml
-                if [ ! -f /config/config.xml ] || ! grep -q '<AuthenticationMethod>' /config/config.xml; then
-                  echo "config.xml not yet seeded; will external-ize on next start"
-                else
-                  grep -o '<AuthenticationMethod>[^<]*' /config/config.xml || true
-                fi
-            securityContext:
-              runAsUser: 1000
-              runAsGroup: 1000
-            resources:
-              requests:
-                cpu: 10m
-                memory: 20Mi
-              limits:
-                memory: 50Mi
-        containers:
-          main:
-            image:
-              repository: linuxserver/bazarr
-              tag: "1.6.1"
-            env:
-              PUID: "1000"
-              PGID: "1000"
-              UMASK: "002"
-              TZ: Europe/Berlin
-            ports:
-              - name: http
-                containerPort: 6767
             resources:
               requests:
                 cpu: 100m
@@ -676,11 +622,6 @@ spec:
         ports:
           http:
             port: 9696
-      bazarr:
-        controller: bazarr
-        ports:
-          http:
-            port: 6767
     persistence:
       # The route script, mounted into the download pods' init container (not
       # the app container — nothing else needs it).
@@ -698,9 +639,6 @@ spec:
             vpn-routes:
               - path: /scripts
           prowlarr:
-            vpn-routes:
-              - path: /scripts
-          bazarr:
             vpn-routes:
               - path: /scripts
       # The WireGuard config (SOPS-encrypted Secret) and the gateway's own
@@ -732,9 +670,6 @@ spec:
             main:
               - path: /data
           radarr:
-            main:
-              - path: /data
-          bazarr:
             main:
               - path: /data
           jellyfin:
@@ -801,15 +736,6 @@ spec:
         existingClaim: prowlarr-config
         advancedMounts:
           prowlarr:
-            main:
-              - path: /config
-            external-auth:
-              - path: /config
-      bazarr-config:
-        type: persistentVolumeClaim
-        existingClaim: bazarr-config
-        advancedMounts:
-          bazarr:
             main:
               - path: /config
             external-auth:

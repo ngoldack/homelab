@@ -1,0 +1,20 @@
+# Daily base backup via the Barman Cloud plugin. WAL archiving is already
+# continuous (the Cluster's plugins[] isWALArchiver), so this only snapshots
+# the data directory - PITR covers everything in between.
+#
+# CNPG's cron format has SIX fields (sec min hour dom mon dow). No timeZone
+# field: the schedule runs on the operator pod's clock (UTC), so this is
+# 02:15 UTC - offset from immich (02:05) and hindsight (02:07) so the three
+# backups do not compete for the same upload window.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: media-daily-backup
+  namespace: media
+spec:
+  cluster:
+    name: media-database
+  schedule: "0 15 2 * * *"
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

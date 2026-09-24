@@ -314,9 +314,9 @@ data:
       # Same two-way wiring as hindsight-ui/grafana: LAN route -> outpost -> app
       # UI. The provider MUST precede the app !Finding it. external_host is the
       # {app}.{namespace}.svc URL the media HTTPRoutes serve; the outpost proxies
-      # to the app's cluster service. Prowlarr/Seerr/Bazarr's in-app API
-      # connections keep using cluster-internal URLs and never cross authentik.
-      # Sonarr/Radarr/Prowlarr/Bazarr run AuthenticationMethod=External (media
+      # to the app's cluster service. Prowlarr/Seerr's in-app API connections
+      # keep using cluster-internal URLs and never cross authentik.
+      # Sonarr/Radarr/Prowlarr run AuthenticationMethod=External (media
       # helmrelease initContainers); Seerr/SABnzbd keep their own login on
       # top of SSO.
       - model: authentik_providers_proxy.proxyprovider
@@ -397,32 +397,6 @@ data:
           meta_name: Prowlarr
           meta_launch_url: https://prowlarr.media.svc.ngoldack.de/
           provider: !Find [authentik_providers_proxy.proxyprovider, [name, prowlarr-proxy]]
-      - model: authentik_providers_proxy.proxyprovider
-        state: present
-        identifiers:
-          name: bazarr-proxy
-        attrs:
-          mode: proxy
-          # API-key consumers (external tools, scripts) hit /api without a
-          # browser session; skip auth for those paths so key-based API calls
-          # keep working while everything else stays SSO-gated.
-          skip_path_regex: ^/api
-          internal_host: http://media-bazarr.media.svc.cluster.local:6767/
-          external_host: https://bazarr.media.svc.ngoldack.de/
-          cookie_domain: ngoldack.de
-          access_token_validity: "hours=168"
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      - model: authentik_core.application
-        state: present
-        identifiers:
-          slug: bazarr
-        attrs:
-          name: bazarr
-          meta_name: Bazarr (subtitles)
-          meta_launch_url: https://bazarr.media.svc.ngoldack.de/
-          provider: !Find [authentik_providers_proxy.proxyprovider, [name, bazarr-proxy]]
       - model: authentik_providers_proxy.proxyprovider
         state: present
         identifiers:
@@ -572,7 +546,6 @@ data:
             - !Find [authentik_providers_proxy.proxyprovider, [name, sonarr-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, radarr-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, prowlarr-proxy]]
-            - !Find [authentik_providers_proxy.proxyprovider, [name, bazarr-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, sabnzbd-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, seerr-proxy]]
             - !Find [authentik_providers_proxy.proxyprovider, [name, bindery-proxy]]
@@ -1353,14 +1326,6 @@ data:
         state: present
         identifiers:
           target: !Find [authentik_core.application, [slug, prowlarr]]
-          order: 0
-        attrs:
-          group: !Find [authentik_core.group, [name, akadmin]]
-          negate: false
-      - model: authentik_policies.policybinding
-        state: present
-        identifiers:
-          target: !Find [authentik_core.application, [slug, bazarr]]
           order: 0
         attrs:
           group: !Find [authentik_core.group, [name, akadmin]]

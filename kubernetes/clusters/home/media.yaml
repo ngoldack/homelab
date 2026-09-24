@@ -1,10 +1,12 @@
 # The media stack (Jellyfin + Seerr + the *arr download chain).
 #
-# dependsOn network for the Gateway its HTTPRoutes attach to and multus for
-# the NetworkAttachmentDefinition CRD + DaemonSet every VLAN-attached pod
-# needs. The StorageClasses its PVCs reference are applied by
-# infra-controllers — exactly as paperless does, a missing SC only parks the
-# PVC in Pending, so no dependency edge is needed for it.
+# dependsOn network for the Gateway its HTTPRoutes attach to, multus for the
+# NetworkAttachmentDefinition CRD + DaemonSet every VLAN-attached pod needs,
+# and cnpg-operator for the postgresql.cnpg.io / barmancloud.cnpg.io CRDs the
+# media-database cluster, databases, ObjectStore and ScheduledBackup use. The
+# StorageClasses its PVCs reference are applied by infra-controllers — exactly
+# as paperless does, a missing SC only parks the PVC in Pending, so no
+# dependency edge is needed for it.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -20,6 +22,7 @@ spec:
   dependsOn:
     - name: network
     - name: multus
+    - name: cnpg-operator
   sourceRef:
     kind: GitRepository
     name: flux-system

@@ -1,0 +1,69 @@
+# PostgreSQL for the *arr stack: radarr, sonarr and prowlarr keep all of their
+# application state in SQLite on the `*-config` PVCs by default. That is the
+# same failure mode the books stack (grimmory-db) and hindsight already moved
+# off: a single NFS file that cannot be snapshotted consistently, cannot be
+# restored point-in-time, and tempts everyone into hand-editing tables.
+#
+# One cluster, six databases, one role (`media`, owner of all six) - the
+# smallest thing that removes the SQLite files. Each app uses TWO databases
+# (main + log), which is what the *arr PostgreSQL support expects:
+#   radarr-main / radarr-log, sonarr-main / sonarr-log, prowlarr-main /
+#   prowlarr-log. Only `radarr-main` is created by initdb (CNPG needs a
+#   bootstrap database); the other five come from database.yaml.
+#
+# Storage is NVMe-oF (block) rather than NFS: this is a live database, and the
+# NFS path is exactly what the PVC I/O benchmark flagged as unfit for
+# fsync-heavy workloads. Same reasoning as grimmory-db in storage.yaml.
+#
+# Single instance, deliberately. The stack it serves is one-owner home media
+# automation: a second instance buys streaming replication between two nodes
+# of the same box at the cost of a permanently hot replica. Backups
+# (ScheduledBackup + continuous WAL archiving to the same Hetzner bucket as
+# immich/hindsight) cover the actual risk.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: media-database
+  namespace: media
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-standard-trixie
+  # Pinned to the home site: the NVMe-oF StorageClass reaches the NAS at
+  # 10.20.10.10, which is not routable from the Hetzner ingress node.
+  affinity:
+    nodeSelector:
+      topology.homelab/site: home
+  # `media` owns every database in this cluster (see the header). The secret
+  # carries username/password/database; initdb creates `radarr-main`.
+  bootstrap:
+    initdb:
+      database: radarr-main
+      owner: media
+      secret:
+        name: media-database-credentials
+  storage:
+    size: 10Gi
+    storageClass: truenas-fast-nvmeof-media-database
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  postgresql:
+    parameters:
+      # Force a WAL segment switch every 60s so archived WAL trails the
+      # primary by at most ~1 minute regardless of write volume — without it a
+      # quiet database leaves its newest WAL unarchived until the 16 MiB
+      # segment fills (the first restore drill died exactly on this: "recovery
+      # ended before configured recovery target was reached").
+      archive_timeout: "60"
+  # Backups + WAL archiving via the Barman Cloud plugin: the ObjectStore CR
+  # (objectstore.yaml) owns destination/retention; this reference enables
+  # archiving. spec.backup.retentionPolicy is NOT set here — in-tree-Barman-
+  # only, ignored when a plugin owns backups.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: media-backup

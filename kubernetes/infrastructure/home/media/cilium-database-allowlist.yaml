@@ -1,0 +1,57 @@
+# The media-database CNPG cluster's incremental policy. The namespace-wide
+# media-allowlist (endpointSelector: {}) already covers in-namespace traffic,
+# DNS and internet egress for every pod here — including this cluster — so this
+# policy adds only what is specific to a CNPG member and would otherwise be
+# denied:
+#
+#   Ingress  the operator + barman plugin from cnpg-system (the instance
+#            manager listens on 8000; the operator also dials 5432), and a peer
+#            instance's replication (5432; documents the intended topology even
+#            while the cluster is single-instance).
+#   Egress   the Kubernetes API. The instance manager reports Cluster status
+#            and must not be blocked. The control-plane VIP is a second rule on
+#            purpose: k8sServiceHost=127.0.0.1 means the configured API
+#            endpoint does not resolve to the kube-apiserver identity, so a
+#            toEntities: kube-apiserver rule alone is not enough — the exact
+#            gap proven in the paperless pilot with the drop monitor.
+#
+# The Barman sidecar's S3 traffic (443) rides the namespace-wide world rule.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: media-database-allowlist
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: media-database
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: media-database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 10.30.0.10/32
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP

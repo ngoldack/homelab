@@ -38,6 +38,16 @@
 # ingress-probe): PublicIngressProbeFailing on probe_success == 0 and
 # PublicIngressProbeMetricsAbsent on absent(probe_success).
 #
+# KNOWN BLIND SPOT (proven 2026-09-25): this probe cannot detect a KubeSpan
+# mesh partition. Its vantage — the blackbox-exporter pod on a home node — is
+# short-circuited at the edge: during the 02:42Z edge KubeSpan collapse the
+# same URL returned 503 to a LAN client and 403 "Access denied" (envoy, 15
+# bytes) to this probe pod at the same moment, and http_edge accepts 403, so
+# probe_success stayed 1 for the whole 6h45m outage. The probe is still the
+# right instrument for DNS/TLS/Gateway/app failures; mesh health is covered
+# separately by the kubespan-mesh VMRule group (rules-platform.yaml) on
+# cilium_node_health_connectivity_status, which did detect that outage.
+#
 # Post-deploy confirmation (orchestrator):
 #   curl -s 'http://<victoria-metrics>/api/v1/query?query=probe_success'
 #   → expect one series per target with value 1

@@ -1,7 +1,29 @@
 # Platform alert pack for the home cluster: certificate lifecycle, Flux
-# reconciliation health, backup-job staleness, node readiness, the
-# internet-facing ingress node's workload allowlist, and the public-ingress
-# probe declared in probe.yaml.
+# reconciliation health, backup-job staleness, node readiness, mesh
+# partition, the internet-facing ingress node's workload allowlist, and the
+# public-ingress probe declared in probe.yaml.
+#
+# Mesh partition (kubespan-mesh group, added 2026-09-25): the 02:42Z edge
+#   KubeSpan collapse showed that node health and mesh health are separate
+#   signals — kubelet kept reporting Ready on every node while the mesh was
+#   broken for 6h45m. These alerts were verified against the recorded outage
+#   window before shipping.
+#
+# House rules (same pattern as rules.yaml):
+#   - every metric/label below was read off the LIVE series via the
+#     VictoriaMetrics query API at implementation time; each rule quotes the
+#     query it rests on and the observed values;
+#   - candidates that could not be verified live are NOT shipped as guessed
+#     rules — they are documented in the "deliberately absent" note below;
+#   - nothing here duplicates the existing groups in rules.yaml
+#     (data-protection, kyverno, tetragon, crowdsec) or the delivery/
+#     Watchdog rules owned by rules-alerting.yaml.
+#
+#   Mesh partition (kubespan-mesh group, added 2026-09-25): the 02:42Z edge
+#     KubeSpan collapse showed that node health and mesh health are separate
+#     signals — kubelet kept reporting Ready on every node while the mesh was
+#     broken for 6h45m. These alerts were verified on the recorded outage
+#     window before shipping.
 #
 # House rules (same pattern as rules.yaml):
 #   - every metric/label below was read off the LIVE series via the
@@ -398,6 +420,15 @@ spec:
           # targets: https://grafana.ngoldack.de/ (edge-verified live: 302
           # to authentik login = reachable) and https://authentik.ngoldack.de/.
           expr: probe_success == 0
+          # BLIND SPOT, proven 2026-09-25: this rule CANNOT detect a KubeSpan
+          # mesh partition. The probe's vantage (the blackbox-exporter pod on
+          # a home node) is short-circuited at the edge — the same URL
+          # returned 503 to a LAN client and 403 "Access denied" (envoy,
+          # 15 bytes) to the probe pod at the same moment, and http_edge
+          # deliberately accepts 403 as healthy. During that 6h45m outage
+          # this rule stayed green throughout. Mesh health is covered by the
+          # kubespan-mesh group below instead; do not read a green
+          # PublicIngressProbeFailing as "the edge is healthy".
           for: 5m
           labels:
             severity: critical
@@ -545,3 +576,84 @@ spec:
               termination reason before raising any limit: OOMKilled,
               liveness-probe failure and a genuine crash each need a
               different fix.
+---
+# KubeSpan mesh partition. Added after the 2026-09-25 02:42Z edge collapse:
+# the Hetzner worker lost its two home KubeSpan peers and never regained
+# them, and because KubeSpan runs with forceRouting=true it fails CLOSED —
+# the edge node blackholed 172.20.0.0/16, the authentik edge outpost could
+# not reach its backend, and every SSO'd edge host served 503 for 6h45m.
+# Nothing alerted: NodeNotReady stayed silent (kubelet kept reporting
+# Ready), and PublicIngressProbeFailing stayed silent because the probe's
+# own vantage is short-circuited — see the probe.yaml note.
+#
+# Rests on: cilium_node_health_connectivity_status, Cilium's own cross-node
+# health check, already scraped from every cilium-agent (:9962, VMPodScrape
+# kube-system/cilium-agent, four instances — the edge agent included, via
+# its public IP). Verified live on the recorded outage window (09-25,
+# 5m resolution, VictoriaMetrics query API):
+#   quiet baseline (09-24 00:00-12:00): 5-6 isolated single-sample blips of
+#     1 per instance; sum momentarily 3 at 02:35 but never for two
+#     consecutive samples;
+#   outage: sum(...{status="unreachable",type="node"}) = 2-3 continuously
+#     from 02:50Z to 09:35Z — i.e. it went red ~8 min after the 02:42:45Z
+#     collapse and stayed red for the whole outage.
+# >= 2 for 15m (three consecutive 5m samples) separates the two regimes:
+#   baseline noise peaks at a single sample, and a genuinely lost node is
+#   reported by at least two of the remaining agents.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: kubespan-mesh
+  namespace: monitoring
+spec:
+  groups:
+    - name: kubespan-mesh
+      rules:
+        - alert: KubeSpanMeshPartitioned
+          # Rests on: sum(cilium_node_health_connectivity_status
+          # {status="unreachable",type="node"}) >= 2 — the summed view across
+          # all four cilium agents, so a single flapping probe (baseline
+          # noise) cannot reach it but a real partition does, from at least
+          # two vantage points.
+          expr: >-
+            sum(cilium_node_health_connectivity_status{status="unreachable",type="node"})
+            >= 2
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "KubeSpan mesh is partitioned — {{ $value }} unreachable node link(s)"
+            description: >-
+              Two or more cilium agents have been reporting unreachable
+              cross-node links for 15 minutes continuously: the KubeSpan
+              mesh is partitioned. With forceRouting=true KubeSpan fails
+              closed, so the partitioned node blackholes the pod network
+              instead of falling back — on 2026-09-25 that turned into a
+              6h45m total edge outage (authentik outpost unresolvable, all
+              SSO'd edge hosts 503) while kubelet still reported every node
+              Ready. Identify the partitioned node with
+              `talosctl -n <node> get kubespanpeerstatuses -o yaml`
+              (compare the four agents' views in vmsingle with
+              `cilium_node_health_connectivity_status{status="unreachable"}`),
+              check `dmesg` on it for the wireguard reconfigure line, and
+              expect a node reboot to be the fix (it was on 2026-09-25).
+        - alert: KubeSpanMeshMetricsAbsent
+          # Absence guard, same pattern as PublicIngressProbeMetricsAbsent:
+          # if the cilium-agent scrape path dies (VMPodScrape removed,
+          # vmagent wedged, Cilium policy gap) the partition rule above goes
+          # blind and the mesh loses its only independent detector — the one
+          # thing this group exists for.
+          expr: >-
+            absent(cilium_node_health_connectivity_status{status="unreachable",type="node"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KubeSpan mesh metrics absent"
+            description: >-
+              No cilium_node_health_connectivity_status series has been
+              scraped for 15m: the cilium-agent VMPodScrape
+              (scrapes.yaml), vmagent or the Cilium allowlist for the
+              agents' :9962 port is broken. While this lasts,
+              KubeSpanMeshPartitioned cannot fire and the mesh has no
+              detector at all.

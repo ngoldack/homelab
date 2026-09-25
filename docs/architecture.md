@@ -201,7 +201,7 @@ nothing but DNS + proxy `:3128`. See
 | Worker node (`wk-main-*`) | Workloads on that node | Anti-affinity for authentik; Cilium L2 VIP leadership is per-service and Lease-backed, so the VIP fails over between home nodes | Drain/reboot; Talos machine config is reproducible from `tofu/home` |
 | Control plane (`cp-main`) | API/etcd unavailable — cluster-wide write outage | Single-node control plane by design; no HA claim | Rebuild from `tofu/home` + restore etcd from the talos-backup bucket (needs the age key held outside the cluster — Unit 5.4 rehearsal not yet run) |
 | Proxmox host (`pmx-main`) | **Everything on the LAN**: all three VMs, so all home workloads | Off-cluster backups (Hetzner Object Storage: CNPG barman, etcd, tofu state) | Rebuild host + VMs from tofu; restore etcd and the CNPG clusters. Single-host hardware is a known accepted risk (excluded from the review's repo-scoped plan) |
-| Home internet / LAN | Public ingress still works (cloud node), but cross-site pod traffic and LAN clients | Edge routes that terminate on the cloud node (`authentik`, headlamp, grafana) keep serving until they need a home backend — none of them can reach it | Link restoration; the cloud worker still dials KubeSpan outbound |
+| Home internet / LAN | Public ingress **and every SSO'd edge route** go down if the KubeSpan mesh partitions (measured 6h45m on 2026-09-25, 503 on all edge hosts) | KubeSpan `forceRouting=true` fails closed rather than leaking pod traffic onto the public internet; the mesh partition itself is alerted on (`KubeSpanMeshPartitioned`, on Cilium's cross-node connectivity) — the public-ingress probe cannot see this failure (its vantage is short-circuited, see `probe.yaml`) | Reboot the partitioned node (re-derives discovery registration); check `talosctl get kubespanpeerstatuses`, then `dmesg` for the wireguard reconfigure line |
 | Hetzner worker (`ingress-fsn1`) | All edge/public names; LAN names keep working on the VIP | Nothing HA — single ingress node, and `externalTrafficPolicy: Local` means the VIP is not cloud-served | Rebuild via `tofu/home/ingress.tf` (Image Factory snapshot + KubeSpan join); DNS records are `external-dns`-owned and republished |
 | TrueNAS (`tank`/fast pools) | All PVs: CNPG databases, media/document libraries, registry, monitoring | Storage classes are `reclaimPolicy: Retain` and never delete by default | ZFS/TrueNAS-side rollback or clone — a NAS operation, not a Kubernetes one |
 | Git / Flux | No new state reaches the cluster; running workloads unaffected | Nothing depends on Git at runtime except reconciliation | Restore the repo, re-run `flux reconcile`; the self-hosted runner performs the post-merge reconcile from inside the cluster |
@@ -251,6 +251,50 @@ notifications in the retention window as of the survivability dashboard's
 2026-09-18T07:17Z data point
 (`monitoring/dashboards/survivability.json`) — the Watchdog heartbeat is the
 signal that distinguishes "no alerts" from "no delivery".
+
+### KubeSpan mesh partition, 2026-09-25 (root-cause finding)
+
+At 02:42:45Z the Hetzner worker `home-talos-ingress-fsn1` dropped from three
+KubeSpan peers to one (`peers: 0` then `peers: 1` — cp-main only) and never
+recovered on its own. With `forceRouting=true` (live on all four nodes, not
+set in `tofu/home` — it is Talos's default) KubeSpan **fails closed**, so the
+edge node blackholed `172.20.0.0/16`, the authentik edge outpost could no
+longer resolve its backend, and every SSO'd edge host returned 503 for 6h45m.
+`NodeNotReady` never fired (kubelet kept reporting Ready) and
+`PublicIngressProbeFailing` stayed green (the probe's vantage is
+short-circuited — see the KNOWN BLIND SPOT note in
+`kubernetes/infrastructure/home/monitoring/probe.yaml`). The outage is what
+the `kubespan-mesh` VMRule group now alerts on, verified against this exact
+window before shipping.
+
+What the investigation could and could not establish:
+
+- **Pre-reboot logs are gone.** Talos's kernel log ring (`talosctl dmesg`) is
+  per-boot; the reboot that fixed the outage also discarded the 02:42
+  evidence. Only the post-reboot boot's log survives, which shows a healthy
+  `peers: 0 -> 3` progression in 1s. This is a gap worth closing if it
+  recurs: Talos supports shipping machined logs off-node, and without them a
+  repeat partition is again unexplained.
+- **The discovery-service path was healthy at the time.** The edge kept
+  reaching `discovery.talos.dev` (200) through the whole outage, and
+  `registryKubernetesEnabled` is `false` on all four nodes, so peer
+  discovery depends entirely on that external service — there is no
+  Kubernetes-backed registry to fall back on. Enabling
+  `cluster.discovery.registries.kubernetes.enabled: true` is the candidate
+  hardening knob (its RBAC prerequisites already exist in the cluster), but
+  it is **not applied**: no evidence yet names it as the cause, and it would
+  add a second discovery path whose failure modes are not yet understood
+  here.
+- **cp-main's restart counts are unrelated.** `cilium-envoy` (195),
+  `cilium-operator` (151+150) and `cilium-agent` (149) restarts are
+  long-running counters from before the outage, with no OOM evidence on the
+  node (`dmesg` clean, 53% memory available) and `ext-tailscale` — which is
+  *supposed* to be absent — looping in the service log. They are a separate
+  hygiene item, not the mesh cause.
+
+Recovery was `talosctl -n <edge> reboot`, which re-derives the discovery
+registration and re-forms all three peerings. That remains the runbook until
+a root cause is named.
 
 ## See also
 

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.7.0"
+  required_version = ">= 1.16.4"
 
   # Remote state, this root's own dedicated bucket (see state-backend.tf for
   # the bootstrap sequence that created it). Credentials come from
@@ -35,11 +35,11 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.108"
+      version = "~> 0.114"
     }
     talos = {
       source  = "siderolabs/talos"
-      version = "~> 0.11"
+      version = "~> 0.12"
     }
     sops = {
       source  = "carlpett/sops"
@@ -47,23 +47,23 @@ terraform {
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.67"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.7"
+      version = "~> 3.9"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.34"
+      version = "~> 2.38"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.16"
+      version = "~> 2.17"
     }
     hcloud = {
       source  = "hetznercloud/hcloud"
-      version = "~> 1.54"
+      version = "~> 1.69"
     }
     # Builds a Hetzner snapshot from a Talos Image Factory disk image (it
     # boots a throwaway rescue server, writes the image, snapshots it, then

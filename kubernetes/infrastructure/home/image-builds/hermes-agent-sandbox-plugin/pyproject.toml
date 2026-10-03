@@ -10,7 +10,7 @@ name = "hermes-agent-sandbox"
 version = "0.1.0"
 description = "Hermes terminal backend that runs commands in a Kubernetes Agent Sandbox (Kata) via hermes-go warm pool and the authenticated router."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14.8"
 license = { text = "Apache-2.0" }
 # Exact pins (provenance, checked 2026-09-17):
 #   k8s-agent-sandbox==1.0.2 — the SDK release the plugin is written against;

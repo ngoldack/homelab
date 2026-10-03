@@ -19,7 +19,7 @@
 # WHY the build context is the REPO ROOT: the COPY paths below are
 # repo-root-relative, the convention every Dockerfile in image-builds/ follows
 # (the BuildKit Job passes the repo at a pinned commit as --opt=context).
-FROM golang:1.27-alpine AS build
+FROM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 WORKDIR /src/go
 
@@ -55,7 +55,7 @@ RUN set -e; \
 # (readOnlyRootFilesystem + a /tmp emptyDir in the Deployment). The process runs
 # as 10001 with no capabilities, so it cannot bind <1024, touch the host, or
 # persist anything into the image.
-FROM alpine:3.21
+FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
 RUN addgroup -g 10001 sp && adduser -D -H -u 10001 -G sp -s /sbin/nologin sp
 COPY --from=build /out/synthetic-proxy /synthetic-proxy
 USER 10001:10001

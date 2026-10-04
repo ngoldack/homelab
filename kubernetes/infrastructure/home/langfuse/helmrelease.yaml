@@ -60,7 +60,7 @@ spec:
   chart:
     spec:
       chart: langfuse
-      version: "2.1.1"
+      version: "2.1.3"
       sourceRef:
         kind: HelmRepository
         name: langfuse

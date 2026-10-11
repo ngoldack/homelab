@@ -67,7 +67,7 @@ spec:
           main:
             image:
               repository: jellyfin/jellyfin
-              tag: "12.1"
+              tag: "12.2@sha256:357724bf0ae27a672c7cbaa899db2d9abeb13dbd8657ccce750258a4c059d037"
             env:
               TZ: Europe/Berlin
               # Advertised to clients so apps auto-discover the right URL
@@ -236,7 +236,7 @@ spec:
           external-auth:
             image:
               repository: docker.io/library/busybox
-              tag: "1.36"
+              tag: "1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
             # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
@@ -346,7 +346,7 @@ spec:
           external-auth:
             image:
               repository: docker.io/library/busybox
-              tag: "1.36"
+              tag: "1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
             # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
@@ -377,7 +377,7 @@ spec:
           main:
             image:
               repository: linuxserver/radarr
-              tag: "6.3.0"
+              tag: "6.4.4@sha256:7dfd049e79c00b16fbc29c3f5d96a9e7b9e73a23930b4c5b3c4541d60b366814"
             env:
               PUID: "1000"
               PGID: "1000"
@@ -452,7 +452,7 @@ spec:
           external-auth:
             image:
               repository: docker.io/library/busybox
-              tag: "1.36"
+              tag: "1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
             # Sonarr/Radarr/Prowlarr "trust the external authentication
             # layer" (goauthentik sonarr integration): set
             # AuthenticationMethod=External in config.xml. Idempotent; if the
@@ -483,7 +483,7 @@ spec:
           main:
             image:
               repository: linuxserver/prowlarr
-              tag: "2.5.2"
+              tag: "2.6.5@sha256:f9151e5bc1025c6d0a630d503210cdcb6bb55a7cc098562609d96a408d838902"
             env:
               PUID: "1000"
               PGID: "1000"

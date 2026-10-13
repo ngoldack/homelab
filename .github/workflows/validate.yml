@@ -87,7 +87,7 @@ jobs:
       - name: Install OpenTofu 1.12.6
         uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
         with:
-          tofu_version: 1.12.6
+          tofu_version: v1.13.1
 
       - name: Install kustomize 5.8.1
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2

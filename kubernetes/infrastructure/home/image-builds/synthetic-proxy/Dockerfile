@@ -55,7 +55,7 @@ RUN set -e; \
 # (readOnlyRootFilesystem + a /tmp emptyDir in the Deployment). The process runs
 # as 10001 with no capabilities, so it cannot bind <1024, touch the host, or
 # persist anything into the image.
-FROM alpine:3.21
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 RUN addgroup -g 10001 sp && adduser -D -H -u 10001 -G sp -s /sbin/nologin sp
 COPY --from=build /out/synthetic-proxy /synthetic-proxy
 USER 10001:10001

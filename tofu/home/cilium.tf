@@ -21,7 +21,7 @@ resource "helm_release" "cilium" {
   create_namespace = false
   repository       = "https://helm.cilium.io"
   chart            = "cilium"
-  version          = "1.20.1"
+  version          = "1.20.2"
 
   # The helm provider's default is 300s, which is not enough to roll the agent
   # DaemonSet across every node — especially with rollOutCiliumPods enabled,

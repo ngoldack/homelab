@@ -35,7 +35,7 @@
 # No HEALTHCHECK: Kubernetes probes observe readiness (controller/claim path).
 
 # ---- Stage 1: build sandboxd from the pinned upstream commit ----
-FROM golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd AS sandboxd
+FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS sandboxd
 
 # Check out the exact release the installed CRDs and extensions came from: the
 # v1beta1 API surface must match what sandbox-router and the SDK speak.

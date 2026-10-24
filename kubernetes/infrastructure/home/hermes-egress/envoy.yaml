@@ -251,7 +251,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: envoy
-          image: docker.io/envoyproxy/envoy:v1.36.0@sha256:d62f60a74cd9631b28bb3f538788ccff201b226975179de4265b0d75fc347e90
+          image: docker.io/envoyproxy/envoy:v1.40.0@sha256:459f2a6404c340fe6afccd69d85527012d47f3c036765493e6f8f3113fa384de
           args:
             # The vendored config: no bootstrap fetch, no admin override.
             # -c is the FILE flag; --config-yaml takes the config CONTENT

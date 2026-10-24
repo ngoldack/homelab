@@ -23,7 +23,7 @@
 #   * We run as the unprivileged hermes uid (10000), matching the gateway
 #     StatefulSet securityContext (runAsNonRoot).
 
-FROM docker.io/nousresearch/hermes-agent:v2026.9.7@sha256:63bfb6d732f49a55d453e801057273785cc61e0f6ee43db3fa2f2a79846301b7
+FROM docker.io/nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
 
 USER root
 

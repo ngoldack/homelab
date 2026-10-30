@@ -43,7 +43,7 @@ spec:
       # Hetzner webhook below now speaks the new Hetzner Cloud API, and the
       # webhook provider protocol has moved on with it, so this tracks a
       # current chart rather than the one the cloud-era config was pinned to.
-      version: "1.22.0"
+      version: "1.23.0"
       sourceRef:
         kind: HelmRepository
         name: external-dns

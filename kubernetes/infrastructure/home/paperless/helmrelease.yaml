@@ -183,7 +183,7 @@ spec:
           main:
             image:
               repository: docker.io/apache/tika
-              tag: "3.3.1.0"
+              tag: "3.3.3.0@sha256:326b238b37904c94ff61fed87afe0af72e6a29fa715933b10af97b7d56f1d4cb"
             resources:
               requests:
                 cpu: 128m
@@ -196,7 +196,7 @@ spec:
           main:
             image:
               repository: docker.io/gotenberg/gotenberg
-              tag: "8.34"
+              tag: "8.39@sha256:13672f317b443c793e972b1bd2155ec62a3e7b6891b411e8196442cc053ee5f5"
             # Gotenberg's "scripts/convert" path renders documents via
             # Chromium; disable JS (paperless only needs static HTML -> PDF)
             # and allowlist the /tmp scratch dir it writes during conversion.

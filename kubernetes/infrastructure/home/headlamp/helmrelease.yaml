@@ -67,7 +67,7 @@ spec:
         validatorIssuerURL: https://authentik.ngoldack.de/application/o/headlamp
     pluginsManager:
       enabled: true
-      baseImage: node:lts-alpine
+      baseImage: node:lts-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94
       version: latest
       configContent: |
         plugins:

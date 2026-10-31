@@ -19,7 +19,7 @@
 #
 # WHY buildkit runs with the REPO ROOT as context: the COPY paths below are
 # repo-root-relative (same convention as every Dockerfile in image-builds/).
-FROM golang:1.27-alpine AS build
+FROM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 WORKDIR /src/go
 
@@ -56,7 +56,7 @@ RUN set -e; \
 # (readOnlyRootFilesystem + a /tmp emptyDir in the Deployments). The process
 # runs as 10001 with no capabilities, so the guard cannot bind <1024, touch the
 # host, or persist anything into the image.
-FROM alpine:3.21
+FROM alpine:3.21@sha256:ee16d92f96db08d9d2d07da48555a27f3a69d8f0759021dbc601195ed0d2b5bd
 RUN addgroup -g 10001 guard && adduser -D -H -u 10001 -G guard -s /sbin/nologin guard
 COPY --from=build /out/guard /guard
 USER 10001:10001

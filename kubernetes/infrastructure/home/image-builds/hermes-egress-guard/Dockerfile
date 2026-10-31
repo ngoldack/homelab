@@ -56,7 +56,7 @@ RUN set -e; \
 # (readOnlyRootFilesystem + a /tmp emptyDir in the Deployments). The process
 # runs as 10001 with no capabilities, so the guard cannot bind <1024, touch the
 # host, or persist anything into the image.
-FROM alpine:3.21
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 RUN addgroup -g 10001 guard && adduser -D -H -u 10001 -G guard -s /sbin/nologin guard
 COPY --from=build /out/guard /guard
 USER 10001:10001
